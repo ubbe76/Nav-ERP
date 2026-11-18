@@ -340,7 +340,7 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
       {
         href: "/tillverkning/korplan",
         title: "Körplan",
-        description: "Kommande arbeten på en resurs, vecka för vecka — utskrivbar.",
+        description: "Kommande arbeten på en resurs, dag för dag — utskrivbar.",
       },
       {
         href: "/tillverkning/scheman",

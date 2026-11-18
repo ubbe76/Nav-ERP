@@ -376,3 +376,39 @@
 .noticeSection {
   margin-top: 8px;
 }
+
+.viewToggle {
+  display: inline-flex;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.viewButton {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.viewButton[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.headerWeek {
+  display: block;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.overloadedDays {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--status-stopped-text);
+}

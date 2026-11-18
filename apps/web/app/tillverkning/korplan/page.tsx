@@ -11,7 +11,7 @@ export default function RunPlanPage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Körplan</div>
-          <div className={shellStyles.meta}>Kommande arbeten på en resurs, vecka för vecka</div>
+          <div className={shellStyles.meta}>Kommande arbeten på en resurs, dag för dag</div>
         </div>
         <HelpLink chapter="tillverkning" anchor="korplan" label="Hjälp om körplan" />
       </div>

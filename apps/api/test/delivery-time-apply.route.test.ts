@@ -12,6 +12,7 @@ import {
   type ApplyDeliveryTimeResult,
   type PlanningService,
 } from "../src/modules/planning/service/planning.service.js";
+import type { DeliveryTimeAnswer } from "../src/modules/planning/service/delivery-time-check.js";
 import {
   LinkedOrderStatusError,
   LinkedRowArticleMismatchError,
@@ -138,13 +139,55 @@ describe("POST /delivery-time-check/apply (route, inject)", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("409 delivery-time-changed carries the new check result in the body", async () => {
-    const newResult = {
+  it("409 delivery-time-changed carries the new check result in the body — the steps and the batches in days (#18)", async () => {
+    const alternativeOf = { workCenterId: id(), workCenterCode: "110", workCenterName: "Kantpress", toDate: "2030-03-21" };
+    const days = [
+      { date: "2030-03-14", minutes: 480 },
+      { date: "2030-03-15", minutes: 120 },
+    ];
+    const newResult: DeliveryTimeAnswer = {
       shipDate: "2030-03-18",
       deliveryDate: "2030-03-18",
-      rows: [],
+      rows: [
+        {
+          key: id(),
+          articleId: id(),
+          articleNumber: "FAR",
+          quantity: 10,
+          readyDate: "2030-03-15",
+          ordinaryReadyDate: "2030-03-22",
+          chain: [
+            {
+              kind: "operation",
+              articleNumber: "FAR",
+              quantity: 10,
+              sequenceNo: 10,
+              description: null,
+              workCenterCode: "120",
+              workCenterName: "Kantpress 2",
+              fromDate: "2030-03-14",
+              toDate: "2030-03-15",
+              days,
+              date: "2030-03-15",
+              alternativeOf,
+            },
+          ],
+          notes: [],
+        },
+      ],
       notes: [],
-      batches: [],
+      batches: [
+        {
+          key: "b1",
+          rowKey: id(),
+          level: 1,
+          articleId: id(),
+          articleNumber: "FAR",
+          quantity: 10,
+          readyDate: "2030-03-15",
+          operations: [{ sequenceNo: 10, workCenterId: id(), workCenterCode: "120", workCenterName: "Kantpress 2", days, alternativeOf }],
+        },
+      ],
       usesAlternatives: true,
       ordinaryShipDate: "2030-03-25",
       ordinaryDeliveryDate: "2030-03-25",

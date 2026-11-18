@@ -767,9 +767,9 @@ export function SettingsForm({
         <div className={styles.texts}>
           <div className={styles.label}>Kötid mellan operationer (dagar)</div>
           <div className={styles.description}>
-            Arbetsdagar som läggs till mellan operationerna — inte före den första eller efter den sista — när ledtiden
-            räknas ur rutten. Påverkar bara ledtiden och startdatumet, inte Planera eller Leveranstidskontrollen. 0 =
-            ingen kötid.
+            Arbetsdagar som läggs till mellan operationerna — inte före den första eller efter den sista. Gäller
+            ledtiden ur rutten, Planera och Leveranstidskontrollen: nästa operation börjar tidigast arbetsdagen efter
+            att den föregående är klar plus kötiden. 0 = ingen kötid.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

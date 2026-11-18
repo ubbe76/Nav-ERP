@@ -2,8 +2,8 @@
 // rows (a sales order, the Ny kundorder form or the stand-alone page) from
 // what already exists (the projected balance of stock and open orders after
 // the demands already promised — available to promise), the lead time on
-// what has to be bought, and free capacity per resource and week for what
-// has to be made, all levels down.
+// what has to be bought, and free capacity per resource and DAY (#18) for
+// what has to be made, all levels down.
 //
 // Pure, like capacity-calc.ts and article-overview.ts: the planning service
 // loads flat rows (the overviews are already on ship dates) and this module
@@ -22,15 +22,22 @@ import { round4, roundUpToMultiple, roundToDecimals } from "@navet/shared";
 import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import { isFirmOverviewRow, type ArticleOverviewRow } from "./article-overview.js";
 import {
-  mondayOf,
+  orderPlanStatus,
   routingOperationMinutes,
   type CapacityOperationRow,
   type DayScheduleNetRow,
   type HolidayRow,
-  type PlannedWeek,
+  type PlannedDay,
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
-import { chooseResource, createCapacityBook, type PlanWorkCenter, type ResourceCandidate } from "./capacity-book.js";
+import {
+  chooseResource,
+  createCapacityBook,
+  MIN_PLAN_MINUTES,
+  operationChain,
+  type PlanWorkCenter,
+  type ResourceCandidate,
+} from "./capacity-book.js";
 import {
   addWorkingDays,
   deliveryFromShipDate,
@@ -69,13 +76,13 @@ export interface DtcAlternative {
 }
 
 // An operation step placed on an alternative: the ordinarie it stands in
-// for, and the week the ordinarie would have finished (null = not within
-// the horizon) — "120 (alternativ till 110, som ger v.48)".
+// for, and the day the ordinarie would have finished (null = not within
+// the horizon) — "120 (alternativ till 110, som ger 18 nov)".
 export interface DtcAlternativeOf {
   workCenterId: string;
   workCenterCode: string;
   workCenterName: string;
-  toWeek: string | null;
+  toDate: string | null;
 }
 
 // The resource as the book sees it (code/name/calendar/factor/lead time).
@@ -89,7 +96,7 @@ export interface DtcSupplier {
 
 // A TO already linked to a configured row (an earlier reservation, Skapa TO
 // from the row): what it makes is this row's, ready when the TO is — its
-// planned finish day (the last planned week of its pending operations in
+// planned finish day (the last planned day of its pending operations in
 // `existingOperations`), else its due date, or at once when it is done.
 export interface DtcLinkedOrder {
   manufacturingOrderId: string;
@@ -135,9 +142,15 @@ export interface DeliveryTimeCheckInput {
   routings: Map<string, DtcOperation[]>;
   workCenters: Map<string, DtcWorkCenter>;
   schedule: { weekScheduleDays: WeekScheduleDayRow[]; daySchedules: DayScheduleNetRow[]; holidays: HolidayRow[] };
-  // The open operations — planned ones (plannedWeeks) count in their
-  // planned weeks, the rest in their due date's week.
+  // The open operations — planned ones (plannedDays) count on their
+  // planned days, the rest on their due date.
   existingOperations: CapacityOperationRow[];
+  // Standardkötid between a batch's operations (nextOperationFloor) — the
+  // same chain Planera walks, so the day the check promises is the day a TO
+  // created right after gets. The service passes the value its own load
+  // read (in the reservation: inside the transaction, under the lock);
+  // left out = 0 (the pure tests).
+  queueDays?: number;
   suppliers: Map<string, DtcSupplier>;
   customer: DeliverySettings | null;
   rows: DtcRowInput[];
@@ -172,9 +185,9 @@ export type DtcStep =
       description: string | null;
       workCenterCode: string;
       workCenterName: string;
-      fromWeek: string; // Monday of the first week the operation books
-      toWeek: string; // Monday of the week it finishes
-      weeks: PlannedWeek[]; // the allocation (what was booked when the horizon was hit)
+      fromDate: string; // the first day the operation books
+      toDate: string; // the day it finishes
+      days: PlannedDay[]; // the allocation (what was booked when the horizon was hit)
       date: string;
       // The run with alternatives: the ordinarie this step's resource stands
       // in for, null on the ordinarie. Left out by a run without them;
@@ -224,7 +237,7 @@ export interface DtcBatch {
 export interface DtcBatchOperation {
   sequenceNo: number;
   workCenterId: string;
-  weeks: PlannedWeek[];
+  days: PlannedDay[];
   // The run with alternatives: the ordinarie this operation's resource stands
   // in for, null on the ordinarie (left out by a run without them).
   alternativeOf?: DtcAlternativeOf | null;
@@ -485,6 +498,12 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
     existingOperations: input.existingOperations,
   });
   const usedResources = new Set<string>();
+  // Something is made (an operation placed, a lego operation sent) for the
+  // rows: what is made on a day ships the working day after — also when that
+  // day is today, which the day-by-day book makes possible (#18; while the
+  // plan counted in weeks a made row was never ready before the week's last
+  // day, so the question did not arise).
+  let makesSomething = false;
 
   // --- Pools: the projected balance per article for this check -------------
   const pools = new Map<string, ArticlePool>();
@@ -530,7 +549,7 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
   // Operations in sequence order from `materialReady`, each placed through
   // the book. Returns the ready day and one step per operation — or, when
   // the horizon is exceeded, readyDate null with the steps that were planned
-  // plus one for the operation that did not fit (its weeks are the ones
+  // plus one for the operation that did not fit (its days are the ones
   // searched). The bookings the planned operations made are left in place:
   // the order will be made regardless, and a later row on the same resource
   // should see that load. `allocations` is the batch's plan (one entry per
@@ -545,8 +564,12 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
   ): { readyDate: string | null; steps: DtcStep[]; allocations: DtcBatch["operations"] } {
     const steps: DtcStep[] = [];
     const allocations: DtcBatch["operations"] = [];
-    let floor = maxDate(materialReady, t0); // capacity may be used from this day
-    let ready = floor;
+    // The chain Planera walks (operationChain): the first operation may use
+    // capacity from the day the material is ready, each next one from the
+    // working day after the previous is ready plus the Standardkötid
+    // (DeliveryTimeCheckInput.queueDays). Operations without time take no
+    // place in it.
+    const chain = operationChain(maxDate(materialReady, t0), input.queueDays ?? 0, offDays);
     for (const op of [...operations].sort((a, b) => a.sequenceNo - b.sequenceNo)) {
       const wc = input.workCenters.get(op.workCenterId);
       const code = wc?.code ?? "?";
@@ -560,23 +583,24 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
       };
       if (wc?.type === "subcontract") {
         if (wc.leadTimeDays == null) notes.legoNoLead.add(code);
-        ready = book.subcontract(wc, maxDate(ready, floor));
-        floor = ready;
+        chain.advance(book.subcontract(wc, chain.floor()));
+        makesSomething = true;
         const tag = options.alternatives ? { alternativeOf: null } : {};
-        steps.push({ kind: "subcontract", ...base, leadTimeDays: wc.leadTimeDays, date: ready });
-        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [], ...tag });
+        steps.push({ kind: "subcontract", ...base, leadTimeDays: wc.leadTimeDays, date: chain.ready });
+        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, days: [], ...tag });
         continue;
       }
       const minutes = routingOperationMinutes(op, quantity);
       const tag = options.alternatives ? { alternativeOf: null } : {};
-      if (minutes <= EPS) {
-        steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), weeks: [], date: ready, ...tag });
-        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [], ...tag });
+      if (minutes < MIN_PLAN_MINUTES) {
+        steps.push({ kind: "operation", ...base, fromDate: chain.ready, toDate: chain.ready, days: [], date: chain.ready, ...tag });
+        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, days: [], ...tag });
         continue;
       }
+      const floor = chain.floor();
       // Valregeln (the run with alternatives): the ordinarie is the base,
       // tried with the load; only when the load pushes it are the
-      // alternatives tried, and one counts only in an earlier week. The
+      // alternatives tried, and one counts only on an earlier day. The
       // chosen resource is booked so the next operation and row see it.
       let target = { wc: wc ?? null, workCenterId: op.workCenterId, minutes, step: base, alternativeOf: null as DtcAlternativeOf | null };
       const choiceKey = `${choicePrefix}#${op.sequenceNo}`;
@@ -597,7 +621,7 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
             workCenterId: chosen.workCenterId,
             minutes: candidates[choice.index]!.minutes,
             step: { ...base, workCenterCode: chosen.code, workCenterName: chosen.name },
-            alternativeOf: { workCenterId: op.workCenterId, workCenterCode: code, workCenterName: wc?.name ?? "", toWeek: choice.baseToWeek },
+            alternativeOf: { workCenterId: op.workCenterId, workCenterCode: code, workCenterName: wc?.name ?? "", toDate: choice.baseToDate },
           };
         }
       }
@@ -607,23 +631,23 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
         steps.push({
           kind: "operation",
           ...target.step,
-          fromWeek: placed.searchedFrom,
-          toWeek: placed.searchedTo,
-          weeks: placed.partial,
-          date: book.weekFinishDay(target.wc, placed.searchedTo, floor),
+          fromDate: placed.searchedFrom,
+          toDate: placed.searchedTo,
+          days: placed.partial,
+          date: placed.searchedTo,
           ...onTarget,
         });
         return { readyDate: null, steps, allocations };
       }
       if (placed.unscheduled) notes.unscheduled.add(target.step.workCenterCode);
       else usedResources.add(target.wc!.workCenterId);
-      ready = maxDate(ready, placed.readyDate);
-      // The next operation may use what is left of the finishing week.
-      floor = maxDate(floor, placed.toWeek);
-      steps.push({ kind: "operation", ...target.step, fromWeek: placed.fromWeek, toWeek: placed.toWeek, weeks: placed.weeks, date: ready, ...onTarget });
-      allocations.push({ sequenceNo: op.sequenceNo, workCenterId: target.workCenterId, weeks: placed.weeks, ...onTarget });
+      // Ready the day its last minute is placed (never the week's last day).
+      chain.advance(placed.readyDate);
+      makesSomething = true;
+      steps.push({ kind: "operation", ...target.step, fromDate: placed.fromDate, toDate: placed.toDate, days: placed.days, date: chain.ready, ...onTarget });
+      allocations.push({ sequenceNo: op.sequenceNo, workCenterId: target.workCenterId, days: placed.days, ...onTarget });
     }
-    return { readyDate: ready, steps, allocations };
+    return { readyDate: chain.ready, steps, allocations };
   }
 
   // A shortage of `quantity` on an article: bought, made or always there.
@@ -738,18 +762,24 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
     return covered;
   }
 
-  // The day a linked TO is ready: the finish day of the last planned week of
-  // its pending operations, else its due date (null = undated).
+  // The day a linked TO is ready: its planned finish as Sen and pegging read
+  // it (orderPlanStatus — the last day of its pending operations' remaining
+  // allocation, a lego operation after them through the chain's floor with
+  // the Standardkötid and its own Ledtid + Kötid), never before t0. A TO
+  // with a pending operation that lacks a plan has no finish: then the last
+  // planned day it has, else its due date (null = undated).
   function linkedOrderReady(order: DtcLinkedOrder): string | null {
-    let last: { monday: string; workCenterId: string } | null = null;
-    for (const op of input.existingOperations) {
-      if (op.manufacturingOrderId !== order.manufacturingOrderId || op.operationStatus !== "pending") continue;
-      for (const w of op.plannedWeeks ?? []) {
-        if (!last || w.monday > last.monday) last = { monday: w.monday, workCenterId: op.workCenterId };
+    const own = input.existingOperations.filter((op) => op.manufacturingOrderId === order.manufacturingOrderId);
+    let last: string | null = null;
+    for (const op of own) {
+      if (op.operationStatus !== "pending") continue;
+      for (const d of op.plannedDays ?? []) {
+        if (last === null || d.date > last) last = d.date;
       }
     }
-    if (!last) return order.dueDate;
-    return book.weekFinishDay(input.workCenters.get(last.workCenterId) ?? null, last.monday, t0);
+    if (last === null) return order.dueDate;
+    const status = orderPlanStatus(own, { today, offDays, workCenters: input.workCenters, queueDays: input.queueDays ?? 0 });
+    return maxDate(status.planned && status.plannedFinish !== null ? status.plannedFinish : last, t0);
   }
 
   // A configured row: first what its linked TOs already make (a private
@@ -820,11 +850,12 @@ function runCheck(input: DeliveryTimeCheckInput, options: CheckOptions): CheckRu
   }
 
   // Ready from stock today ⇒ ship today; anything arriving or made on a day
-  // ships the working day after (the färdigdatum rule mirrored).
+  // ships the working day after (the färdigdatum rule mirrored) — a row made
+  // today included (makesSomething).
   let shipDate: string | null = null;
   if (rows.length > 0 && rows.every((r) => r.readyDate !== null)) {
     const latest = rows.reduce((d, r) => maxDate(d, r.readyDate!), t0);
-    shipDate = latest <= t0 ? t0 : addWorkingDays(latest, 1, offDays);
+    shipDate = latest <= t0 && !makesSomething ? t0 : addWorkingDays(latest, 1, offDays);
   }
   const deliveryDate =
     shipDate === null ? null : input.customer ? deliveryFromShipDate(shipDate, input.customer, offDays) : shipDate;

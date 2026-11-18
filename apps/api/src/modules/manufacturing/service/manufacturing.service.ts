@@ -668,10 +668,13 @@ export interface TerminalOperation {
   quantityCompleted: string | null;
   quantityScrapped: string;
   dueDate: string | null;
-  // Produktionsplanering: the operation's planned weeks (Mondays), null when
-  // unplanned — the terminal sorts on the start week.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  // Produktionsplanering: the operation's planned days (first and last),
+  // null when unplanned — the terminal sorts on the start day.
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  // The place within the day set by hand in the körplan (#18); null = none.
+  // The terminal's Planerad dag sorts on it after the start day.
+  runPosition: number | null;
   readiness: Readiness;
   // What can be worked on per the readiness rule (terminal-readiness.ts).
   available: string;
@@ -1649,7 +1652,7 @@ export function createManufacturingService(
     // whole tree of TOs atomically). The validation and the configurator's
     // derivation read as plain committed reads, like createManufacturingOrder;
     // the repository body takes the production_plan lock first. With
-    // `plannedWeeks` (by sequence number and resource — an alternative the
+    // `plannedDays` (by sequence number and resource — an alternative the
     // reservation chose is switched to, Vald för hand) the allocations are
     // written as given instead of planned by the engine; `refuseMismatch`
     // throws the planning service's ReservedPlanMismatchError when they no
@@ -1659,7 +1662,7 @@ export function createManufacturingService(
       tx: Tx,
       input: CreateManufacturingOrderInput,
       createdBy: string | null,
-      opts: { plannedWeeks?: GivenOperationPlan[] } & GivenPlanOptions = {}
+      opts: { plannedDays?: GivenOperationPlan[] } & GivenPlanOptions = {}
     ) {
       const prepared = await prepareCreate(input);
       const result = await repo.createManufacturingOrderInTx(
@@ -1668,7 +1671,7 @@ export function createManufacturingService(
         createdBy,
         prepared.linkedSalesOrder,
         prepared.configured,
-        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks, { refuseMismatch: opts.refuseMismatch }) : undefined
+        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedDays, { refuseMismatch: opts.refuseMismatch }) : undefined
       );
       if (!result.ok) throw createOutcomeError(result);
       // The caller logs after its commit: `createdAudit`, then its own
@@ -1817,15 +1820,15 @@ export function createManufacturingService(
       return {
         ...order,
         salesOrder,
-        plannedStartWeek: summary?.plannedStartWeek ?? null,
-        plannedEndWeek: summary?.plannedEndWeek ?? null,
+        plannedStartDate: summary?.plannedStartDate ?? null,
+        plannedEndDate: summary?.plannedEndDate ?? null,
         late: summary?.late ?? false,
         componentLate: componentLate.has(order.id),
       };
     },
 
-    // Produktionsplanering: each row carries plannedStartWeek/plannedEndWeek
-    // (min/max over its pending operations' planned weeks) and late (Sen)
+    // Produktionsplanering: each row carries plannedStartDate/plannedEndDate
+    // (min/max over its pending operations' planned days) and late (Sen)
     // from the plan — nulls/false without a plan reader or a plan — and
     // componentLate (Halvfabrikat sent, pegging #9) from the plan reader.
     // The status filters Sen and Halvfabrikat sent are the plan's verdict,
@@ -1859,8 +1862,8 @@ export function createManufacturingService(
           const summary = summaries.get(row.id);
           return {
             ...row,
-            plannedStartWeek: summary?.plannedStartWeek ?? null,
-            plannedEndWeek: summary?.plannedEndWeek ?? null,
+            plannedStartDate: summary?.plannedStartDate ?? null,
+            plannedEndDate: summary?.plannedEndDate ?? null,
             late: summary?.late ?? false,
             componentLate: componentLate!.has(row.id),
           };

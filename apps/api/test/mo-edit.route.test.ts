@@ -210,7 +210,7 @@ describe("Ändra operationer — routes", () => {
 // Förslag på resurs (#15, etapp 2): GET …/operations carries `suggestion` per
 // operation, also for the workshop profile whose prices are nulled.
 describe("GET /manufacturing-orders/:id/operations — förslag på resurs", () => {
-  const suggestion = { workCenterId: id(), code: "120", name: "Kantpress 2", toWeek: "2030-03-04", currentToWeek: "2030-03-18", reason: "overloaded" };
+  const suggestion = { workCenterId: id(), code: "120", name: "Kantpress 2", toDate: "2030-03-04", currentToDate: "2030-03-18", reason: "overloaded" };
   const rows = [
     { id: id(), sequenceNo: 10, setupPrice: "100.00", transportPrice: null, unitPrice: "5.00", resourceLocked: false, resources: [], suggestion },
     { id: id(), sequenceNo: 20, setupPrice: null, transportPrice: null, unitPrice: null, resourceLocked: true, resources: [], suggestion: null },

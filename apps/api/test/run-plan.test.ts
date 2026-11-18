@@ -13,7 +13,7 @@ import type { CapacityResult } from "../src/modules/planning/service/capacity-ca
 import { mondayOf } from "../src/modules/planning/service/capacity-calc.js";
 import {
   buildRunPlan,
-  defaultRunPlanToWeek,
+  defaultRunPlanToDate,
   type RunPlanResult,
   type RunPlanRow,
 } from "../src/modules/planning/service/run-plan.js";
@@ -39,7 +39,7 @@ const authService = createAuthService(authRepo, "unused", createAuditRepository(
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, unwiredSalesOrderLinks);
 const PASSWORD = "correcthorsebattery";
 
-const TABLES = sql`TRUNCATE mo_operation_plan_weeks, stamp_sessions, time_reports, employees, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, user_settings, users CASCADE`;
+const TABLES = sql`TRUNCATE mo_operation_plan_days, stamp_sessions, time_reports, employees, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, user_settings, users CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'KPL%'`;
 
 let app: ReturnType<typeof buildApp>;
@@ -68,6 +68,10 @@ const thisMonday = mondayOf(today);
 const nextMonday = addDays(thisMonday, 7);
 const inTwoWeeks = addDays(thisMonday, 14);
 const lastMonday = addDays(thisMonday, -7);
+// Never before today, whatever weekday the suite runs on.
+const thisSunday = addDays(thisMonday, 6);
+// T.o.m. when none is given: the Sunday of next week.
+const defaultToDate = addDays(nextMonday, 6);
 
 async function login(email: string) {
   const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: PASSWORD } });
@@ -161,8 +165,7 @@ describe("GET /planning/run-plan — urval, vecka och ordning", () => {
     const plan = await runPlan(cookie, `workCenterId=${w.kap.id}`);
     expect(plan.workCenter).toEqual({ id: w.kap.id, code: "100", name: "Kap" });
     expect(plan.today).toBe(today);
-    expect(plan.currentWeek).toBe(thisMonday);
-    expect(plan.toWeek).toBe(nextMonday);
+    expect(plan.toDate).toBe(defaultToDate);
     expect(plan.rows.map((r) => r.orderNumber).sort()).toEqual([released.orderNumber, inProgress.orderNumber, planned.orderNumber].sort());
     for (const number of [...closed, opDone.orderNumber]) expect(rowOf(plan, number)).toBeUndefined();
     // Only Kap's own operation — never the lego one, Svets's or the Kalkyl row.
@@ -179,7 +182,8 @@ describe("GET /planning/run-plan — urval, vecka och ordning", () => {
       remainingQuantity: 10,
       remainingMinutes: 50,
       setupDone: false,
-      week: thisMonday,
+      // Unplanned: the day is the due date.
+      date: thisSunday,
       late: false,
       planned: false,
       planLocked: false,
@@ -195,7 +199,7 @@ describe("GET /planning/run-plan — urval, vecka och ordning", () => {
       description: "Kapa rör",
       remainingQuantity: 5,
       remainingMinutes: 40,
-      week: thisMonday,
+      date: thisSunday,
     });
 
     // The other resource has its own list; the done Kap operation's order is on it.
@@ -206,7 +210,7 @@ describe("GET /planning/run-plan — urval, vecka och ordning", () => {
     expect(JSON.stringify(plan)).not.toMatch(/price|cost/i);
   });
 
-  it("keys on the planned week, else the due date's week, else nothing — Försenad always in, T.o.m. vecka inclusive", async () => {
+  it("keys on the planned day, else the due date, else nothing — Försenad always in, T.o.m. inclusive", async () => {
     const w = await world();
     const cookie = await adminCookie();
     const thisWeek = await w.order(1, addDays(thisMonday, 6));
@@ -214,59 +218,64 @@ describe("GET /planning/run-plan — urval, vecka och ordning", () => {
     const later = await w.order(1, addDays(inTwoWeeks, 1));
     const late = await w.order(1, addDays(lastMonday, 2));
     const undated = await w.order(1, null);
-    // Due in two weeks but Flyttad to next week: the plan wins.
+    // Due in two weeks but Flyttad to next Monday: the plan wins.
     const moved = await w.order(1, addDays(inTwoWeeks, 3));
     const move = await app.inject({
       method: "POST",
       url: `/api/v1/planning/operations/${moved.op10.id}/move`,
       headers: { cookie },
-      payload: { weekMonday: nextMonday, moveFollowing: false },
+      payload: { date: nextMonday, moveFollowing: false },
     });
     expect(move.statusCode, move.body).toBe(200);
-    // Planned last week (a plan the calendar has passed), due next week.
+    // Planned last Monday (a plan the calendar has passed), due next week.
     const latePlanned = await w.order(1, addDays(nextMonday, 4));
-    await db.execute(sql`INSERT INTO mo_operation_plan_weeks (mo_operation_id, week_monday, minutes) VALUES (${latePlanned.op10.id}, ${lastMonday}, 32)`);
-    await db.execute(sql`UPDATE mo_operations SET planned_start_week = ${lastMonday}, planned_end_week = ${lastMonday}, planned_at = now() WHERE id = ${latePlanned.op10.id}`);
+    await db.execute(sql`INSERT INTO mo_operation_plan_days (mo_operation_id, plan_date, minutes) VALUES (${latePlanned.op10.id}, ${lastMonday}, 32)`);
+    await db.execute(sql`UPDATE mo_operations SET planned_start_date = ${lastMonday}, planned_end_date = ${lastMonday}, planned_at = now() WHERE id = ${latePlanned.op10.id}`);
 
     const plan = await runPlan(cookie, `workCenterId=${w.kap.id}`);
-    // Försenad first (older key first, then due date), the weeks, Ej planerad last.
+    // Försenad first (the older DAY first: the plan's last Monday is before
+    // the other's due date two days later — both were "last week" when the
+    // key was a week, and the due date decided), the days, Ej planerad last.
     expect(plan.rows.map((r) => r.orderNumber)).toEqual([
-      late.orderNumber,
       latePlanned.orderNumber,
+      late.orderNumber,
       thisWeek.orderNumber,
-      nextWeek.orderNumber,
       moved.orderNumber,
+      nextWeek.orderNumber,
       undated.orderNumber,
     ]);
     expect(rowOf(plan, later.orderNumber)).toBeUndefined();
-    expect(rowOf(plan, late.orderNumber)).toMatchObject({ week: lastMonday, late: true, planned: false });
-    expect(rowOf(plan, latePlanned.orderNumber)).toMatchObject({ week: lastMonday, late: true, planned: true, plannedStartWeek: lastMonday });
-    expect(rowOf(plan, moved.orderNumber)).toMatchObject({ week: nextMonday, late: false, planned: true, planLocked: true, plannedStartWeek: nextMonday });
-    expect(rowOf(plan, undated.orderNumber)).toMatchObject({ week: null, late: false, dueDate: null });
+    expect(rowOf(plan, late.orderNumber)).toMatchObject({ date: addDays(lastMonday, 2), late: true, planned: false });
+    expect(rowOf(plan, latePlanned.orderNumber)).toMatchObject({ date: lastMonday, late: true, planned: true, plannedStartDate: lastMonday, plannedEndDate: lastMonday });
+    expect(rowOf(plan, moved.orderNumber)).toMatchObject({ date: nextMonday, late: false, planned: true, planLocked: true, plannedStartDate: nextMonday });
+    expect(rowOf(plan, undated.orderNumber)).toMatchObject({ date: null, late: false, dueDate: null });
 
     // The groups in list order, each with its sum; the total is their sum.
-    expect(plan.weeks.map((g) => [g.kind, g.week, g.late, g.rows, g.minutes])).toEqual([
-      ["late", null, true, 2, 64],
-      ["week", thisMonday, false, 1, 32],
-      ["week", nextMonday, false, 2, 64],
-      ["unplanned", null, false, 1, 32],
+    expect(plan.days.map((g) => [g.kind, g.date, g.weekday, g.late, g.rows, g.minutes])).toEqual([
+      ["late", null, null, true, 2, 64],
+      ["day", thisSunday, 7, false, 1, 32],
+      ["day", nextMonday, 1, false, 1, 32],
+      ["day", addDays(nextMonday, 2), 3, false, 1, 32],
+      ["unplanned", null, null, false, 1, 32],
     ]);
     expect(plan.totalMinutes).toBe(192);
     expect(plan.totalHours).toBe(3.2);
-    expect(plan.weeks[1]!.hours).toBe(0.53);
+    expect(plan.days[1]!.hours).toBe(0.53);
 
-    // The limit is inclusive: two weeks ahead takes the later order in …
-    const wide = await runPlan(cookie, `workCenterId=${w.kap.id}&toWeek=${inTwoWeeks}`);
-    expect(rowOf(wide, later.orderNumber)).toMatchObject({ week: inTwoWeeks });
-    // … and this week only drops next week's but keeps Försenad and Ej planerad.
-    const narrow = await runPlan(cookie, `workCenterId=${w.kap.id}&toWeek=${thisMonday}`);
-    expect(narrow.rows.map((r) => r.orderNumber)).toEqual([late.orderNumber, latePlanned.orderNumber, thisWeek.orderNumber, undated.orderNumber]);
+    // The limit is inclusive: the later order's own day takes it in, the day before does not …
+    const wide = await runPlan(cookie, `workCenterId=${w.kap.id}&toDate=${addDays(inTwoWeeks, 1)}`);
+    expect(wide.toDate).toBe(addDays(inTwoWeeks, 1));
+    expect(rowOf(wide, later.orderNumber)).toMatchObject({ date: addDays(inTwoWeeks, 1) });
+    expect(rowOf(await runPlan(cookie, `workCenterId=${w.kap.id}&toDate=${inTwoWeeks}`), later.orderNumber)).toBeUndefined();
+    // … and this Sunday only drops next week's but keeps Försenad and Ej planerad.
+    const narrow = await runPlan(cookie, `workCenterId=${w.kap.id}&toDate=${thisSunday}`);
+    expect(narrow.rows.map((r) => r.orderNumber)).toEqual([latePlanned.orderNumber, late.orderNumber, thisWeek.orderNumber, undated.orderNumber]);
     // A limit in the past still lists what is late.
-    const past = await runPlan(cookie, `workCenterId=${w.kap.id}&toWeek=${addDays(lastMonday, -7)}`);
-    expect(past.rows.map((r) => r.orderNumber)).toEqual([late.orderNumber, latePlanned.orderNumber, undated.orderNumber]);
+    const past = await runPlan(cookie, `workCenterId=${w.kap.id}&toDate=${addDays(lastMonday, -7)}`);
+    expect(past.rows.map((r) => r.orderNumber)).toEqual([latePlanned.orderNumber, late.orderNumber, undated.orderNumber]);
   });
 
-  it("orders a week by due date (none last), then order number, then operation", async () => {
+  it("orders by day, then due date (none last), then order number, then operation", async () => {
     const w = await world();
     const cookie = await adminCookie();
     const friday = await w.order(1, addDays(thisMonday, 4));
@@ -278,7 +287,7 @@ describe("GET /planning/run-plan — urval, vecka och ordning", () => {
 });
 
 describe("GET /planning/run-plan — samma tal som Beläggning och terminalen", () => {
-  it("Tid kvar, Antal kvar and the week are Beläggning's for the same operation — setup done or not", async () => {
+  it("Tid kvar, Antal kvar and the plan are Beläggning's for the same operation — setup done or not", async () => {
     const w = await world();
     const cookie = await adminCookie();
     const untouched = await w.order(10, addDays(thisMonday, 6));
@@ -291,7 +300,7 @@ describe("GET /planning/run-plan — samma tal som Beläggning och terminalen", 
       method: "POST",
       url: `/api/v1/planning/operations/${moved.op10.id}/move`,
       headers: { cookie },
-      payload: { weekMonday: nextMonday, moveFollowing: false },
+      payload: { date: nextMonday, moveFollowing: false },
     });
     expect(move.statusCode, move.body).toBe(200);
 
@@ -301,19 +310,19 @@ describe("GET /planning/run-plan — samma tal som Beläggning och terminalen", 
       const { monday, chip } = await capacityChip(cookie, row.moOperationId!);
       expect(row.remainingHours, row.orderNumber).toBe(chip.remainingHours);
       expect(row.planned).toBe(chip.planned);
-      expect(row.plannedStartWeek).toBe(chip.plannedStartWeek);
-      expect(row.plannedEndWeek).toBe(chip.plannedEndWeek);
+      expect(row.plannedStartDate).toBe(chip.plannedStartDate);
+      expect(row.plannedEndDate).toBe(chip.plannedEndDate);
       expect(row.planLocked).toBe(chip.planLocked);
-      // The veckonyckel is the matrix's week — except that the matrix puts
-      // a passed week in the current one, where the körplan says Försenad.
-      expect(row.late ? thisMonday : row.week, row.orderNumber).toBe(monday);
+      // The day key lies in the matrix's week — except that the matrix puts
+      // a passed day on today, where the körplan says Försenad.
+      expect(row.date == null ? null : row.late ? thisMonday : mondayOf(row.date), row.orderNumber).toBe(monday);
     }
     // Setup not done: 30 + 10 × 2. Setup done (a reported quantity): 6 × 2.
     expect(rowOf(plan, untouched.orderNumber)).toMatchObject({ setupDone: false, remainingMinutes: 50, remainingHours: 0.83, remainingQuantity: 10 });
     expect(rowOf(plan, started.orderNumber)).toMatchObject({ setupDone: true, remainingMinutes: 12, remainingHours: 0.2, remainingQuantity: 6 });
     expect(rowOf(plan, late.orderNumber).late).toBe(true);
-    expect(rowOf(plan, undated.orderNumber).week).toBeNull();
-    expect(rowOf(plan, moved.orderNumber).week).toBe(nextMonday);
+    expect(rowOf(plan, undated.orderNumber).date).toBeNull();
+    expect(rowOf(plan, moved.orderNumber).date).toBe(nextMonday);
   });
 
   it("the beredskap is the terminal's for the same operation, with the operation it waits for", async () => {
@@ -353,10 +362,9 @@ describe("GET /planning/run-plan — resursväljaren, fel och behörighet", () =
     expect(bare).toEqual({
       workCenter: null,
       today,
-      currentWeek: thisMonday,
-      toWeek: nextMonday,
+      toDate: defaultToDate,
       rows: [],
-      weeks: [],
+      days: [],
       totalMinutes: 0,
       totalHours: 0,
       stations: [
@@ -367,7 +375,7 @@ describe("GET /planning/run-plan — resursväljaren, fel och behörighet", () =
     expect((await runPlan(cookie, `workCenterId=${w.kap.id}`)).stations).toEqual(bare.stations);
     // The same list, in the same order, as the terminal's stations.
     expect(bare.stations).toEqual((await get(cookie, "/terminal/stations")).json());
-    expect(defaultRunPlanToWeek(today)).toBe(nextMonday);
+    expect(defaultRunPlanToDate(today)).toBe(defaultToDate);
   });
 
   it("404s an unknown resource, 400s a legoresurs and a bad query — list and PDF alike", async () => {
@@ -379,8 +387,9 @@ describe("GET /planning/run-plan — resursväljaren, fel och behörighet", () =
       const lego = await get(cookie, `${path}?workCenterId=${w.lego.id}`);
       expect([lego.statusCode, lego.json().code]).toEqual([400, "run-plan-subcontract-resource"]);
       expect((await get(cookie, `${path}?workCenterId=nope`)).statusCode).toBe(400);
-      // A Tuesday is not a week.
-      expect((await get(cookie, `${path}?workCenterId=${w.kap.id}&toWeek=${addDays(thisMonday, 1)}`)).statusCode).toBe(400);
+      // T.o.m. is a date (any weekday).
+      expect((await get(cookie, `${path}?workCenterId=${w.kap.id}&toDate=nope`)).statusCode).toBe(400);
+      expect((await get(cookie, `${path}?workCenterId=${w.kap.id}&toDate=${addDays(thisMonday, 1)}`)).statusCode).toBe(200);
     }
     // The printout is always of one resource.
     expect((await get(cookie, "/planning/run-plan/pdf")).statusCode).toBe(400);
@@ -409,7 +418,7 @@ describe("GET /planning/run-plan — resursväljaren, fel och behörighet", () =
 });
 
 describe("GET /planning/run-plan/pdf", () => {
-  it("answers a PDF with the resource, the period, the weeks with their sums and the orders", async () => {
+  it("answers a PDF with the resource, the period, the days with their sums and the orders", async () => {
     const w = await world();
     const cookie = await adminCookie();
     const thisWeek = await w.order(10, addDays(thisMonday, 6));
@@ -421,12 +430,15 @@ describe("GET /planning/run-plan/pdf", () => {
     const res = await get(cookie, `/planning/run-plan/pdf?workCenterId=${w.kap.id}`);
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toBe("application/pdf");
-    expect(String(res.headers["content-disposition"])).toContain(`korplan-100-${nextMonday}.pdf`);
+    expect(String(res.headers["content-disposition"])).toContain(`korplan-100-${defaultToDate}.pdf`);
     expect(res.rawPayload.subarray(0, 5).toString()).toBe("%PDF-");
     const text = pdfText(res.rawPayload);
     expect(text).toContain("Körplan — 100 Kap");
     expect(text).toContain(`Utskriven ${today}`);
-    expect(text).toContain(`(${nextMonday} – ${addDays(nextMonday, 6)})`);
+    expect(text).toContain(`T.o.m. ${defaultToDate}`);
+    // One group per day: the planned TO's due date is a Tuesday.
+    expect(text).toContain(`tis ${addDays(nextMonday, 1)} (vecka`);
+    expect(text).toContain(`Summa sön ${thisSunday}`);
     for (const order of [thisWeek, late, undated, planned]) expect(text).toContain(order.orderNumber);
     expect(text).not.toContain(outside.orderNumber);
     for (const printed of ["Försenad", "Ej planerad", "Summa försenad", "Summa tid kvar", "Planerad TO", "Redo", "10 Kapa rör", "Antal kvar", "Tid kvar", w.article.articleNumber]) {
@@ -438,7 +450,7 @@ describe("GET /planning/run-plan/pdf", () => {
     expect(text).toContain("2,67 h");
 
     // Nothing to do: still a PDF, with the empty text.
-    const empty = await get(cookie, `/planning/run-plan/pdf?workCenterId=${w.svets.id}&toWeek=${lastMonday}`);
+    const empty = await get(cookie, `/planning/run-plan/pdf?workCenterId=${w.svets.id}&toDate=${lastMonday}`);
     expect(empty.statusCode).toBe(200);
     expect(pdfText(empty.rawPayload)).toContain("Körplan — 200 Svets");
   });
@@ -463,45 +475,178 @@ describe("buildRunPlan (pure)", () => {
     quantityScrapped: 0,
     ...over,
   });
-  const build = (todayIs: string, toWeek: string, operations: ReturnType<typeof op>[]): RunPlanRow[] =>
-    buildRunPlan({ today: todayIs, toWeek, workCenter, stations: [], operations, plannedOrderOperations: [] }).rows;
+  const plan = (todayIs: string, toDate: string, operations: ReturnType<typeof op>[]): RunPlanResult =>
+    buildRunPlan({ today: todayIs, toDate, workCenter, stations: [], operations, plannedOrderOperations: [] });
+  const build = (todayIs: string, toDate: string, operations: ReturnType<typeof op>[]): RunPlanRow[] => plan(todayIs, toDate, operations).rows;
 
-  it("takes the week from a Stockholm day: a Sunday belongs to the week that ends, next week starts the day after", () => {
+  it("T.o.m. defaults to the Sunday of next week — the same selection as before the plan counted in days", () => {
     // 2030-03-10 is a Sunday; its week's Monday is 2030-03-04.
-    expect(defaultRunPlanToWeek("2030-03-10")).toBe("2030-03-11");
-    expect(defaultRunPlanToWeek("2030-03-11")).toBe("2030-03-18");
-    const rows = build("2030-03-10", "2030-03-11", [
-      op({ orderNumber: "TO-1", dueDate: "2030-03-03" }), // the Sunday before: last week
-      op({ orderNumber: "TO-2", dueDate: "2030-03-04" }), // Monday of the current week, already passed — not Försenad by week
-      op({ orderNumber: "TO-3", dueDate: "2030-03-17" }), // the limit week's Sunday
-      op({ orderNumber: "TO-4", dueDate: "2030-03-18" }), // the Monday after the limit
-    ]);
-    expect(rows.map((r) => [r.orderNumber, r.week, r.late])).toEqual([
-      ["TO-1", "2030-02-25", true],
-      ["TO-2", "2030-03-04", false],
-      ["TO-3", "2030-03-11", false],
-    ]);
+    expect(defaultRunPlanToDate("2030-03-10")).toBe("2030-03-17");
+    expect(defaultRunPlanToDate("2030-03-06")).toBe("2030-03-17");
+    expect(defaultRunPlanToDate("2030-03-11")).toBe("2030-03-24");
   });
 
-  it("the plan's first week is the key even when the due date is another week, and time on the resource alone means the setup is done", () => {
-    const rows = build("2030-03-06", "2030-03-11", [
+  it("keys on the day: Försenad is before TODAY (also earlier this week), T.o.m. is inclusive, no day is Ej planerad", () => {
+    // Wednesday 2030-03-06; each operation is 30 + 10 × 2 = 50 min.
+    const result = plan("2030-03-06", "2030-03-08", [
+      op({ orderNumber: "TO-1", dueDate: "2030-03-05" }), // yesterday
+      op({ orderNumber: "TO-2", dueDate: "2030-03-04" }), // Monday of this week: passed — Försenad by day
+      op({ orderNumber: "TO-3", dueDate: "2030-03-06" }), // today is not late
+      op({ orderNumber: "TO-4", dueDate: "2030-03-08" }), // the limit day
+      op({ orderNumber: "TO-5", dueDate: "2030-03-09" }), // the day after the limit
+      op({ orderNumber: "TO-6", dueDate: null }),
+    ]);
+    expect(result.toDate).toBe("2030-03-08");
+    expect(result.rows.map((r) => [r.orderNumber, r.date, r.late])).toEqual([
+      ["TO-2", "2030-03-04", true],
+      ["TO-1", "2030-03-05", true],
+      ["TO-3", "2030-03-06", false],
+      ["TO-4", "2030-03-08", false],
+      ["TO-6", null, false],
+    ]);
+    // The groups in list order: Försenad together, then each day, Ej planerad last.
+    expect(result.days).toEqual([
+      { kind: "late", date: null, weekday: null, isoWeek: null, late: true, rows: 2, minutes: 100, hours: 1.67, reorderable: false },
+      // Unplanned operations on their due dates: a day, but nothing to order.
+      { kind: "day", date: "2030-03-06", weekday: 3, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
+      { kind: "day", date: "2030-03-08", weekday: 5, isoWeek: 10, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
+      { kind: "unplanned", date: null, weekday: null, isoWeek: null, late: false, rows: 1, minutes: 50, hours: 0.83, reorderable: false },
+    ]);
+    expect(result.totalMinutes).toBe(250);
+  });
+
+  it("the plan's first day is the key even when the due date is another day, and time on the resource alone means the setup is done", () => {
+    const rows = build("2030-03-06", "2030-03-08", [
       op({
         dueDate: "2030-04-30",
-        plannedWeeks: [
-          { monday: "2030-03-11", minutes: 20 },
-          { monday: "2030-03-04", minutes: 30 },
+        plannedDays: [
+          { date: "2030-03-11", minutes: 20 },
+          { date: "2030-03-07", minutes: 30 },
         ],
         planLocked: true,
         timeOnCurrentResource: true,
       }),
     ]);
     expect(rows[0]).toMatchObject({
-      week: "2030-03-04",
-      plannedStartWeek: "2030-03-04",
-      plannedEndWeek: "2030-03-11",
+      date: "2030-03-07",
+      late: false,
+      planned: true,
+      plannedStartDate: "2030-03-07",
+      plannedEndDate: "2030-03-11",
       planLocked: true,
       setupDone: true,
       remainingMinutes: 20,
     });
+  });
+
+  it("a plan whose first day has passed is Försenad, whatever the due date; a plan beyond T.o.m. is left out", () => {
+    const rows = build("2030-03-06", "2030-03-08", [
+      op({ orderNumber: "TO-1", dueDate: "2030-03-20", plannedDays: [{ date: "2030-03-05", minutes: 50 }] }),
+      op({ orderNumber: "TO-2", dueDate: "2030-03-07", plannedDays: [{ date: "2030-03-11", minutes: 50 }] }),
+      // Due long ago but planned tomorrow: the plan is the key.
+      op({ orderNumber: "TO-3", dueDate: "2030-02-01", plannedDays: [{ date: "2030-03-07", minutes: 50 }] }),
+    ]);
+    expect(rows.map((r) => [r.orderNumber, r.date, r.late])).toEqual([
+      ["TO-1", "2030-03-05", true],
+      ["TO-3", "2030-03-07", false],
+    ]);
+  });
+
+  it("orders a day by due date (none last), then order number (natural), then operation", () => {
+    const on = (orderNumber: string, dueDate: string | null, sequenceNo = 10) =>
+      op({ orderNumber, dueDate, sequenceNo, plannedDays: [{ date: "2030-03-07", minutes: 50 }] });
+    const rows = build("2030-03-06", "2030-03-08", [
+      on("TO-10", "2030-03-20"),
+      on("TO-9", "2030-03-20", 20),
+      on("TO-9", "2030-03-20", 10),
+      on("TO-3", null),
+      on("TO-7", "2030-03-12"),
+    ]);
+    expect(rows.map((r) => [r.orderNumber, r.sequenceNo])).toEqual([
+      ["TO-7", 10],
+      ["TO-9", 10],
+      ["TO-9", 20],
+      ["TO-10", 10],
+      ["TO-3", 10],
+    ]);
+  });
+
+  it("within a day the place set by hand comes first — holes allowed, rows without a place after them in the standard order", () => {
+    const on = (orderNumber: string, runPosition: number | null, dueDate: string | null = "2030-03-20", date = "2030-03-07") =>
+      op({ orderNumber, dueDate, runPosition, plannedDays: [{ date, minutes: 50 }] });
+    const result = plan("2030-03-06", "2030-03-08", [
+      on("TO-1", null, "2030-03-10"), // the most urgent, but nobody placed it
+      on("TO-2", 9),
+      on("TO-3", 2, null),
+      on("TO-4", 5, "2030-03-30"),
+      on("TO-5", null, null),
+      // The day is still the first key: place 1 on a later day never jumps ahead.
+      on("TO-6", 1, "2030-03-09", "2030-03-08"),
+      // Försenad: sorted on its own day and its old place.
+      on("TO-7", 2, "2030-03-01", "2030-03-05"),
+      on("TO-8", 1, "2030-03-02", "2030-03-05"),
+      on("TO-9", 1, "2030-03-03", "2030-03-04"),
+      // Ej planerad never has a place (a stray one on the row is not read).
+      op({ orderNumber: "TO-10", dueDate: null, runPosition: 1 }),
+    ]);
+    expect(result.rows.map((r) => [r.orderNumber, r.date, r.runPosition])).toEqual([
+      ["TO-9", "2030-03-04", 1],
+      ["TO-8", "2030-03-05", 1],
+      ["TO-7", "2030-03-05", 2],
+      ["TO-3", "2030-03-07", 2],
+      ["TO-4", "2030-03-07", 5],
+      ["TO-2", "2030-03-07", 9],
+      ["TO-1", "2030-03-07", null],
+      ["TO-5", "2030-03-07", null],
+      ["TO-6", "2030-03-08", 1],
+      ["TO-10", null, null],
+    ]);
+    // Only a day can be ordered by hand.
+    expect(result.days.map((d) => [d.kind, d.date, d.reorderable, d.rows])).toEqual([
+      ["late", null, false, 3],
+      ["day", "2030-03-07", true, 5],
+      ["day", "2030-03-08", true, 1],
+      ["unplanned", null, false, 1],
+    ]);
+    // … and per row: every planned row of a day, never Försenad or Ej planerad.
+    expect(result.rows.filter((r) => r.reorderable).map((r) => r.orderNumber)).toEqual(["TO-3", "TO-4", "TO-2", "TO-1", "TO-5", "TO-6"]);
+  });
+
+  it("reorderable is per row: an unplanned operation lies on its due date in the day but is not in the day's order", () => {
+    const result = plan("2030-03-06", "2030-03-08", [
+      op({ orderNumber: "TO-1", dueDate: "2030-03-20", plannedDays: [{ date: "2030-03-07", minutes: 50 }] }),
+      // Unplanned (Planera clears a plan without time, or it hit the horizon): keyed on the due date.
+      op({ orderNumber: "TO-2", dueDate: "2030-03-07" }),
+      op({ orderNumber: "TO-3", dueDate: "2030-03-25", plannedDays: [{ date: "2030-03-07", minutes: 50 }] }),
+      // A day with only an unplanned operation has nothing to order.
+      op({ orderNumber: "TO-4", dueDate: "2030-03-08" }),
+    ]);
+    expect(result.rows.map((r) => [r.orderNumber, r.date, r.planned, r.reorderable])).toEqual([
+      ["TO-2", "2030-03-07", false, false],
+      ["TO-1", "2030-03-07", true, true],
+      ["TO-3", "2030-03-07", true, true],
+      ["TO-4", "2030-03-08", false, false],
+    ]);
+    expect(result.days.map((d) => [d.date, d.reorderable, d.rows])).toEqual([
+      ["2030-03-07", true, 3],
+      ["2030-03-08", false, 1],
+    ]);
+  });
+
+  it("a Planerad TO's route operation is never placed: it follows the ordered rows of its day", () => {
+    const placed = op({ orderNumber: "TO-2", dueDate: "2030-03-30", runPosition: 1, plannedDays: [{ date: "2030-03-07", minutes: 50 }] });
+    const { moOperationId: _id, ...route } = op({ orderNumber: "TO-1", dueDate: "2030-03-07" });
+    const result = buildRunPlan({
+      today: "2030-03-06",
+      toDate: "2030-03-08",
+      workCenter,
+      stations: [],
+      operations: [placed],
+      plannedOrderOperations: [{ ...route, moOperationId: null, runPosition: 4 }],
+    });
+    expect(result.rows.map((r) => [r.orderNumber, r.moOperationId === null, r.runPosition, r.status])).toEqual([
+      ["TO-2", false, 1, "ready"],
+      ["TO-1", true, null, "planned_order"],
+    ]);
   });
 });

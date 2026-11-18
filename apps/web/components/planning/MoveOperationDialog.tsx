@@ -2,16 +2,16 @@
 
 import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
-import { Checkbox, Field, Select } from "../ui/Field";
+import { Checkbox, Field, Input } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { Modal } from "../ui/Modal";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { plannedWeekLabel, shortDate } from "../../lib/planning";
+import { stockholmToday } from "../../lib/date";
+import { plannedDateLabel } from "../../lib/planning";
 import type {
   CapacityCellOrder,
   CapacityResourceRow,
-  CapacityWeek,
   MoveOperationResult,
   PlanWarning,
   UnlockOperationResult,
@@ -27,65 +27,64 @@ function formatHours(hours: number): string {
   return hours.toLocaleString("sv-SE", { maximumFractionDigits: 1 });
 }
 
-// Flytta…: pick the week an operation should start in. The options are the
-// matrix's own week columns (their Mondays come from the API — never derived
-// from a browser Date, so the timezone cannot shift a week). Moving locks the
-// operation; Lås upp hands it back to Planera.
+// Flytta…: pick the day an operation should start on (not before today, a
+// Stockholm day). Moving locks the operation; Lås upp hands it back to Planera.
 export function MoveOperationDialog({
   target,
-  weeks,
+  today,
   onClose,
   onChanged,
 }: {
   target: MoveTarget | null;
-  weeks: CapacityWeek[];
+  // The Stockholm day from the capacity response (never the browser's date);
+  // null where no capacity data was loaded (the order card).
+  today?: string | null;
   onClose: () => void;
   // The plan changed — the matrix reloads.
   onChanged: () => void;
 }) {
   return (
     <Modal open={target !== null} onClose={onClose} title="Flytta operation">
-      {target && <MoveForm target={target} weeks={weeks} onClose={onClose} onChanged={onChanged} />}
+      {target && <MoveForm target={target} today={today ?? stockholmToday()} onClose={onClose} onChanged={onChanged} />}
     </Modal>
   );
 }
 
 function MoveForm({
   target,
-  weeks,
+  today,
   onClose,
   onChanged,
 }: {
   target: MoveTarget;
-  weeks: CapacityWeek[];
+  today: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const { order, resource } = target;
-  const spansMultipleYears = new Set(weeks.map((w) => w.isoYear)).size > 1;
-  const current = order.plannedStartWeek && weeks.some((w) => w.monday === order.plannedStartWeek) ? order.plannedStartWeek : null;
-  const [weekMonday, setWeekMonday] = useState(current ?? weeks[0]?.monday ?? "");
+  const planStart = order.plannedStartDate;
+  const [date, setDate] = useState(planStart && planStart >= today ? planStart : today);
   const [moveFollowing, setMoveFollowing] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set once a move went through with warnings: the dialog stays to show them.
   const [warnings, setWarnings] = useState<PlanWarning[] | null>(null);
-  // The order's new planned weeks, from the move response.
-  const [movedWeeks, setMovedWeeks] = useState<{ start: string | null; end: string | null; locked: boolean } | null>(null);
+  // The operation's new planned dates, from the move response.
+  const [movedDates, setMovedDates] = useState<{ start: string | null; end: string | null; locked: boolean } | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!weekMonday) return;
+    if (!date || date < today) return;
     setError(null);
     setBusy(true);
     try {
       const res = await apiFetch<MoveOperationResult>(`/api/v1/planning/operations/${order.moOperationId}/move`, {
         method: "POST",
-        body: JSON.stringify({ weekMonday, moveFollowing }),
+        body: JSON.stringify({ date, moveFollowing }),
       });
       onChanged();
       if (res.warnings.length > 0) {
-        setMovedWeeks({ start: res.operation.plannedStartWeek, end: res.operation.plannedEndWeek, locked: res.operation.planLocked });
+        setMovedDates({ start: res.operation.plannedStartDate, end: res.operation.plannedEndDate, locked: res.operation.planLocked });
         setWarnings(res.warnings);
       } else onClose();
     } catch (err) {
@@ -114,9 +113,19 @@ function MoveForm({
     }
   }
 
-  const planned = movedWeeks
-    ? plannedWeekLabel(movedWeeks.start, movedWeeks.end)
-    : plannedWeekLabel(order.plannedStartWeek, order.plannedEndWeek);
+  // "ledigt 3 h av 8" from the resource's day loads, when the day is loaded;
+  // a day without capacity (weekend, red day) says so — a move there is refused.
+  const dayLoad = resource.dayLoads?.find((d) => d.date === date);
+  const freeText =
+    dayLoad && dayLoad.availableHours !== null
+      ? dayLoad.availableHours <= 0
+        ? "ingen kapacitet den dagen"
+        : `ledigt ${formatHours(Math.max(0, dayLoad.availableHours - dayLoad.loadHours))} h av ${formatHours(dayLoad.availableHours)}`
+      : null;
+
+  const planned = movedDates
+    ? plannedDateLabel(movedDates.start, movedDates.end)
+    : plannedDateLabel(order.plannedStartDate, order.plannedEndDate);
 
   return (
     <form onSubmit={submit}>
@@ -136,32 +145,14 @@ function MoveForm({
         <dt>Planerad</dt>
         <dd>
           {planned ?? "Ej planerad"}
-          {(movedWeeks ? movedWeeks.locked : order.planLocked) ? " · Låst" : ""}
+          {(movedDates ? movedDates.locked : order.planLocked) ? " · Låst" : ""}
         </dd>
       </dl>
 
-      <Field label="Vecka" htmlFor="moveWeek">
-        <Select id="moveWeek" value={weekMonday} onChange={(e) => setWeekMonday(e.target.value)} disabled={busy || warnings !== null}>
-          {weeks.map((w, i) => {
-            const cell = resource.weeks[i];
-            // The current week's matrix figure is the whole week; only the
-            // days from today can still be used, so no free-time figure there.
-            const free =
-              i === 0
-                ? " — innevarande vecka"
-                : cell && cell.availableHours !== null
-                  ? ` — ledigt ${formatHours(Math.max(cell.availableHours - cell.loadHours, 0))} h av ${formatHours(cell.availableHours)}`
-                  : "";
-            const year = spansMultipleYears ? ` ${w.isoYear}` : "";
-            return (
-              <option key={w.monday} value={w.monday}>
-                {`v.${w.isoWeek}${year} · ${shortDate(w.monday)}${free}`}
-              </option>
-            );
-          })}
-        </Select>
+      <Field label="Dag" htmlFor="moveDate">
+        <Input id="moveDate" type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} disabled={busy || warnings !== null} />
+        {freeText && <FormHint>{freeText}</FormHint>}
       </Field>
-      <FormHint attached>Fler veckor nås genom att öka Veckor i beläggningen.</FormHint>
 
       <label className={styles.check}>
         <Checkbox checked={moveFollowing} disabled={busy || warnings !== null} onChange={(e) => setMoveFollowing(e.target.checked)} />
@@ -182,7 +173,7 @@ function MoveForm({
 
       <FormActions>
         {warnings === null && (
-          <Button type="submit" variant="primary" disabled={busy || !weekMonday}>
+          <Button type="submit" variant="primary" disabled={busy || !date}>
             {busy ? "Flyttar…" : "Flytta"}
           </Button>
         )}

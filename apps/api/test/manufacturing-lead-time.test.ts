@@ -5,14 +5,17 @@ import {
   legoReturnDate,
   manufacturingLeadDays,
   moStartDate,
+  queueGapDays,
   routingLeadWork,
   type LeadTimeResource,
 } from "../src/modules/planning/service/manufacturing-lead-time.js";
 import { remainingOperationMinutes, type CapacityOperationRow } from "../src/modules/planning/service/capacity-calc.js";
 
 // Pure tests — no database. Tillverkningsledtid (#13): the article's field
-// wins, otherwise the routing's operations without capacity, rounded up to
-// whole working days; and a TO's start date.
+// wins, otherwise the routing's operations counted like the capacity book
+// places them on an empty resource (#18, S5–S7: at least a whole day per
+// operation with time, the queue time rounded up on its sum); and a TO's
+// start date.
 
 const own = (hoursPerDay: number | null): LeadTimeResource => ({
   type: "machine",
@@ -45,22 +48,39 @@ describe("manufacturingLeadDays", () => {
     expect(manufacturingLeadDays(null, [{ minutes: 960, resource: null }])).toBe(2);
   });
 
-  it("a lego operation is the supplier's lead time plus the queue time, null = 0", () => {
-    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(5, 2) }])).toBe(7);
-    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(null, null) }])).toBe(0);
-    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(3.5, null) }])).toBe(4);
+  it("a lego operation is the day it is sent plus the supplier's lead + queue time rounded up, null = 0", () => {
+    // As the book places it: sent on its floor, back ceil(L + Q) working
+    // days later, the next operation the day after.
+    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(5, 2) }])).toBe(8);
+    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(null, null) }])).toBe(1);
+    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(3.5, null) }])).toBe(5);
+    expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(0.5, 0.2) }, { minutes: 0, resource: lego(0.5, 0.2) }])).toBe(4);
   });
 
-  it("sums the operations before rounding up", () => {
-    // 0.5 + 0.5 + 0.25 days = 1.25 → 2, not 1 + 1 + 1 = 3.
+  it("every own operation with time takes at least one whole day — rounded up per operation, like the plan", () => {
+    // 0.5 + 0.5 + 0.25 days of work are three days in the plan (the next
+    // operation starts the working day after), so the lead time says 3.
     const work = [
       { minutes: 240, resource: own(8) },
       { minutes: 240, resource: own(8) },
       { minutes: 120, resource: own(8) },
     ];
-    expect(leadDaysFromWork(work)).toBe(2);
-    // Float noise (0.1 + 0.2 days) never rounds into an extra day.
-    expect(leadDaysFromWork([{ minutes: 48, resource: own(8) }, { minutes: 96, resource: own(8) }, { minutes: 336, resource: own(8) }])).toBe(1);
+    expect(leadDaysFromWork(work)).toBe(3);
+    // 1.25 + 2.5 days ⇒ 2 + 3.
+    expect(leadDaysFromWork([{ minutes: 600, resource: own(8) }, { minutes: 1200, resource: own(8) }])).toBe(5);
+    // Float noise never rounds into an extra day.
+    expect(leadDaysFromWork([{ minutes: 480.0000001, resource: own(8) }])).toBe(1);
+    expect(leadDaysFromWork([{ minutes: 0.3 * 480, resource: own(8) }, { minutes: (0.1 + 0.2) * 4800, resource: own(8) }])).toBe(4);
+  });
+
+  it("an operation without time takes no day and no queue (S7)", () => {
+    const day = { minutes: 480, resource: own(8) };
+    const none = { minutes: 0, resource: own(8) };
+    expect(leadDaysFromWork([day, none, day])).toBe(2);
+    expect(leadDaysFromWork([day, none, day], 1)).toBe(3); // ONE gap, not two
+    expect(leadDaysFromWork([none, { minutes: 0.005, resource: own(8) }], 2)).toBe(0);
+    // A lego operation has no minutes but always takes its place.
+    expect(leadDaysFromWork([day, { minutes: 0, resource: lego(null, null) }, day], 1)).toBe(5);
   });
 
   it("no operations ⇒ 0", () => {
@@ -75,16 +95,25 @@ describe("manufacturingLeadDays", () => {
       expect(manufacturingLeadDays(0, [{ minutes: 480, resource: own(8) }], defaults)).toBe(0);
     });
 
-    it("the queue time is waited BETWEEN operations, and the sum is rounded up once", () => {
-      // Two operations of 1 day each + ONE queue of 1.5 ⇒ 3.5 ⇒ 4 (not 2 + 2 queues).
+    it("the queue time is waited BETWEEN operations, rounded up on ITS sum (the sum of the gaps)", () => {
+      // Two operations of 1 day each + ONE queue of 1.5 ⇒ 2 + 2 = 4.
       const two = [{ minutes: 480, resource: own(8) }, { minutes: 480, resource: own(8) }];
       expect(manufacturingLeadDays(null, two, defaults)).toBe(4);
-      // Three half-day operations + two queues: 1.5 + 3 = 4.5 ⇒ 5 — per-operation
-      // rounding would give 2 + 2 + 2 = 6.
+      // Three half-day operations (a day each) + two queues of 1.5 (3) ⇒ 6.
       const three = [{ minutes: 240, resource: own(8) }, { minutes: 240, resource: own(8) }, { minutes: 240, resource: own(8) }];
-      expect(leadDaysFromWork(three, 1.5)).toBe(5);
+      expect(leadDaysFromWork(three, 1.5)).toBe(6);
+      // Four operations with a queue of 0.5: three gaps are 2 days (S4), not 3.
+      expect(leadDaysFromWork([...three, three[0]!], 0.5)).toBe(6);
+      // The queue part is exactly the sum of the book's gaps.
+      for (const q of [0, 0.1, 0.5, 1, 1.5]) {
+        for (let n = 1; n <= 8; n++) {
+          const work = Array.from({ length: n }, () => ({ minutes: 480, resource: own(8) }));
+          const gaps = Array.from({ length: n - 1 }, (_, i) => queueGapDays(i + 1, q)).reduce((a, b) => a + b, 0);
+          expect(leadDaysFromWork(work, q)).toBe(n + gaps);
+        }
+      }
       // A lego operation in the chain queues like any other.
-      expect(manufacturingLeadDays(null, [{ minutes: 480, resource: own(8) }, { minutes: 0, resource: lego(2, 0) }], defaults)).toBe(5);
+      expect(manufacturingLeadDays(null, [{ minutes: 480, resource: own(8) }, { minutes: 0, resource: lego(2, 0) }], defaults)).toBe(6);
     });
 
     it("a single operation gets no queue time", () => {
@@ -140,8 +169,8 @@ describe("manufacturingLeadDays", () => {
     );
     expect(work.map((w) => w.minutes)).toEqual([660, 0, 130]);
     expect(work[2]!.resource).toBeNull();
-    // 660/480 = 1.375 + 5 + 130/480 = 0.27 → 6.65 → 7 days.
-    expect(leadDaysFromWork(work)).toBe(7);
+    // 660/480 = 1.375 ⇒ 2 days, lego 1 + 5, 130/480 = 0.27 ⇒ 1 day.
+    expect(leadDaysFromWork(work)).toBe(9);
   });
 
   it("an existing TO uses its remaining minutes — a partly reported TO needs less time", () => {
@@ -171,12 +200,12 @@ describe("manufacturingLeadDays", () => {
 });
 
 describe("moStartDate", () => {
-  it("the due date minus the lead time wins over an EARLIER planned week (Planera fills capacity from today)", () => {
+  it("the due date minus the lead time wins over an EARLIER planned day (Planera fills capacity from today)", () => {
     // Base: Fri 2026-12-18 minus 3 working days = Tue 12-15; the plan says
-    // week 11-09 — earlier, not binding ⇒ the base.
+    // 11-10 — earlier, not binding ⇒ the base.
     expect(
       moStartDate({
-        plannedStartWeeks: ["2026-11-16", null, "2026-11-09", undefined],
+        plannedStartDates: ["2026-11-17", null, "2026-11-10", undefined],
         planFixed: false,
         dueDate: "2026-12-18",
         leadDays: 3,
@@ -185,49 +214,50 @@ describe("moStartDate", () => {
     ).toBe("2026-12-15");
   });
 
-  it("a binding plan (locked or reported on) wins with the Monday of its earliest week", () => {
+  it("a binding plan (locked or reported on) wins with its earliest day", () => {
     expect(
       moStartDate({
-        plannedStartWeeks: ["2026-11-16", null, "2026-11-09"],
+        plannedStartDates: ["2026-11-17", null, "2026-11-10"],
         planFixed: true,
         dueDate: "2026-12-18",
         leadDays: 3,
         offDays: NO_HOLIDAYS,
       })
-    ).toBe("2026-11-09");
+    ).toBe("2026-11-10");
   });
 
-  it("a planned week LATER than the base wins (overload pushed the work back)", () => {
-    // Base Wed 2026-11-11; planned week 11-16 is later ⇒ 11-16. A planned
-    // Monday in the base's own week (11-09) is earlier ⇒ the base.
-    expect(
-      moStartDate({ plannedStartWeeks: ["2026-11-16"], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })
-    ).toBe("2026-11-16");
-    expect(
-      moStartDate({ plannedStartWeeks: ["2026-11-09"], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })
-    ).toBe("2026-11-11");
+  it("a planned day LATER than the base wins — compared per day (overload pushed the work back)", () => {
+    // Base Wed 2026-11-11. Planned the day after ⇒ that day; planned two
+    // days after ⇒ two days (it was 0 or 7 while the plan counted weeks);
+    // planned on the base or before it ⇒ the base.
+    const start = (planned: string) =>
+      moStartDate({ plannedStartDates: [planned], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS });
+    expect(start("2026-11-12")).toBe("2026-11-12");
+    expect(start("2026-11-13")).toBe("2026-11-13");
+    expect(start("2026-11-11")).toBe("2026-11-11");
+    expect(start("2026-11-09")).toBe("2026-11-11");
   });
 
   it("without a plan: the due date minus the lead time in working days", () => {
     // Mon 2026-11-16 minus 3 working days = Wed 11-11.
-    expect(moStartDate({ plannedStartWeeks: [], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })).toBe(
+    expect(moStartDate({ plannedStartDates: [], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })).toBe(
       "2026-11-11"
     );
     // Lead time 0: the due date itself.
     expect(
-      moStartDate({ plannedStartWeeks: [null], planFixed: false, dueDate: "2026-11-16", leadDays: 0, offDays: NO_HOLIDAYS })
+      moStartDate({ plannedStartDates: [null], planFixed: false, dueDate: "2026-11-16", leadDays: 0, offDays: NO_HOLIDAYS })
     ).toBe("2026-11-16");
     // A full-day holiday is skipped.
     expect(
-      moStartDate({ plannedStartWeeks: [], planFixed: false, dueDate: "2026-11-16", leadDays: 1, offDays: new Set(["2026-11-13"]) })
+      moStartDate({ plannedStartDates: [], planFixed: false, dueDate: "2026-11-16", leadDays: 1, offDays: new Set(["2026-11-13"]) })
     ).toBe("2026-11-12");
   });
 
-  it("without a due date the planned week is all there is; without either it stays undated", () => {
+  it("without a due date the planned day is all there is; without either it stays undated", () => {
     expect(
-      moStartDate({ plannedStartWeeks: ["2026-11-23"], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })
-    ).toBe("2026-11-23");
-    expect(moStartDate({ plannedStartWeeks: [null], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })).toBeNull();
+      moStartDate({ plannedStartDates: ["2026-11-25"], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })
+    ).toBe("2026-11-25");
+    expect(moStartDate({ plannedStartDates: [null], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })).toBeNull();
   });
 });
 
@@ -256,7 +286,7 @@ describe("legoOperationDates", () => {
     ).toBe("2030-03-12");
   });
 
-  it("a done operation after it takes no time and no queue; the rounding is on the sums", () => {
+  it("a done operation after it takes no time and no queue; the operations after it count like the lead time", () => {
     expect(
       legoOperationDates({
         dueDate: due,
@@ -267,11 +297,33 @@ describe("legoOperationDates", () => {
         offDays: NO_HOLIDAYS,
       })
     ).toEqual({ finishDate: "2030-03-15", startDate: "2030-03-11" });
-    // Half a day after it ⇒ back one day earlier; 0.5 + 4 = 4.5 ⇒ 5 days.
+    // Half a day after it is a whole day in the plan ⇒ back one day earlier;
+    // the lego days are whole too (3.5 + 0.5 = 4).
     const half = { minutes: 240, resource: own(8) };
     expect(
       legoOperationDates({ dueDate: due, fallbackStart: null, lego: lego(3.5, 0.5), after: [half], queueDays: 0, offDays: NO_HOLIDAYS })
     ).toEqual({ finishDate: "2030-03-14", startDate: "2030-03-08" });
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: lego(2.2, null), after: [half], queueDays: 0, offDays: NO_HOLIDAYS })
+    ).toEqual({ finishDate: "2030-03-14", startDate: "2030-03-11" });
+    // An operation without time after it takes no day and no queue; two
+    // half-day operations with a queue of 0.5 before each: 2 + ceil(1) = 3.
+    const none = { minutes: 0, resource: own(8) };
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: supplier, after: [none], queueDays: 2, offDays: NO_HOLIDAYS }).finishDate
+    ).toBe("2030-03-15");
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: supplier, after: [half, none, half], queueDays: 0.5, offDays: NO_HOLIDAYS })
+    ).toEqual({ finishDate: "2030-03-12", startDate: "2030-03-06" });
+  });
+
+  it("a later lego operation after it takes its sent day too — the book's walk read backward", () => {
+    // After: an own day, then a lego operation of 2 days (1 + 2), no queue:
+    // back 4 working days before the due date, sent 4 more before that.
+    const laterLego = { minutes: 0, resource: lego(2, null) };
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: supplier, after: [oneDay, laterLego], queueDays: 0, offDays: NO_HOLIDAYS })
+    ).toEqual({ finishDate: "2030-03-11", startDate: "2030-03-05" });
   });
 
   it("without a due date the TO's start is the start; without either the operation is undated", () => {

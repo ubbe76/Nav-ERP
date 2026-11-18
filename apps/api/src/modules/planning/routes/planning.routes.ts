@@ -12,6 +12,7 @@ import {
   missingComponentsSchema,
   moveOperationSchema,
   runPlanPdfQuerySchema,
+  runPlanOrderSchema,
   runPlanQuerySchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
@@ -31,8 +32,9 @@ import {
   NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
-  PlanWeekInPastError,
-  PlanWeekNoCapacityError,
+  PlanDateInPastError,
+  PlanDateNoCapacityError,
+  RunPlanOrderChangedError,
   RunPlanSubcontractResourceError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
@@ -279,7 +281,7 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
 
   // Reservationen — Skapa tillverkningsordrar för det som saknas: the check
   // run again under the production_plan lock, one TO per shortage batch
-  // planned in the weeks it booked, and the KO's Förväntat leveransdatum.
+  // planned in the days it booked, and the KO's Förväntat leveransdatum.
   // Access: DELIVERY_CHECK, although this WRITES (KO date, TOs) — the
   // point is that the seller promises a date that holds; the KO status
   // guard and the manufacturing service's own rules are the double check.
@@ -368,12 +370,30 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     }
   });
 
+  // Ordningen inom dagen (#18): the whole day's list on the resource in the
+  // wanted order. Module default write = tillverkning (arbetsledaren — the
+  // workshop profile reads the körplan but does not order it). No dates are
+  // touched. 409 run-plan-order-changed when the day's operations are not
+  // the ones sent: nothing written, the web reads the körplan again.
+  app.put("/planning/run-plan/order", async (req, reply) => {
+    const input = runPlanOrderSchema.parse(req.body);
+    try {
+      const result = await service.setRunPlanOrder(input, req.user!.id);
+      if (!result) return reply.code(404).send(errorBody(new WorkCenterNotFoundError(input.workCenterId)));
+      return result;
+    } catch (err) {
+      if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+      if (err instanceof RunPlanOrderChangedError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
   // Produktionsplanering — the three plan writes, each one transaction under
   // the production_plan lock. Module default: write = tillverkning.
-  // Planera: every open TO replanned on free capacity, hand-moved weeks kept.
+  // Planera: every open TO replanned on free capacity, hand-moved days kept.
   app.post("/planning/plan", async (req) => service.planProductionRun(req.user!.id));
 
-  // Flytta: start the operation in a chosen week (locked); the TO's later
+  // Flytta: start the operation on a chosen day (locked); the TO's later
   // unlocked operations follow when moveFollowing is set.
   app.post<{ Params: { opId: string } }>("/planning/operations/:opId/move", async (req, reply) => {
     const input = moveOperationSchema.parse(req.body);
@@ -381,14 +401,14 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return await service.moveOperation(req.params.opId, input, req.user!.id);
     } catch (err) {
       if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof PlanWeekInPastError) return reply.code(400).send(errorBody(err));
-      if (err instanceof PlanWeekNoCapacityError) return reply.code(409).send(errorBody(err));
+      if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
+      if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
       if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
 
-  // Lås upp: the weeks stay until the next Planera. Idempotent.
+  // Lås upp: the days stay until the next Planera. Idempotent.
   app.post<{ Params: { opId: string } }>("/planning/operations/:opId/unlock", async (req, reply) => {
     try {
       return await service.unlockOperation(req.params.opId, req.user!.id);

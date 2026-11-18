@@ -1,6 +1,8 @@
 // Planera — the production plan: every open TO's pending operations placed
-// on free capacity through the shared capacity book, in priority order
-// (earliest due date first), operations in sequence. Three calls, one
+// DAY BY DAY (#18) on free capacity through the shared capacity book, in
+// priority order (earliest due date first), operations in sequence — each
+// one from the working day after the previous is ready plus the
+// Standardkötid (operationChain / nextOperationFloor). Three calls, one
 // engine: Planera (all open TOs), the planning of a new TO (`orders` = the
 // new one, every other open operation as existing load) and a hand move
 // (`forceStart` on one operation, the TO's other operations locked or
@@ -17,17 +19,24 @@
 import {
   hasCapacityCalendar,
   mondayOf,
-  operationLoadWeeks,
+  operationLoadDays,
   remainingOperationMinutes,
   type CapacityOperationRow,
   type DayScheduleNetRow,
   type HolidayRow,
-  type PlannedWeek,
+  type PlannedDay,
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
 import { addDays } from "../../system/service/delivery-days.js";
 import { DEFAULT_LONG_OPERATION_WEEKS } from "../../system/service/plan-settings.js";
-import { createCapacityBook, MIN_PLAN_MINUTES, roundPlanWeeks, type CapacityBook, type PlanWorkCenter } from "./capacity-book.js";
+import {
+  createCapacityBook,
+  MIN_PLAN_MINUTES,
+  operationChain,
+  roundPlanDays,
+  type CapacityBook,
+  type PlanWorkCenter,
+} from "./capacity-book.js";
 import { roundToDecimals } from "@navet/shared";
 
 // Orimligt mycket tid: an operation whose remaining time alone would fill its
@@ -35,15 +44,15 @@ import { roundToDecimals } from "@navet/shared";
 // setting planning_long_operation_weeks, plan-settings.ts) is most likely a
 // data error (times in the wrong unit, a typo in the quantity). It is
 // planned as usual, with a warning that names it.
-// A normal week is the largest whole-week capacity among the weeks after the
-// current one (a holiday week never sets the bar); a resource without a
+// A normal week is the largest whole-week capacity (the sum of its days)
+// among the weeks after the current one (a holiday week never sets the bar); a resource without a
 // capacity calendar is measured against a 40-hour week.
 const NORMAL_WEEK_SAMPLE = 8;
 const STANDARD_WEEK_MINUTES = 40 * 60;
 
 export interface PlanOperation extends CapacityOperationRow {
   // Påbörjad: something reported (OK or scrap) or an open/paused stamp
-  // session — the work is under way and starts in the current week.
+  // session — the work is under way and starts today.
   started: boolean;
   // Ligger fast: kept where it is by a move (the TO's other planned
   // operations) — treated like a locked one in this run, but it is not
@@ -67,11 +76,17 @@ export interface PlanProductionInput {
   // their allocations are cleared).
   orders: PlanOrder[];
   // Load that is not replanned: every other open operation (a new TO, a
-  // move). Planned ones count in their planned weeks.
+  // move). Planned ones count on their planned days.
   existingOperations?: CapacityOperationRow[];
-  // Flytta: this operation starts in `weekMonday` whatever is free there
-  // (whole-week capacity, overload allowed), locked or not.
-  forceStart?: { operationId: string; weekMonday: string };
+  // Standardkötid (planning_queue_time_days) as loaded for THIS run — the
+  // wait between an order's operations on top of "the next working day".
+  // Never a module constant (the setting changes; the tests change it).
+  queueDays: number;
+  // Flytta: this operation starts on `date` whatever is free there (the
+  // day's whole capacity, overload allowed), locked or not. The service
+  // compares the plan's startDate with `date`: a day without capacity
+  // starts later and is refused before anything is written.
+  forceStart?: { operationId: string; date: string };
   horizonWeeks?: number;
   // Orimligt mycket tid: the limit in normal weeks; 0 = no warning.
   // Default DEFAULT_LONG_OPERATION_WEEKS.
@@ -82,9 +97,9 @@ export interface PlanProductionInput {
 export interface OperationPlan {
   operationId: string; // mo_operations.id
   manufacturingOrderId: string;
-  weeks: PlannedWeek[];
-  startWeek: string; // = weeks[0].monday
-  endWeek: string; // = weeks[last].monday
+  days: PlannedDay[];
+  startDate: string; // = days[0].date
+  endDate: string; // = days[last].date
 }
 
 export interface PlanWarning {
@@ -116,9 +131,8 @@ export interface PlanProductionResult {
   orders: PlannedOrderSummary[];
 }
 
-const maxDate = (a: string, b: string) => (a > b ? a : b);
 const formatNumber = (n: number, decimals = 1) => n.toLocaleString("sv-SE", { maximumFractionDigits: decimals });
-const hasPlan = (op: CapacityOperationRow) => !!op.plannedWeeks && op.plannedWeeks.length > 0;
+const hasPlan = (op: CapacityOperationRow) => !!op.plannedDays && op.plannedDays.length > 0;
 
 // Prioritet: due date ascending, null last, then order number (then id —
 // never a tie, so the plan is deterministic).
@@ -137,7 +151,7 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   const firstMonday = mondayOf(today);
   const forced = input.forceStart ?? null;
   const isForced = (op: PlanOperation) => forced !== null && forced.operationId === op.moOperationId;
-  // Låst: a hand-moved operation keeps its weeks — it is existing load
+  // Låst: a hand-moved operation keeps its days — it is existing load
   // before anything else is placed, and is never touched (unless it is the
   // one being moved again).
   const isLocked = (op: PlanOperation) =>
@@ -161,19 +175,25 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   for (const order of [...input.orders].sort(compareOrderPriority)) {
     const head = { manufacturingOrderId: order.id, orderNumber: order.orderNumber };
     const unscheduledNoted = new Set<string>();
-    let floor = today; // capacity may be used from this day
-    let ready = floor; // the day the previous operation is done
-    let prevEndWeek: string | null = null; // Monday of the week the previous operation finishes
+    // The chain: the first operation may use capacity from today, each next
+    // one from the working day after the previous is ready + the queue time.
+    // Done operations and operations without time never advance it (S7).
+    const chain = operationChain(today, input.queueDays, input.offDays);
     let horizonHit = false;
 
-    const sequenceBreak = (op: PlanOperation, code: string, startWeek: string, what: string) => {
-      if (prevEndWeek !== null && startWeek < prevEndWeek) {
+    // Sekvensbrott (S13): the operation starts before the previous one is
+    // READY (the same day counts — the next one starts the day after). A
+    // start inside the queue time is no break: the queue is a planning
+    // buffer, and a move into it is a choice.
+    const sequenceBreak = (op: PlanOperation, code: string, startDate: string, what: string) => {
+      const previousReady = chain.previousReady;
+      if (previousReady !== null && startDate <= previousReady) {
         warnings.push({
           kind: "sequence",
           ...head,
           sequenceNo: op.sequenceNo,
           workCenterCode: code,
-          message: `Op ${op.sequenceNo} på ${code} är ${what} i veckan som börjar ${startWeek}, före föregående operation är klar (${ready})`,
+          message: `Op ${op.sequenceNo} på ${code} är ${what} ${startDate}, före föregående operation är klar (${previousReady})`,
         });
       }
     };
@@ -192,25 +212,21 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
       if (long) warnings.push({ ...head, ...long });
       if (horizonHit) {
         // Nothing after the operation that did not fit is planned; a locked
-        // one keeps its weeks (Planera never touches it).
+        // one keeps its days (Planera never touches it).
         if (!isLocked(op) && hasPlan(op)) clear.push(op.moOperationId);
         continue;
       }
       if (isLocked(op)) {
-        const chunks = operationLoadWeeks(op, firstMonday);
+        // Its stored days as the book holds them (the remaining load, passed
+        // days today): the next operation's floor counts from its last day.
+        const chunks = operationLoadDays(op, today);
         if (chunks.length === 0) continue; // nothing left — the plan is moot
-        const startWeek = chunks[0]!.monday!;
-        const endWeek = chunks[chunks.length - 1]!.monday!;
-        sequenceBreak(op, code, startWeek, op.planLocked ? "låst" : "planerad och ligger fast");
-        ready = maxDate(ready, book.weekFinishDay(wc, endWeek, floor));
-        floor = maxDate(floor, endWeek);
-        prevEndWeek = endWeek;
+        sequenceBreak(op, code, chunks[0]!.date!, op.planLocked ? "låst på" : "planerad och ligger fast på");
+        chain.advance(chunks[chunks.length - 1]!.date!);
         continue;
       }
       if (wc?.type === "subcontract") {
-        ready = book.subcontract(wc, maxDate(ready, floor));
-        floor = ready;
-        prevEndWeek = mondayOf(ready);
+        chain.advance(book.subcontract(wc, chain.floor()));
         if (hasPlan(op)) clear.push(op.moOperationId);
         continue;
       }
@@ -219,8 +235,11 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
         if (hasPlan(op)) clear.push(op.moOperationId);
         continue;
       }
-      const forceStartWeek = isForced(op) ? forced!.weekMonday : op.started ? firstMonday : undefined;
-      const placed = book.place(wc, minutes, forceStartWeek ? { floor, forceStartWeek } : { floor });
+      const floor = chain.floor();
+      // Påbörjad: the work is under way — it starts today (S8: today is a
+      // whole day), whatever the chain says.
+      const forceStartDate = isForced(op) ? forced!.date : op.started ? today : undefined;
+      const placed = book.place(wc, minutes, forceStartDate ? { floor, forceStartDate } : { floor });
       if (placed.horizonExceeded) {
         // Not planned — what it booked before the horizon is given back, or
         // it would sit as phantom load for every TO planned after it.
@@ -246,26 +265,23 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
           message: `Resurs ${code} saknar veckoschema och timmar per dag — Op ${op.sequenceNo} är planerad utan kapacitetsgräns`,
         });
       }
-      if (isForced(op)) sequenceBreak(op, code, placed.fromWeek, "flyttad");
-      else if (op.started) sequenceBreak(op, code, placed.fromWeek, "påbörjad");
+      if (isForced(op)) sequenceBreak(op, code, placed.fromDate, "flyttad till");
+      else if (op.started) sequenceBreak(op, code, placed.fromDate, "påbörjad och planerad från");
       plans.push({
         operationId: op.moOperationId,
         manufacturingOrderId: order.id,
-        weeks: placed.weeks,
-        startWeek: placed.fromWeek,
-        endWeek: placed.toWeek,
+        days: placed.days,
+        startDate: placed.fromDate,
+        endDate: placed.toDate,
       });
-      ready = maxDate(ready, placed.readyDate);
-      // The next operation may use what is left of the finishing week.
-      floor = maxDate(floor, placed.toWeek);
-      prevEndWeek = placed.toWeek;
+      chain.advance(placed.readyDate);
     }
 
-    // Sen: the last pending operation (lego through its lead time) finishes
-    // after the due date. A TO that hit the horizon has no finish — then Sen
+    // Sen: the TO is ready (its latest operation, lego through its lead
+    // time) after the due date — ready ON the due date is in time. A TO that hit the horizon has no finish — then Sen
     // is the matrix's rule for an unplanned TO (orderPlanStatus): the due
     // date has passed.
-    const plannedFinish = horizonHit ? null : ready;
+    const plannedFinish = horizonHit ? null : chain.ready;
     const late =
       order.dueDate !== null && (plannedFinish !== null ? plannedFinish > order.dueDate : order.dueDate < today);
     if (late) {
@@ -287,25 +303,25 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
 }
 
 // The operations as writeOperationPlans leaves them after a run: a planned
-// one with its rounded weeks (one that rounds away is cleared), a cleared one
-// without weeks or lock. Planera's answer computes its förslag on this — the
+// one with its rounded days (one that rounds away is cleared), a cleared one
+// without days or lock. Planera's answer computes its förslag on this — the
 // plan it just wrote, in memory, without reading it back (#15).
 export function operationsWithPlan(
   operations: CapacityOperationRow[],
   result: Pick<PlanProductionResult, "plans" | "clear">
 ): CapacityOperationRow[] {
-  const planned = new Map(result.plans.map((p) => [p.operationId, roundPlanWeeks(p.weeks)]));
+  const planned = new Map(result.plans.map((p) => [p.operationId, roundPlanDays(p.days)]));
   const cleared = new Set(result.clear);
   return operations.map((op) => {
-    const weeks = planned.get(op.moOperationId);
-    if (weeks !== undefined && weeks.length > 0) return { ...op, plannedWeeks: weeks };
-    if (weeks !== undefined || cleared.has(op.moOperationId)) return { ...op, plannedWeeks: null, planLocked: false };
+    const days = planned.get(op.moOperationId);
+    if (days !== undefined && days.length > 0) return { ...op, plannedDays: days };
+    if (days !== undefined || cleared.has(op.moOperationId)) return { ...op, plannedDays: null, planLocked: false };
     return op;
   });
 }
 
 // Orimligt mycket tid for the operations of `orders` without planning them —
-// the reservation writes Leveranstidskontrollen's weeks as they are, but its
+// the reservation writes Leveranstidskontrollen's days as they are, but its
 // TOs get the same warning as one Planera places.
 export function longOperationWarnings(
   input: Pick<PlanProductionInput, "today" | "offDays" | "workCenters" | "schedule" | "orders" | "longOperationWeeks">

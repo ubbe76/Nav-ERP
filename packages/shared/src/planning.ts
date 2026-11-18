@@ -53,8 +53,12 @@ export type ListAbcQuery = z.infer<typeof listAbcQuerySchema>;
 
 // Beläggning (E2) — the capacity matrix is a whole-dataset derivation, not a
 // paged list; the only knobs are the horizon and an optional group filter.
+// granularity=day (#18) answers with `days` day columns from today instead of
+// the week columns (`weeks` is then not read).
 export const capacityQuerySchema = z.object({
   weeks: z.coerce.number().int().min(1).max(26).default(8),
+  granularity: z.enum(["week", "day"]).default("week"),
+  days: z.coerce.number().int().min(7).max(42).default(14),
   productionGroupId: z.string().uuid().optional(),
 });
 export type CapacityQuery = z.infer<typeof capacityQuerySchema>;
@@ -145,18 +149,12 @@ export const deliveryTimeCheckSchema = z
   });
 export type DeliveryTimeCheckRequest = z.infer<typeof deliveryTimeCheckSchema>;
 
-// Produktionsplanering: a week is identified by its Monday (YYYY-MM-DD).
-// The date arithmetic is UTC on purpose — the Monday is a calendar date the
-// client took from the API's own `weeks[].monday`, never a local Date.
-export const isMonday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 1;
-export const planWeekSchema = businessDateSchema.refine(isMonday, { message: "week must be a Monday" });
-
 // GET /planning/run-plan — Körplan: a resource's coming work up to and
-// including the week `toWeek` (a Monday; left out = next week, Stockholm).
-// Without a resource the answer only carries the picker's stations.
+// including the day `toDate` (a Stockholm day; left out = the Sunday of next
+// week). Without a resource the answer only carries the picker's stations.
 export const runPlanQuerySchema = z.object({
   workCenterId: z.string().uuid().optional(),
-  toWeek: planWeekSchema.optional(),
+  toDate: businessDateSchema.optional(),
 });
 export type RunPlanQuery = z.infer<typeof runPlanQuerySchema>;
 
@@ -164,18 +162,32 @@ export type RunPlanQuery = z.infer<typeof runPlanQuerySchema>;
 export const runPlanPdfQuerySchema = runPlanQuerySchema.required({ workCenterId: true });
 export type RunPlanPdfQuery = z.infer<typeof runPlanPdfQuerySchema>;
 
-// POST /planning/operations/:opId/move — Flytta: the operation starts in
-// weekMonday (whole-week capacity, overload allowed) and is locked; with
+// PUT /planning/run-plan/order — the order within ONE day on a resource
+// (#18): the WHOLE day's list of operations in the wanted order. The order
+// only steers the körplan and the terminal's list, never a date.
+export const runPlanOrderSchema = z.object({
+  workCenterId: z.string().uuid(),
+  date: businessDateSchema,
+  moOperationIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(500)
+    .refine((ids) => new Set(ids).size === ids.length, { message: "moOperationIds must be unique" }),
+});
+export type RunPlanOrderInput = z.infer<typeof runPlanOrderSchema>;
+
+// POST /planning/operations/:opId/move — Flytta: the operation starts on
+// `date` (the day's whole capacity, overload allowed) and is locked; with
 // moveFollowing the TO's later unlocked operations are replanned after it.
 export const moveOperationSchema = z.object({
-  weekMonday: planWeekSchema,
+  date: businessDateSchema,
   moveFollowing: z.boolean().default(true),
 });
 export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
 
 // POST /delivery-time-check/apply — the reservation: Leveranstidskontrollen is
 // run again inside one transaction, the TOs for every shortage batch are
-// created with the weeks the check booked, and the order's Förväntat
+// created with the days the check booked, and the order's Förväntat
 // leveransdatum is set. deliveryDate is the date the client was shown — a
 // different outcome under the lock is refused (delivery-time-changed).
 // expectedOrders: the number of TOs the client showed (the check's

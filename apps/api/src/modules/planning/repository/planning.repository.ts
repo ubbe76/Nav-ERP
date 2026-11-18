@@ -21,7 +21,7 @@ import {
   inquiryRows,
   manufacturingOrders,
   moMaterialConsumptions,
-  moOperationPlanWeeks,
+  moOperationPlanDays,
   moOperationResources,
   moOperations,
   productionGroups,
@@ -61,10 +61,10 @@ import { stockValuedAt } from "../../stock/repository/valued-at.js";
 import { loadAbcSettings, loadForecastSettings } from "../../system/repository/plan-settings.js";
 import type { ForecastMonth } from "../service/forecast.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
-import type { CapacityInput, OperationResourceOption, PlannedWeek } from "../service/capacity-calc.js";
+import type { CapacityInput, OperationResourceOption, PlannedDay } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
 import type { RunPlanPlannedOperation } from "../service/run-plan.js";
-import { roundPlanWeeks } from "../service/capacity-book.js";
+import { roundPlanDays } from "../service/capacity-book.js";
 import type { ArticleOverviewLoad } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { loadLeadTimeDefaults, loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
@@ -368,7 +368,7 @@ export function createPlanningRepository(db: Db) {
               orderQuantity: manufacturingOrders.quantity,
               quantityCompleted: moOperations.quantityCompleted,
               quantityScrapped: moOperations.quantityScrapped,
-              plannedStartWeek: moOperations.plannedStartWeek,
+              plannedStartDate: moOperations.plannedStartDate,
               planLocked: moOperations.planLocked,
             })
             .from(moOperations)
@@ -1134,10 +1134,16 @@ export function createPlanningRepository(db: Db) {
       // `resources` (#15, the readers that suggest: Beläggning, Planera's
       // answer, the TO card): each operation's possible resources
       // (mo_operation_resources) and, for an operation that has them,
-      // whether it is rörd (operationTouchedSql) — two more set-based
-      // queries in the same batch, never per operation.
+      // whether it is rörd (operationTouchedSql), plus the operations with
+      // an open stamp session (instämplad) — three more set-based queries
+      // in the same batch, never per operation.
       opts: { orderIds?: string[]; resources?: boolean } = {}
-    ): Promise<CapacityInput> {
+      // queueDays = Standardkötid (#18): the gap the book and Sen put between
+      // an order's operations. Read HERE, in the same batch and through the
+      // same `dbc` as the load, so every reader of the plan (Planera, Flytta,
+      // a new TO, the matrix, the TO list's Sen) counts with the value of
+      // its own run — never cached per process.
+    ): Promise<CapacityInput & { queueDays: number }> {
       const openOrders = inArray(manufacturingOrders.status, ["released", "in_progress"]);
       const orderFilter = opts.orderIds ? and(openOrders, inArray(manufacturingOrders.id, opts.orderIds)) : openOrders;
       const hasResources = sql`EXISTS (SELECT 1 FROM mo_operation_resources has_r WHERE has_r.mo_operation_id = "mo_operations"."id")`;
@@ -1153,6 +1159,8 @@ export function createPlanningRepository(db: Db) {
         timeOnResources,
         resourceRows,
         touchedRows,
+        stampedRows,
+        leadTimeDefaults,
       ] = await Promise.all([
         dbc
           .select({
@@ -1166,6 +1174,7 @@ export function createPlanningRepository(db: Db) {
             hoursPerDay: workCenters.hoursPerDay,
             active: workCenters.active,
             leadTimeDays: workCenters.leadTimeDays,
+            queueTimeDays: workCenters.queueTimeDays,
           })
           .from(workCenters),
         dbc
@@ -1189,6 +1198,7 @@ export function createPlanningRepository(db: Db) {
             quantityCompleted: moOperations.quantityCompleted,
             quantityScrapped: moOperations.quantityScrapped,
             planLocked: moOperations.planLocked,
+            runPosition: moOperations.runPosition,
             plannedAt: moOperations.plannedAt,
             resourceLocked: moOperations.resourceLocked,
           })
@@ -1222,15 +1232,15 @@ export function createPlanningRepository(db: Db) {
         // as the operations, so a plan row never arrives without its row.
         dbc
           .select({
-            moOperationId: moOperationPlanWeeks.moOperationId,
-            monday: moOperationPlanWeeks.weekMonday,
-            minutes: moOperationPlanWeeks.minutes,
+            moOperationId: moOperationPlanDays.moOperationId,
+            date: moOperationPlanDays.planDate,
+            minutes: moOperationPlanDays.minutes,
           })
-          .from(moOperationPlanWeeks)
-          .innerJoin(moOperations, eq(moOperations.id, moOperationPlanWeeks.moOperationId))
+          .from(moOperationPlanDays)
+          .innerJoin(moOperations, eq(moOperations.id, moOperationPlanDays.moOperationId))
           .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
           .where(orderFilter)
-          .orderBy(moOperationPlanWeeks.weekMonday),
+          .orderBy(moOperationPlanDays.planDate),
         operationTimeOnResources(dbc, orderFilter),
         opts.resources
           ? dbc
@@ -1256,6 +1266,14 @@ export function createPlanningRepository(db: Db) {
               .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
               .where(and(orderFilter, hasResources, operationTouchedSql()))
           : Promise.resolve([]),
+        // Instämplad: an open or paused stamp session — stampedOperationIds'
+        // own question, asked of EVERY operation: the förslag walk the whole
+        // order with Planera's påbörjad-rule, also past an operation
+        // without possible resources.
+        opts.resources
+          ? dbc.selectDistinct({ moOperationId: stampSessions.moOperationId }).from(stampSessions).where(isNull(stampSessions.stoppedAt))
+          : Promise.resolve([]),
+        loadLeadTimeDefaults(dbc),
       ]);
 
       const resourcesByOperation = new Map<string, OperationResourceOption[]>();
@@ -1265,11 +1283,12 @@ export function createPlanningRepository(db: Db) {
         resourcesByOperation.set(row.moOperationId, list);
       }
       const touched = new Set(touchedRows.map((row) => row.moOperationId));
+      const stamped = new Set(stampedRows.map((row) => row.moOperationId));
 
-      const plansByOperation = new Map<string, PlannedWeek[]>();
+      const plansByOperation = new Map<string, PlannedDay[]>();
       for (const row of planRows) {
         const list = plansByOperation.get(row.moOperationId) ?? [];
-        list.push({ monday: row.monday, minutes: Number(row.minutes) });
+        list.push({ date: row.date, minutes: Number(row.minutes) });
         plansByOperation.set(row.moOperationId, list);
       }
 
@@ -1286,6 +1305,7 @@ export function createPlanningRepository(db: Db) {
           capacityFactor: Number(r.capacityFactor),
           hoursPerDay: r.hoursPerDay === null ? null : Number(r.hoursPerDay),
           leadTimeDays: r.leadTimeDays === null ? null : Number(r.leadTimeDays),
+          queueTimeDays: r.queueTimeDays === null ? null : Number(r.queueTimeDays),
         })),
         productionGroups: groupRows,
         operations: operationRows.map((r) => ({
@@ -1296,10 +1316,14 @@ export function createPlanningRepository(db: Db) {
           quantityCompleted: r.quantityCompleted === null ? null : Number(r.quantityCompleted),
           quantityScrapped: Number(r.quantityScrapped),
           ...(timeOnResources.get(r.moOperationId) ?? NO_TIME),
-          plannedWeeks: plansByOperation.get(r.moOperationId) ?? null,
+          plannedDays: plansByOperation.get(r.moOperationId) ?? null,
           plannedAt: r.plannedAt === null ? null : r.plannedAt.toISOString(),
           ...(opts.resources
-            ? { resources: resourcesByOperation.get(r.moOperationId) ?? [], touched: touched.has(r.moOperationId) }
+            ? {
+                resources: resourcesByOperation.get(r.moOperationId) ?? [],
+                touched: touched.has(r.moOperationId),
+                stamped: stamped.has(r.moOperationId),
+              }
             : {}),
         })),
         weekScheduleDays: weekDayRows,
@@ -1312,6 +1336,7 @@ export function createPlanningRepository(db: Db) {
           }),
         })),
         holidays: holidayRows,
+        queueDays: leadTimeDefaults.queueDays,
       };
     },
 
@@ -1405,7 +1430,7 @@ export function createPlanningRepository(db: Db) {
         quantityCompleted: null,
         quantityScrapped: 0,
         ...NO_TIME,
-        plannedWeeks: null,
+        plannedDays: null,
       }));
     },
 
@@ -1427,51 +1452,92 @@ export function createPlanningRepository(db: Db) {
       return new Set(rows.map((r) => r.moOperationId));
     },
 
-    // The ONE writer of allocations: replaces each planned operation's weeks
+    async runPlanWorkCenter(tx: Tx, workCenterId: string) {
+      const [row] = await tx
+        .select({ id: workCenters.id, code: workCenters.code, type: workCenters.type })
+        .from(workCenters)
+        .where(eq(workCenters.id, workCenterId));
+      return row ?? null;
+    },
+
+    // Ordningen inom dagen (#18) — the resource's pending operations on open
+    // TO:s whose planned start day is `date`, locked FOR UPDATE in id order
+    // (the caller holds the production_plan lock; never the order row).
+    async lockRunPlanDayOperations(tx: Tx, workCenterId: string, date: string) {
+      const rows = await tx.execute<{ id: string; order_number: string; run_position: number | null }>(sql`
+        SELECT o.id, mo.order_number, o.run_position
+        FROM mo_operations o
+        JOIN manufacturing_orders mo ON mo.id = o.manufacturing_order_id
+        WHERE o.work_center_id = ${workCenterId}::uuid
+          AND o.status = 'pending'
+          AND o.planned_start_date = ${date}::date
+          AND mo.status IN ('released', 'in_progress')
+        ORDER BY o.id
+        FOR UPDATE OF o`);
+      return [...rows].map((r) => ({ id: r.id, orderNumber: r.order_number, runPosition: r.run_position }));
+    },
+
+    // run_position = 1..n in the given order, ONE statement.
+    async writeRunPositions(tx: Tx, moOperationIds: string[]): Promise<void> {
+      const values = sql.join(
+        moOperationIds.map((id, i) => sql`(${id}::uuid, ${i + 1}::integer)`),
+        sql`, `
+      );
+      await tx.execute(sql`
+        UPDATE ${moOperations} AS o SET run_position = v.position
+        FROM (VALUES ${values}) AS v(id, position)
+        WHERE o.id = v.id`);
+    },
+
+    // The ONE writer of allocations: replaces each planned operation's days
     // (DELETE + INSERT) and sets the mirror columns from the WRITTEN rows
-    // (start = first Monday, end = last) and planned_at; `clear` removes the
+    // (start = first day, end = last) and planned_at; `clear` removes the
     // allocation and the mirror — and the lock, which the CHECK forbids
     // without a plan (a cleared operation is done, lego, 0 minutes or beyond
     // the horizon, where a lock means nothing). The rows are stored with two
-    // decimals under CHECK minutes > 0, so the weeks are rounded here
-    // (`roundPlanWeeks`): a week that rounds to 0.00 is merged into its
+    // decimals under CHECK minutes > 0, so the days are rounded here
+    // (`roundPlanDays`): a day that rounds to 0.00 is merged into its
     // neighbour, and an operation left without rows is cleared instead —
     // whatever the engine or the reservation handed over, the write never
-    // breaks the CHECK. One statement per table (the mirror as one
-    // UPDATE … FROM (VALUES …) per batch) — this runs under the
-    // production_plan lock, one round trip per operation would hold it for
-    // every open TO. Runs inside the caller's transaction.
+    // breaks the CHECK. run_position (the order within the day, #18) is
+    // dropped HERE when the start day changes and kept when the operation
+    // lands on the same start day again; `clear` always drops it. One
+    // statement per table (the mirror as one UPDATE … FROM (VALUES …) per
+    // batch) — this runs under the production_plan lock, one round trip per
+    // operation would hold it for every open TO. Runs inside the caller's
+    // transaction.
     async writeOperationPlans(tx: Tx, write: { plans: OperationPlan[]; clear: string[]; plannedAt: Date }): Promise<void> {
-      const plans: { operationId: string; weeks: PlannedWeek[]; startWeek: string; endWeek: string }[] = [];
+      const plans: { operationId: string; days: PlannedDay[]; startDate: string; endDate: string }[] = [];
       const clear = new Set(write.clear);
       for (const p of write.plans) {
-        const weeks = roundPlanWeeks(p.weeks);
-        if (weeks.length === 0) clear.add(p.operationId);
-        else plans.push({ operationId: p.operationId, weeks, startWeek: weeks[0]!.monday, endWeek: weeks[weeks.length - 1]!.monday });
+        const days = roundPlanDays(p.days);
+        if (days.length === 0) clear.add(p.operationId);
+        else plans.push({ operationId: p.operationId, days, startDate: days[0]!.date, endDate: days[days.length - 1]!.date });
       }
       const touched = [...new Set([...plans.map((p) => p.operationId), ...clear])];
       if (touched.length === 0) return;
-      await tx.delete(moOperationPlanWeeks).where(inArray(moOperationPlanWeeks.moOperationId, touched));
+      await tx.delete(moOperationPlanDays).where(inArray(moOperationPlanDays.moOperationId, touched));
       const rows = plans.flatMap((p) =>
-        p.weeks.map((w) => ({ moOperationId: p.operationId, weekMonday: w.monday, minutes: w.minutes.toFixed(2) }))
+        p.days.map((d) => ({ moOperationId: p.operationId, planDate: d.date, minutes: d.minutes.toFixed(2) }))
       );
-      for (const batch of chunk(rows, WRITE_BATCH)) await tx.insert(moOperationPlanWeeks).values(batch);
+      for (const batch of chunk(rows, WRITE_BATCH)) await tx.insert(moOperationPlanDays).values(batch);
       for (const batch of chunk(plans, WRITE_BATCH)) {
         const values = sql.join(
-          batch.map((p) => sql`(${p.operationId}::uuid, ${p.startWeek}::date, ${p.endWeek}::date)`),
+          batch.map((p) => sql`(${p.operationId}::uuid, ${p.startDate}::date, ${p.endDate}::date)`),
           sql`, `
         );
         await tx.execute(sql`
           UPDATE ${moOperations} AS o
-          SET planned_start_week = v.start_week, planned_end_week = v.end_week, planned_at = ${write.plannedAt.toISOString()}::timestamptz
-          FROM (VALUES ${values}) AS v(id, start_week, end_week)
+          SET run_position = CASE WHEN o.planned_start_date IS DISTINCT FROM v.start_date THEN NULL ELSE o.run_position END,
+              planned_start_date = v.start_date, planned_end_date = v.end_date, planned_at = ${write.plannedAt.toISOString()}::timestamptz
+          FROM (VALUES ${values}) AS v(id, start_date, end_date)
           WHERE o.id = v.id
         `);
       }
       if (clear.size > 0) {
         await tx
           .update(moOperations)
-          .set({ plannedStartWeek: null, plannedEndWeek: null, planLocked: false, plannedAt: write.plannedAt })
+          .set({ plannedStartDate: null, plannedEndDate: null, runPosition: null, planLocked: false, plannedAt: write.plannedAt })
           .where(inArray(moOperations.id, [...clear]));
       }
     },
@@ -1490,8 +1556,8 @@ export function createPlanningRepository(db: Db) {
           operationStatus: moOperations.status,
           workCenterType: workCenters.type,
           workCenterCode: workCenters.code,
-          plannedStartWeek: moOperations.plannedStartWeek,
-          plannedEndWeek: moOperations.plannedEndWeek,
+          plannedStartDate: moOperations.plannedStartDate,
+          plannedEndDate: moOperations.plannedEndDate,
           planLocked: moOperations.planLocked,
         })
         .from(moOperations)
@@ -1507,8 +1573,8 @@ export function createPlanningRepository(db: Db) {
         .set({ planLocked: locked })
         .where(eq(moOperations.id, opId))
         .returning({
-          plannedStartWeek: moOperations.plannedStartWeek,
-          plannedEndWeek: moOperations.plannedEndWeek,
+          plannedStartDate: moOperations.plannedStartDate,
+          plannedEndDate: moOperations.plannedEndDate,
           planLocked: moOperations.planLocked,
         });
       return row ?? null;
@@ -1700,7 +1766,7 @@ export function createPlanningRepository(db: Db) {
       const rows = await tx
         .update(moOperations)
         .set({ planLocked: true })
-        .where(and(eq(moOperations.manufacturingOrderId, manufacturingOrderId), isNotNull(moOperations.plannedStartWeek)))
+        .where(and(eq(moOperations.manufacturingOrderId, manufacturingOrderId), isNotNull(moOperations.plannedStartDate)))
         .returning({ id: moOperations.id });
       return rows.length;
     },

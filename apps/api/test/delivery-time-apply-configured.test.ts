@@ -1,7 +1,11 @@
 import { createWorkCenterSchema } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
-import { db, moOperationPlanWeeks } from "@navet/db";
+import { eq, isNull } from "drizzle-orm";
+import { db, holidays, moOperationPlanDays, systemSettings } from "@navet/db";
+import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
+import { addWorkingDays } from "../src/modules/system/service/delivery-days.js";
+import { PLANNING_QUEUE_TIME_DAYS_KEY } from "../src/modules/system/service/plan-settings.js";
+import { createSystemService } from "../src/modules/system/service/system.service.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
@@ -14,10 +18,10 @@ import { parsed } from "./helpers/parsed.js";
 
 // Reservationen on a configured (beställningsvara) KO row: the TO goes the
 // createFromSalesOrderRow way inside the reservation's transaction — the
-// structure is derived from the row — and is planned in the weeks the check
+// structure is derived from the row — and is planned on the days the check
 // booked for the derived operations (10 and 20; the Kalkyl operation 30 is
 // never on a TO). The resources have no schedule, so every operation lands
-// whole in the floor's week.
+// whole on the floor day.
 
 // The configuration columns are untyped jsonb; read the stored key without a cast.
 function configurationKey(configuration: unknown): unknown {
@@ -25,12 +29,20 @@ function configurationKey(configuration: unknown): unknown {
   return configuration.key;
 }
 
+// system_settings is not truncated with the rest: the Standardkötid a test
+// sets must never reach the next test (or the next file on this worker).
+const clearQueueTime = () => db.delete(systemSettings).where(eq(systemSettings.key, PLANNING_QUEUE_TIME_DAYS_KEY));
+
 beforeEach(async () => {
   await resetConfiguredRows();
   await db.execute(CONFIGURED_MFG_TRUNCATE);
   await resetCostingSettings();
+  await clearQueueTime();
 });
-afterAll(resetConfiguredRows);
+afterAll(async () => {
+  await resetConfiguredRows();
+  await clearQueueTime();
+});
 
 // The manufacturing service as app.ts wires it for 4c + the plan reader.
 const planReaderRef: { current: ManufacturingPlanReader | null } = { current: null };
@@ -64,15 +76,15 @@ planReaderRef.current = planning;
 
 async function planRows(opId: string) {
   const rows = await db
-    .select({ monday: moOperationPlanWeeks.weekMonday, minutes: moOperationPlanWeeks.minutes })
-    .from(moOperationPlanWeeks)
-    .where(eq(moOperationPlanWeeks.moOperationId, opId))
-    .orderBy(moOperationPlanWeeks.weekMonday);
-  return rows.map((r) => ({ monday: r.monday, minutes: Number(r.minutes) }));
+    .select({ date: moOperationPlanDays.planDate, minutes: moOperationPlanDays.minutes })
+    .from(moOperationPlanDays)
+    .where(eq(moOperationPlanDays.moOperationId, opId))
+    .orderBy(moOperationPlanDays.planDate);
+  return rows.map((r) => ({ date: r.date, minutes: Number(r.minutes) }));
 }
 
 describe("reservationen — configured row", () => {
-  it("creates the row's configured TO with the check's weeks on the derived operations", async () => {
+  it("creates the row's configured TO with the check's days on the derived operations", async () => {
     const user = await makeUser();
     const { order, row } = await confirmedRow(2);
     const check = await planning.checkDeliveryTime({ salesOrderId: order.id });
@@ -82,8 +94,8 @@ describe("reservationen — configured row", () => {
     expect(batch).toMatchObject({ level: 1, rowKey: row.id, quantity: 2 });
     expect(batch.operations.map((o) => o.sequenceNo)).toEqual([10, 20]);
     // Op 10: setup 6 + 2 × 3 = 12 min; op 20 (LOCK B): 2 × 4 = 8 min, both
-    // whole in one week (no schedule = unlimited).
-    expect(batch.operations.map((o) => o.weeks.map((w) => w.minutes))).toEqual([[12], [8]]);
+    // whole on one day (no schedule = unlimited).
+    expect(batch.operations.map((o) => o.days.map((d) => d.minutes))).toEqual([[12], [8]]);
 
     const applied = await planning.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate! }, user.id);
     expect(applied.manufacturingOrders).toEqual([
@@ -102,11 +114,11 @@ describe("reservationen — configured row", () => {
     expect(configurationKey(mo.configuration)).toBe(configurationKey(row.configuration));
     const ops = await mfg.listOperations(mo.id);
     expect(ops.map((o) => o.sequenceNo)).toEqual([10, 20]);
-    expect(await planRows(ops[0]!.id)).toEqual(batch.operations[0]!.weeks);
-    expect(await planRows(ops[1]!.id)).toEqual(batch.operations[1]!.weeks);
+    expect(await planRows(ops[0]!.id)).toEqual(batch.operations[0]!.days);
+    expect(await planRows(ops[1]!.id)).toEqual(batch.operations[1]!.days);
     const after = await salesService.getSalesOrder(order.id);
     expect(after).toMatchObject({ status: "in_production", expectedDeliveryDate: check.deliveryDate });
-    // The promised weeks are locked.
+    // The promised days are locked.
     expect(ops.map((o) => o.planLocked)).toEqual([true, true]);
 
     // The row now has its TO: the next check nets it (the same rule as
@@ -126,6 +138,39 @@ describe("reservationen — configured row", () => {
     expect(await mfg.coverageForSalesOrderRows([row.id])).toEqual(new Map([[row.id, expect.objectContaining({ quantity: 2 })]]));
   });
 
+  it("with a Standardkötid the derived operations wait it, the TO gets the check's days, and the next check reads the TO ready the same day (#18)", async () => {
+    const user = await makeUser();
+    const { order, row } = await confirmedRow(2);
+    const without = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    await createSystemService(createSystemRepository(db)).updateSettings({ planningQueueTimeDays: 1 });
+    const check = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    const [op10, op20] = check.batches[0]!.operations;
+    // "Today" is the real day here: the dates are read relative to Op 10's.
+    const offDays = new Set((await db.select({ date: holidays.date }).from(holidays).where(isNull(holidays.dayScheduleId))).map((h) => h.date));
+    const first = op10!.days[0]!.date;
+    expect(without.batches[0]!.operations[1]!.days.map((d) => d.date)).toEqual([addWorkingDays(first, 1, offDays)]);
+    // The working day after Op 10 is ready, plus the day's queue.
+    expect(op20!.days.map((d) => d.date)).toEqual([addWorkingDays(first, 2, offDays)]);
+    expect(check.rows[0]!.readyDate).toBe(op20!.days[0]!.date);
+    expect(check.shipDate).toBe(addWorkingDays(first, 3, offDays));
+
+    const applied = await planning.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, user.id);
+    const moId = applied.manufacturingOrders[0]!.id;
+    const ops = await mfg.listOperations(moId);
+    expect(await planRows(ops[0]!.id)).toEqual(op10!.days);
+    expect(await planRows(ops[1]!.id)).toEqual(op20!.days);
+    expect(ops.map((o) => o.planLocked)).toEqual([true, true]);
+    expect((await planning.orderPlanSummaries([moId])).get(moId)).toMatchObject({ plannedFinish: check.rows[0]!.readyDate, late: false });
+
+    // The row's TO is its supply now, ready on its planned finish — the
+    // same day, so the promised date stands.
+    const again = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    expect(again.batches).toEqual([]);
+    expect(again.rows[0]).toMatchObject({ readyDate: check.rows[0]!.readyDate, notes: [] });
+    expect(again).toMatchObject({ shipDate: check.shipDate, deliveryDate: check.deliveryDate });
+    expect(row.id).toBe(check.batches[0]!.rowKey);
+  });
+
   it("rounds the batch up to the template's step and answers with the TO's own quantity", async () => {
     const user = await makeUser();
     const { s, order, row } = await confirmedRow(2);
@@ -136,7 +181,7 @@ describe("reservationen — configured row", () => {
     expect(check.rows[0]).toMatchObject({ quantity: 2 });
     expect(check.batches[0]).toMatchObject({ rowKey: row.id, quantity: 5 });
     // The structure is derived for the batch: op 10 is 6 + 5 × 3 = 21 min.
-    expect(check.batches[0]!.operations[0]!.weeks.map((w) => w.minutes)).toEqual([21]);
+    expect(check.batches[0]!.operations[0]!.days.map((d) => d.minutes)).toEqual([21]);
 
     const applied = await planning.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, user.id);
     expect(applied.manufacturingOrders[0]).toMatchObject({ quantity: 5, salesOrderRowId: row.id });
@@ -145,7 +190,7 @@ describe("reservationen — configured row", () => {
     expect(applied.warnings).toContain(`${mo.orderNumber}: Skruv: behöver 40, tillgängligt 0`);
     // The plan written is the check's (21 minutes), not a re-plan.
     const ops = await mfg.listOperations(mo.id);
-    expect(await planRows(ops[0]!.id)).toEqual(check.batches[0]!.operations[0]!.weeks);
+    expect(await planRows(ops[0]!.id)).toEqual(check.batches[0]!.operations[0]!.days);
   });
 
   it("locks every KO row before the first TO: a row edit during the reservation waits instead of deadlocking", async () => {
@@ -260,10 +305,12 @@ describe("reservationen — configured row on an alternative resource", () => {
     await pinnedMfg.createManufacturingOrder({ articleId: filler.id, quantity: 1 }, user.id);
 
     const check = await pinned.checkDeliveryTime({ salesOrderId: order.id });
-    // Op 10 (12 min) on 640 this week instead of 610 next week.
-    expect(check).toMatchObject({ usesAlternatives: true, deliveryDate: "2030-03-11", ordinaryDeliveryDate: "2030-03-18" });
+    // Op 10 (12 min) on 640 today instead of 610 next Monday; op 20 the
+    // working day after, shipped the day after that. (Before #18 the dates
+    // were the Mondays after each week's Friday: 03-11 and 03-18.)
+    expect(check).toMatchObject({ usesAlternatives: true, deliveryDate: "2030-03-06", ordinaryDeliveryDate: "2030-03-13" });
     const op10 = check.rows[0]!.chain.find((step) => step.kind === "operation" && step.sequenceNo === 10);
-    expect(op10).toMatchObject({ workCenterCode: "640", alternativeOf: { workCenterCode: "610", toWeek: "2030-03-11" } });
+    expect(op10).toMatchObject({ workCenterCode: "640", fromDate: "2030-03-04", toDate: "2030-03-04", alternativeOf: { workCenterCode: "610", toDate: "2030-03-11" } });
     expect(check.batches[0]!.operations.map((o) => [o.sequenceNo, o.workCenterId])).toEqual([
       [10, alt.id],
       [20, s.wc20.id],
@@ -281,6 +328,6 @@ describe("reservationen — configured row on an alternative resource", () => {
       [10, alt.id, true, true],
       [20, s.wc20.id, false, true],
     ]);
-    expect(await planRows(ops[0]!.id)).toEqual(check.batches[0]!.operations[0]!.weeks);
+    expect(await planRows(ops[0]!.id)).toEqual(check.batches[0]!.operations[0]!.days);
   });
 });

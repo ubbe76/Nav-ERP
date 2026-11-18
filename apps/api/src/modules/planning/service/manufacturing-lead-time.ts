@@ -7,8 +7,29 @@
 //
 // All dates are Stockholm days (YYYY-MM-DD) and lead times count WORKING
 // days (delivery-days.ts).
+//
+// This file is the ROOT of the planning rules' imports (capacity-calc.ts and
+// capacity-book.ts build on it, never the other way round): the day-rounding
+// of the queue time (queueGapDays) is read by the capacity book's floor
+// (nextOperationFloor) and by the lead time below, so the plan and the lead
+// time can never round differently (#18, beslut 2).
 import { addWorkingDays, nextWorkingDayOnOrAfter, subtractWorkingDays } from "../../system/service/delivery-days.js";
-import { routingOperationMinutes } from "./capacity-calc.js";
+
+// The smallest time that is an operation at all: the plan stores minutes
+// with two decimals under CHECK minutes > 0, so anything under a hundredth
+// of a minute is never placed (capacity-book.ts re-exports the constant and
+// explains the booking side). An operation under it takes no day and waits
+// for no queue — in the book and in the lead time alike (#18, S7).
+export const MIN_PLAN_MINUTES = 0.01;
+
+// The work in MINUTES a routing operation takes for a quantity that has not
+// been started yet (setup once, run time per unit). Leveranstidskontrollen
+// and the manufacturing lead time share this one formula so a proposal's
+// lead time and the check's capacity need never disagree. (Re-exported by
+// capacity-calc.ts, where its other readers import it.)
+export function routingOperationMinutes(op: { setupTime: number; runTimePerUnit: number }, quantity: number): number {
+  return op.setupTime + op.runTimePerUnit * quantity;
+}
 
 // The resource as the lead time sees it. `type` decides the rule: our own
 // resource turns minutes into days through its hours per day, a subcontract
@@ -41,8 +62,10 @@ export interface LeadTimeWork {
 // - `queueDays`: waiting time added BETWEEN consecutive operations (not
 //   before the first or after the last) when the lead time comes from the
 //   operations.
-// Neither touches Planera or Leveranstidskontrollen's capacity book — they
-// only move the lead time and thereby the start date.
+// The Standardledtid only moves the lead time. The Standardkötid is ALSO the
+// capacity book's wait between operations (nextOperationFloor, #18) — the
+// plan and the lead time count the same queue, rounded the same way
+// (queueGapDays).
 export interface LeadTimeDefaults {
   defaultLeadDays: number;
   queueDays: number;
@@ -62,25 +85,62 @@ function workDays(w: LeadTimeWork): number {
   return hours > 0 ? w.minutes / (hours * 60) : w.minutes / (DEFAULT_HOURS_PER_DAY * 60);
 }
 
-// The remaining operations' summed time plus the queue time between them,
-// rounded UP to whole working days — a TO that needs 1.1 days of work cannot
-// start the day before it is due. The rounding happens on the SUM (time +
-// queues), never per operation. Reported-done operations are skipped: they
-// take no time and no queue is waited for them, so a partly reported TO has
-// max(0, remaining − 1) queues. No remaining operations ⇒ 0. toFixed(6)
-// guards float noise (2.0000000000000004) from ceiling into an extra day.
+// toFixed(6) guards float noise (2.0000000000000004, 0.1 × 3) from ceiling
+// into an extra day — the ONE day-rounding of the lead time, the queue time
+// and the capacity book's lego days.
+export function ceilDays(days: number): number {
+  return Math.ceil(Number(days.toFixed(6)));
+}
+
+// The wait before the operation after gap `gapIndex` (1 = between the first
+// and the second remaining operation), in whole working days. A decimal
+// Standardkötid is rounded UP on the order's ACCUMULATED sum (#18, S4):
+// ceil(k × q) − ceil((k − 1) × q). Three gaps of 0.5 day are 1 + 0 + 1 = 2
+// days, exactly what the lead time counts for them (ceil(3 × 0.5)) — a
+// rounding per gap would give 3. The gaps 1..n always sum to ceil(n × q).
+export function queueGapDays(gapIndex: number, queueDays: number): number {
+  const q = Math.max(0, queueDays);
+  if (gapIndex < 1 || q === 0) return 0;
+  return ceilDays(gapIndex * q) - ceilDays((gapIndex - 1) * q);
+}
+
+// Does the operation count in the chain: a lego operation always (the
+// supplier's time), an own one only with time left (S7). Reported-done
+// operations never.
+const inChain = (w: LeadTimeWork) => !w.done && (w.resource?.type === "subcontract" || w.minutes >= MIN_PLAN_MINUTES);
+
+// Whole working days ONE remaining operation takes, as the capacity book
+// places it on an empty resource (#18, S5/S6): an own operation at least one
+// whole day (ceil per operation — the next operation starts the working day
+// after, so a 0.1-day operation still uses up its day). A lego operation
+// takes the day it is SENT plus the supplier's Ledtid + Kötid rounded up —
+// 1 + ceil(L + Q): the book sends it on its floor, has it back that many
+// working days later, and starts the next operation the working day after
+// it is back. L = Q = 0 is one day, like an own operation of a day.
+function operationDays(w: LeadTimeWork): number {
+  const days = ceilDays(Math.max(workDays(w), 0));
+  return w.resource?.type === "subcontract" ? 1 + days : Math.max(1, days);
+}
+
+// The remaining operations' days plus the queue time between them — counted
+// like the capacity book (#18, S5–S7; the property test "bok = ledtid" in
+// production-plan.test.ts): every remaining own operation with time takes
+// at least one whole day, a lego operation 1 + its Ledtid + Kötid rounded up,
+// and the Standardkötid between the n operations that count is
+// ceil((n − 1) × q) — the sum of their queueGapDays. Reported-done
+// operations and operations without time are skipped: they take no day and
+// no queue is waited for them. Nothing remaining ⇒ 0.
 export function leadDaysFromWork(work: readonly LeadTimeWork[], queueDays = 0): number {
-  const remaining = work.filter((w) => !w.done);
-  const days = remaining.reduce((sum, w) => sum + Math.max(workDays(w), 0), 0);
-  const queues = Math.max(0, remaining.length - 1) * Math.max(0, queueDays);
-  return Math.ceil(Number((days + queues).toFixed(6)));
+  const remaining = work.filter(inChain);
+  const days = remaining.reduce((sum, w) => sum + operationDays(w), 0);
+  return days + ceilDays(Math.max(0, remaining.length - 1) * Math.max(0, queueDays));
 }
 
 // The article's lead time in working days, in this order:
 // 1. the field Ledtid (dagar) (articles.manufacturing_lead_time_days) WINS
 //    when set — a total throughput time independent of quantity;
-// 2. the operations (a routing, or an existing TO's own operations) without
-//    capacity, plus the Standardkötid between them (leadDaysFromWork);
+// 2. the operations (a routing, or an existing TO's own operations) on an
+//    empty resource, plus the Standardkötid between them (leadDaysFromWork);
 // 3. no operations at all — the article has no routing, or a planned TO
 //    with no snapshot of an article without one — ⇒ the Standardledtid,
 //    rounded up to whole days like the field;
@@ -114,30 +174,31 @@ export function routingLeadWork(
 // When an existing TO starts (its material need date). The base is the due
 // date minus the lead time in working days — the latest start that still
 // finishes in time, the same rule the proposals use. The production plan's
-// weeks only win when the plan is binding or later:
+// days only win when the plan is binding or later:
 // - `planFixed` (an operation is locked by a move, or already reported on):
-//   the Monday of the earliest planned week — the work is under way or was
-//   placed by hand, so that is when the material is used;
-// - a planned week LATER than the base (overload pushed the work back): the
-//   material is not needed before the work can start.
-// An earlier planned week is ignored on purpose (user decision 2026-11-01):
+//   the earliest planned day — the work is under way or was placed by hand,
+//   so that is when the material is used;
+// - a planned day LATER than the base (overload pushed the work back): the
+//   material is not needed before the work can start. The comparison is per
+//   day (#18): two days of overload move the material date two days.
+// An earlier planned day is ignored on purpose (user decision 2026-11-01):
 // Planera fills free capacity forward from today, so almost every new TO is
-// planned for the current week however far off its due date is, and
-// following that would make nearly every purchased component urgent.
-// Without a due date the planned week is all there is; without either, null
+// planned from today however far off its due date is, and following that
+// would make nearly every purchased component urgent.
+// Without a due date the planned day is all there is; without either, null
 // (an undated TO — as before). Shared by the article overview, the
 // behovsberäkning and the färdigdatumsförslag, so a component's need never
 // sits on a different day in one of them.
 export function moStartDate(i: {
-  plannedStartWeeks: readonly (string | null | undefined)[]; // mo_operations.planned_start_week (Mondays)
+  plannedStartDates: readonly (string | null | undefined)[]; // mo_operations.planned_start_date
   planFixed: boolean;
   dueDate: string | null;
   leadDays: number;
   offDays: ReadonlySet<string>;
 }): string | null {
   let earliest: string | null = null;
-  for (const week of i.plannedStartWeeks) {
-    if (week && (earliest === null || week < earliest)) earliest = week;
+  for (const date of i.plannedStartDates) {
+    if (date && (earliest === null || date < earliest)) earliest = date;
   }
   const base = i.dueDate === null ? null : subtractWorkingDays(i.dueDate, Math.max(0, i.leadDays), i.offDays);
   if (earliest === null) return base;
@@ -146,7 +207,7 @@ export function moStartDate(i: {
 }
 
 // Lego (subcontract) operations are never placed on capacity (Planera clears
-// their weeks), so their dates come BACKWARD from the TO's färdigdatum
+// their plan), so their dates come BACKWARD from the TO's färdigdatum
 // (user decision 2026-11-04):
 // - `finishDate`: when the goods must be back from the supplier — the due
 //   date minus the operations after the lego operation (their time without
@@ -156,9 +217,15 @@ export function moStartDate(i: {
 // - `startDate`: when the goods must be AT the supplier — the finish minus
 //   the resource's Ledtid + Kötid. The behovsberäkning's need date of the
 //   lego row (its latest-order date is this minus Ledtid beställning).
-// Rounded up on the sums (after, after + lego) like leadDaysFromWork, so the
-// two dates never drift apart by a rounding. Done operations after it take
-// no time and no queue. The article's field Ledtid (dagar) is a throughput
+// The operations after it are counted with leadDaysFromWork's own rule (#18:
+// at least a day per own operation with time, a later lego operation
+// 1 + its days, the queue rounded up on its sum), and the lego days are
+// whole (S6) — the two dates are the capacity book's walk read backward:
+// the goods are back (`finishDate`) the working day before the next
+// operation starts, and were sent (`startDate`) ceil(Ledtid + Kötid) working
+// days before that. Together the sent day and those days are the 1 + ceil
+// the lead time counts for the operation. Done operations
+// and operations without time after it take no day and no queue. The article's field Ledtid (dagar) is a throughput
 // time for the whole TO and does not say where a single operation sits, so
 // it is not read here. Without a due date the TO's start (moStartDate,
 // `fallbackStart`) is the start and the finish follows it by the lego days;
@@ -176,17 +243,19 @@ export function legoOperationDates(i: {
   queueDays: number;
   offDays: ReadonlySet<string>;
 }): LegoOperationDates {
-  const legoDays = Math.max(legoWorkDays(i.lego), 0);
+  const legoDays = ceilDays(Math.max(legoWorkDays(i.lego), 0));
   if (i.dueDate === null) {
     if (i.fallbackStart === null) return { startDate: null, finishDate: null };
-    return { startDate: i.fallbackStart, finishDate: addWorkingDays(i.fallbackStart, ceilDays(legoDays), i.offDays) };
+    return { startDate: i.fallbackStart, finishDate: addWorkingDays(i.fallbackStart, legoDays, i.offDays) };
   }
-  const remaining = i.after.filter((w) => !w.done);
+  // One queue before EACH operation after the lego one (the lego operation
+  // itself is the one before the first of them).
+  const remaining = i.after.filter(inChain);
   const afterDays =
-    remaining.reduce((sum, w) => sum + Math.max(workDays(w), 0), 0) + remaining.length * Math.max(0, i.queueDays);
+    remaining.reduce((sum, w) => sum + operationDays(w), 0) + ceilDays(remaining.length * Math.max(0, i.queueDays));
   return {
-    finishDate: subtractWorkingDays(i.dueDate, ceilDays(afterDays), i.offDays),
-    startDate: subtractWorkingDays(i.dueDate, ceilDays(afterDays + legoDays), i.offDays),
+    finishDate: subtractWorkingDays(i.dueDate, afterDays, i.offDays),
+    startDate: subtractWorkingDays(i.dueDate, afterDays + legoDays, i.offDays),
   };
 }
 
@@ -211,9 +280,4 @@ export function legoReturnDate(i: {
 
 function legoWorkDays(resource: LeadTimeResource | null): number {
   return workDays({ minutes: 0, resource: resource ?? { type: "subcontract", hoursPerDay: null, leadTimeDays: null, queueTimeDays: null } });
-}
-
-// toFixed(6): the same float-noise guard as leadDaysFromWork.
-function ceilDays(days: number): number {
-  return Math.ceil(Number(days.toFixed(6)));
 }

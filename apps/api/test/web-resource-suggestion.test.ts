@@ -6,27 +6,27 @@ import {
   suggestionText,
 } from "../../web/lib/resourceSuggestion.js";
 
-// Mondays: 2026-11-16 = v.47, 2026-11-30 = v.49.
+// Days: 2026-11-16 = 16 nov, 2026-11-30 = 30 nov.
 describe("resourceSuggestion texts", () => {
-  it("names both weeks when the operation is planned on the full resource", () => {
-    expect(suggestionText({ code: "120", toWeek: "2026-11-16", currentToWeek: "2026-11-30", reason: "overloaded" })).toBe(
-      "Kan bli klar v.47 på 120 (i stället för v.49)"
+  it("names both days when the operation is planned on the full resource", () => {
+    expect(suggestionText({ code: "120", toDate: "2026-11-16", currentToDate: "2026-11-30", reason: "overloaded" })).toBe(
+      "Kan bli klar 16 nov på 120 (i stället för 30 nov)"
     );
   });
 
   it("uses its own wording when the current resource has no plan", () => {
-    expect(suggestionText({ code: "120", toWeek: "2026-11-16", currentToWeek: null, reason: "unplanned" })).toBe(
-      "Kan planeras klar v.47 på 120 (saknar plan på nuvarande resurs)"
+    expect(suggestionText({ code: "120", toDate: "2026-11-16", currentToDate: null, reason: "unplanned" })).toBe(
+      "Kan planeras klar 16 nov på 120 (saknar plan på nuvarande resurs)"
     );
   });
 
-  it("shifts as from → to on codes and weeks", () => {
+  it("shifts as from → to on codes and days", () => {
     expect(
-      suggestionShift({ fromCode: "110", code: "120", toWeek: "2026-11-16", currentToWeek: "2026-11-30", reason: "overloaded" })
-    ).toBe("110 → 120, v.49 → v.47");
+      suggestionShift({ fromCode: "110", code: "120", toDate: "2026-11-16", currentToDate: "2026-11-30", reason: "overloaded" })
+    ).toBe("110 → 120, 30 nov → 16 nov");
     expect(
-      suggestionShift({ fromCode: "110", code: "120", toWeek: "2026-11-16", currentToWeek: null, reason: "unplanned" })
-    ).toBe("110 → 120, v.47");
+      suggestionShift({ fromCode: "110", code: "120", toDate: "2026-11-16", currentToDate: null, reason: "unplanned" })
+    ).toBe("110 → 120, 16 nov");
   });
 
   it("counts", () => {

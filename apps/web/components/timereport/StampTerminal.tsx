@@ -38,7 +38,7 @@ import {
   splitSelection,
   type TerminalSort,
 } from "../../lib/terminalOperations";
-import { plannedWeekLabel } from "../../lib/planning";
+import { plannedDateLabel } from "../../lib/planning";
 import { formatElapsed, formatQuantity, operationProgress, type OperationProgress } from "../../lib/stampSessions";
 import { formatHours } from "./SchedulesPageClient";
 import styles from "./StampTerminal.module.css";
@@ -1908,7 +1908,7 @@ function OperationListView({
           value={sort}
           onChange={onSort}
           options={[
-            { value: "planned", label: "Planerad vecka" },
+            { value: "planned", label: "Planerad dag" },
             { value: "urgent", label: "Brådskande" },
             { value: "material", label: "Material" },
           ]}
@@ -1974,9 +1974,9 @@ function OperationListView({
                         {overdue && <span className={styles.visuallyHidden}> Försenad</span>}
                       </span>
                     )}
-                    {plannedWeekLabel(op.plannedStartWeek, op.plannedEndWeek) && (
+                    {plannedDateLabel(op.plannedStartDate, op.plannedEndDate) && (
                       <span className={styles.dueDate}>
-                        Planerad <span className="num">{plannedWeekLabel(op.plannedStartWeek, op.plannedEndWeek)}</span>
+                        Planerad <span className="num">{plannedDateLabel(op.plannedStartDate, op.plannedEndDate)}</span>
                       </span>
                     )}
                     {stamped && <span className={styles.choiceSecondary}>Du är instämplad</span>}

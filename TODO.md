@@ -83,7 +83,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Låg
 
 - [ ] **Planering och beställningspunkt per lager** (vid behov, senare — användarens beslut 2026-11-07) → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
-- [ ] **Detaljplanering per dag eller timme och köberäkning** (medvetet utanför v1) → [#18](https://github.com/ubbe76/Nav-ERP/issues/18) *(hemsidan)*
 
 ### Medvetet utanför
 

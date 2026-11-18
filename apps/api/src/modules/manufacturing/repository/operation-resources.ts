@@ -100,9 +100,11 @@ export interface ResourceSwitch {
 // EN skrivare av bytet: sets the resource and the target row's times on
 // each operation, conditioned on its current resource and on the target
 // being one of its rows, and sets resource_locked. plan_locked is cleared —
-// the weeks were booked on the old resource; the caller's plan writer
-// writes the new weeks afterwards (Ändra's replanOrderInTx, the
-// reservation's planned weeks). Returns the ids actually switched. The
+// the days were booked on the old resource; the caller's plan writer
+// writes the new days afterwards (Ändra's replanOrderInTx, the
+// reservation's planned days). run_position (the place within the day in
+// the körplan, #18) is dropped: it is a place on the OLD resource's day.
+// Returns the ids actually switched. The
 // caller holds the operations' row locks (Ändra: lockOrderOperations); the
 // target resources are locked FOR SHARE after them (sorted, like the
 // snapshot), so a type change to lego cannot slip in under the switch.
@@ -131,7 +133,8 @@ export async function switchOperationResourcesInTx(tx: Tx, switches: ResourceSwi
           setup_time = r.setup_time,
           run_time_per_unit = r.run_time_per_unit,
           resource_locked = v.locked,
-          plan_locked = false
+          plan_locked = false,
+          run_position = CASE WHEN o.work_center_id IS DISTINCT FROM r.work_center_id THEN NULL ELSE o.run_position END
       FROM (VALUES ${values}) AS v(id, from_wc, to_wc, locked)
       JOIN mo_operation_resources r ON r.mo_operation_id = v.id AND r.work_center_id = v.to_wc
       WHERE o.id = v.id AND o.work_center_id = v.from_wc

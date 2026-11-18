@@ -5,7 +5,8 @@ import { planningRoutes } from "../src/modules/planning/routes/planning.routes.j
 import {
   OperationNotFoundError,
   OperationNotPlannableError,
-  PlanWeekInPastError,
+  PlanDateInPastError,
+  PlanDateNoCapacityError,
   type PlanningService,
 } from "../src/modules/planning/service/planning.service.js";
 
@@ -34,7 +35,7 @@ function buildApp(fake: Fake) {
 
 const USER = crypto.randomUUID();
 const id = () => crypto.randomUUID();
-const weeks = { plannedStartWeek: "2030-03-11", plannedEndWeek: "2030-03-18", planLocked: true };
+const dates = { plannedStartDate: "2030-03-13", plannedEndDate: "2030-03-18", planLocked: true };
 
 describe("POST /planning/plan", () => {
   it("200s with the run and the user — the förslag på resurs ride along (#15)", async () => {
@@ -54,8 +55,8 @@ describe("POST /planning/plan", () => {
           toWorkCenterId: id(),
           toCode: "120",
           toName: "Kantpress 2",
-          currentToWeek: "2030-03-25",
-          toWeek: "2030-03-11",
+          currentToDate: "2030-03-25",
+          toDate: "2030-03-13",
           reason: "overloaded" as const,
         },
       ],
@@ -73,16 +74,16 @@ describe("POST /planning/plan", () => {
 });
 
 describe("POST /planning/operations/:opId/move", () => {
-  it("200s, defaults moveFollowing to true and passes the week through", async () => {
+  it("200s, defaults moveFollowing to true and passes the day through", async () => {
     const opId = id();
-    const result = { operation: weeks, following: [], warnings: [] };
+    const result = { operation: dates, following: [], warnings: [] };
     const app = buildApp({
       moveOperation: async (op, input, userId) => {
-        expect([op, input, userId]).toEqual([opId, { weekMonday: "2030-03-11", moveFollowing: true }, USER]);
+        expect([op, input, userId]).toEqual([opId, { date: "2030-03-13", moveFollowing: true }, USER]);
         return result;
       },
     });
-    const res = await app.inject({ method: "POST", url: `/planning/operations/${opId}/move`, payload: { weekMonday: "2030-03-11" } });
+    const res = await app.inject({ method: "POST", url: `/planning/operations/${opId}/move`, payload: { date: "2030-03-13" } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual(result);
   });
@@ -90,24 +91,24 @@ describe("POST /planning/operations/:opId/move", () => {
   it("passes moveFollowing: false through", async () => {
     const app = buildApp({
       moveOperation: async (_op, input) => {
-        expect(input).toEqual({ weekMonday: "2030-03-11", moveFollowing: false });
-        return { operation: weeks, following: [], warnings: [] };
+        expect(input).toEqual({ date: "2030-03-13", moveFollowing: false });
+        return { operation: dates, following: [], warnings: [] };
       },
     });
     const res = await app.inject({
       method: "POST",
       url: `/planning/operations/${id()}/move`,
-      payload: { weekMonday: "2030-03-11", moveFollowing: false },
+      payload: { date: "2030-03-13", moveFollowing: false },
     });
     expect(res.statusCode).toBe(200);
   });
 
   it.each([
     {},
-    { weekMonday: "2030-03-12" }, // a Wednesday
-    { weekMonday: "2030-03-11", moveFollowing: "yes" },
-    { weekMonday: "nope" },
-    { weekMonday: "0001-01-01" },
+    { weekMonday: "2030-03-11" }, // the week-based body is gone (#18)
+    { date: "2030-03-13", moveFollowing: "yes" },
+    { date: "nope" },
+    { date: "0001-01-01" },
   ])("400s %o", async (payload) => {
     const app = buildApp({
       moveOperation: async () => {
@@ -122,14 +123,15 @@ describe("POST /planning/operations/:opId/move", () => {
     [new OperationNotFoundError("x"), 404, "operation-not-found"],
     [new OperationNotPlannableError("done"), 409, "operation-not-plannable"],
     [new OperationNotPlannableError("subcontract"), 409, "operation-not-plannable"],
-    [new PlanWeekInPastError("2030-02-25", "2030-03-04"), 400, "plan-week-in-past"],
+    [new PlanDateInPastError("2030-03-01", "2030-03-04"), 400, "plan-date-in-past"],
+    [new PlanDateNoCapacityError("2030-03-09", "110"), 409, "plan-date-no-capacity"],
   ] as const)("maps %s", async (error, status, code) => {
     const app = buildApp({
       moveOperation: async () => {
         throw error;
       },
     });
-    const res = await app.inject({ method: "POST", url: `/planning/operations/${id()}/move`, payload: { weekMonday: "2030-03-11" } });
+    const res = await app.inject({ method: "POST", url: `/planning/operations/${id()}/move`, payload: { date: "2030-03-13" } });
     expect(res.statusCode).toBe(status);
     expect(res.json().code).toBe(code);
   });
@@ -141,12 +143,12 @@ describe("POST /planning/operations/:opId/unlock", () => {
     const app = buildApp({
       unlockOperation: async (op, userId) => {
         expect([op, userId]).toEqual([opId, USER]);
-        return { operation: { ...weeks, planLocked: false } };
+        return { operation: { ...dates, planLocked: false } };
       },
     });
     const res = await app.inject({ method: "POST", url: `/planning/operations/${opId}/unlock` });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ operation: { ...weeks, planLocked: false } });
+    expect(res.json()).toEqual({ operation: { ...dates, planLocked: false } });
   });
 
   it("404s an unknown operation", async () => {

@@ -16,7 +16,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { and, eq, sql } from "drizzle-orm";
 import { ZodError } from "zod";
-import { auditLog, db, exchangeRates, manufacturingOrders, moOperationPlanWeeks, moOperations, purchaseOrders } from "@navet/db";
+import { auditLog, db, exchangeRates, manufacturingOrders, moOperationPlanDays, moOperations, purchaseOrders } from "@navet/db";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
 import { parsed } from "./helpers/parsed.js";
 import { CONFIGURED_MFG_TRUNCATE, confirmedRow, mfg as configuredMfg, resetCostingSettings } from "./helpers/configured-manufacturing.js";
@@ -42,7 +42,7 @@ import { planMissingComponents, type MissingArticle } from "../src/modules/plann
 import {
   createPlanningService,
   legoPriceConverter,
-  PlanWeekNoCapacityError,
+  PlanDateNoCapacityError,
   STALE_PROPOSAL_MESSAGE,
   type ManufacturingPlanReader,
   type PlanningService,
@@ -67,7 +67,7 @@ import { createScheduleService } from "../src/modules/timereport/service/schedul
 // Planeringsgranskningen 2026-11-10: the proposal key and the serialized
 // Skapa ordrar, lego prices in kronor against an order / an inquiry in
 // another currency, Skapa saknade halvfabrikat against the FIRM balance and
-// inactive articles, the cache drops, the `kind` filter, Flytta to a week
+// inactive articles, the cache drops, the `kind` filter, Flytta to a day
 // without capacity and the partly received TO of a configured row.
 //
 // Two clocks: the purchase side reads today's rate (stockholmToday), so the
@@ -169,7 +169,7 @@ const pinnedPlanning = buildPinnedPlanning(0);
 planReaderRef.current = pinnedPlanning;
 
 const TABLES = sql`TRUNCATE audit_log, email_log, exchange_rates, article_forecasts, inquiry_rows, inquiries, purchase_receipts,
-  mo_report_materials, mo_reports, purchase_order_rows, purchase_orders, article_suppliers, suppliers, mo_operation_plan_weeks,
+  mo_report_materials, mo_reports, purchase_order_rows, purchase_orders, article_suppliers, suppliers, mo_operation_plan_days,
   mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, sales_order_rows, sales_orders, customers,
   routing_operations, work_centers, production_groups, holidays, week_schedule_days, week_schedules, day_schedule_breaks,
   day_schedules, stock_transactions, stock_locations, warehouses, bom_components, configurator_templates, articles, users CASCADE`;
@@ -914,59 +914,71 @@ describe("7 — filtret kind på GET /planning/requirements", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 8. Flytta to a week without capacity
+// 8. Flytta to a day without capacity
 // ---------------------------------------------------------------------------
 
-describe("8 — Flytta till en vecka utan kapacitet", () => {
+describe("8 — Flytta till en dag utan kapacitet", () => {
   const planRows = async (opId: string) =>
     (
       await db
-        .select({ monday: moOperationPlanWeeks.weekMonday, minutes: moOperationPlanWeeks.minutes })
-        .from(moOperationPlanWeeks)
-        .where(eq(moOperationPlanWeeks.moOperationId, opId))
-        .orderBy(moOperationPlanWeeks.weekMonday)
-    ).map((r) => ({ monday: r.monday, minutes: Number(r.minutes) }));
+        .select({ date: moOperationPlanDays.planDate, minutes: moOperationPlanDays.minutes })
+        .from(moOperationPlanDays)
+        .where(eq(moOperationPlanDays.moOperationId, opId))
+        .orderBy(moOperationPlanDays.planDate)
+    ).map((r) => ({ date: r.date, minutes: Number(r.minutes) }));
   const opRow = async (opId: string) => {
     const [row] = await db
-      .select({ plannedStartWeek: moOperations.plannedStartWeek, plannedEndWeek: moOperations.plannedEndWeek, planLocked: moOperations.planLocked })
+      .select({ plannedStartDate: moOperations.plannedStartDate, plannedEndDate: moOperations.plannedEndDate, planLocked: moOperations.planLocked })
       .from(moOperations)
       .where(eq(moOperations.id, opId));
     return row!;
   };
+  // 20 h on R1 from today: Monday, Tuesday and half of Wednesday.
+  const fromToday = [
+    { date: "2030-03-04", minutes: 480 },
+    { date: "2030-03-05", minutes: 480 },
+    { date: "2030-03-06", minutes: 240 },
+  ];
 
-  it("409 plan-week-no-capacity when every day of the week is a holiday — weeks and lock untouched; a week with capacity is fine and locks", async () => {
+  it("409 plan-date-no-capacity when the day is a holiday — days and lock untouched; a day with capacity is fine and locks", async () => {
     const world = await peggingWorld();
     // Week 12 (W3) closed: Monday–Friday are full-day holidays.
     for (const [i, date] of ["2030-03-18", "2030-03-19", "2030-03-20", "2030-03-21", "2030-03-22"].entries()) {
       await db.execute(sql`INSERT INTO holidays (date, name) VALUES (${date}, ${`Stängt ${i + 1}`})`);
     }
-    // 20 h on R1: planned in the current week.
     const order = await plannedMfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 20, dueDate: "2030-04-30" }, user.id);
     const op = (await plannedMfgService.listOperations(order.id))[0]!;
-    expect(await planRows(op.id)).toEqual([{ monday: W1, minutes: 1200 }]);
-    expect(await opRow(op.id)).toEqual({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: false });
+    expect(await planRows(op.id)).toEqual(fromToday);
+    expect(await opRow(op.id)).toEqual({ plannedStartDate: "2030-03-04", plannedEndDate: "2030-03-06", planLocked: false });
 
-    const err = await pinnedPlanning.moveOperation(op.id, { weekMonday: W3, moveFollowing: true }, user.id).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PlanWeekNoCapacityError);
-    expect(err).toMatchObject({ weekMonday: W3, workCenterCode: "101", message: "101 har ingen kapacitet kvar vecka 12 — välj en annan vecka" });
+    const err = await pinnedPlanning.moveOperation(op.id, { date: W3, moveFollowing: true }, user.id).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PlanDateNoCapacityError);
+    expect(err).toMatchObject({ date: W3, workCenterCode: "101", message: "101 har ingen kapacitet 2030-03-18 — välj en annan dag" });
 
     const app = await planningApp(pinnedPlanning);
-    const refused = await app.inject({ method: "POST", url: `/planning/operations/${op.id}/move`, payload: { weekMonday: W3, moveFollowing: true } });
-    expect([refused.statusCode, refused.json().code]).toEqual([409, "plan-week-no-capacity"]);
+    const refused = await app.inject({ method: "POST", url: `/planning/operations/${op.id}/move`, payload: { date: W3, moveFollowing: true } });
+    expect([refused.statusCode, refused.json().code]).toEqual([409, "plan-date-no-capacity"]);
+    // A Saturday is refused the same way.
+    const weekend = await app.inject({ method: "POST", url: `/planning/operations/${op.id}/move`, payload: { date: "2030-03-09", moveFollowing: true } });
+    expect([weekend.statusCode, weekend.json().code]).toEqual([409, "plan-date-no-capacity"]);
     // Rolled back: the plan is the one it had, and it is not locked.
-    expect(await planRows(op.id)).toEqual([{ monday: W1, minutes: 1200 }]);
-    expect(await opRow(op.id)).toEqual({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: false });
+    expect(await planRows(op.id)).toEqual(fromToday);
+    expect(await opRow(op.id)).toEqual({ plannedStartDate: "2030-03-04", plannedEndDate: "2030-03-06", planLocked: false });
     const moves = await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.action, "operation_moved"));
     expect(moves).toEqual([]);
 
-    const moved = await app.inject({ method: "POST", url: `/planning/operations/${op.id}/move`, payload: { weekMonday: W2, moveFollowing: true } });
+    const moved = await app.inject({ method: "POST", url: `/planning/operations/${op.id}/move`, payload: { date: W2, moveFollowing: true } });
     expect(moved.statusCode).toBe(200);
-    expect(moved.json().operation).toEqual({ plannedStartWeek: W2, plannedEndWeek: W2, planLocked: true });
-    expect(await planRows(op.id)).toEqual([{ monday: W2, minutes: 1200 }]);
+    expect(moved.json().operation).toEqual({ plannedStartDate: "2030-03-11", plannedEndDate: "2030-03-13", planLocked: true });
+    expect(await planRows(op.id)).toEqual([
+      { date: "2030-03-11", minutes: 480 },
+      { date: "2030-03-12", minutes: 480 },
+      { date: "2030-03-13", minutes: 240 },
+    ]);
     await app.close();
   });
 
-  it("a week with one working day left takes what it can — not refused", async () => {
+  it("the one open day of a closed week takes what it can and the rest goes on — not refused", async () => {
     const world = await peggingWorld();
     // Only the Friday of W3 is open: 8 h of capacity.
     for (const date of ["2030-03-18", "2030-03-19", "2030-03-20", "2030-03-21"]) {
@@ -975,9 +987,15 @@ describe("8 — Flytta till en vecka utan kapacitet", () => {
     const order = await plannedMfgService.createManufacturingOrder({ articleId: world.semi.id, quantity: 20, dueDate: "2030-04-30" }, user.id);
     const op = (await plannedMfgService.listOperations(order.id))[0]!;
 
-    const moved = await pinnedPlanning.moveOperation(op.id, { weekMonday: W3, moveFollowing: true }, user.id);
-    expect(moved.operation).toMatchObject({ plannedStartWeek: W3, planLocked: true });
-    expect((await planRows(op.id))[0]).toEqual({ monday: W3, minutes: 480 });
+    // The closed Monday is refused — the plan's unit is the day, not the week.
+    await expect(pinnedPlanning.moveOperation(op.id, { date: W3, moveFollowing: true }, user.id)).rejects.toBeInstanceOf(PlanDateNoCapacityError);
+    const moved = await pinnedPlanning.moveOperation(op.id, { date: "2030-03-22", moveFollowing: true }, user.id);
+    expect(moved.operation).toEqual({ plannedStartDate: "2030-03-22", plannedEndDate: "2030-03-26", planLocked: true });
+    expect(await planRows(op.id)).toEqual([
+      { date: "2030-03-22", minutes: 480 },
+      { date: "2030-03-25", minutes: 480 },
+      { date: "2030-03-26", minutes: 240 },
+    ]);
   });
 });
 

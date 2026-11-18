@@ -73,7 +73,7 @@ export function selectMaterialRows(dbc: Db | Tx) {
 export type MaterialRow = Awaited<ReturnType<ReturnType<typeof selectMaterialRows>["execute"]>>[number];
 
 // The same shape as GET /manufacturing-orders/:id/operations rows (the
-// planned weeks are mirror columns on mo_operations and ride along).
+// planned days are mirror columns on mo_operations and ride along).
 // `resources` = the operation's possible resources (alternativa resurser,
 // operation-resources.ts), [] without alternatives; resourceLocked ("Vald
 // för hand") is a column.
@@ -495,9 +495,12 @@ export async function updateOperationInTx(
         input.transportPrice === undefined ? undefined : input.transportPrice === null ? null : String(input.transportPrice),
       unitPrice: input.unitPrice === undefined ? undefined : input.unitPrice === null ? null : String(input.unitPrice),
       showNetWeight: input.showNetWeight,
-      // The weeks were booked on the old resource: a locked operation that
+      // The days were booked on the old resource: a locked operation that
       // changes resource loses its lock and is replanned like any other.
       planLocked: workCenterChanged && op.planLocked ? false : undefined,
+      // The place within the day (körplanen, #18) was a place on the old
+      // resource — dropped even when the replanning gives the same day.
+      runPosition: workCenterChanged ? null : undefined,
       resourceLocked,
     })
     .where(eq(moOperations.id, opId));

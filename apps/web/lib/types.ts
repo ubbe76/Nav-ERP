@@ -2812,8 +2812,8 @@ export interface ManufacturingOrder {
   dueDate: string | null;
   // Produktionsplanering — on list rows and the single GET: min/max planned
   // week (Mondays) over the pending operations, null = unplanned; late = Sen.
-  plannedStartWeek?: string | null;
-  plannedEndWeek?: string | null;
+  plannedStartDate?: string | null;
+  plannedEndDate?: string | null;
   late?: boolean;
   // Pegging (#9): a halvfabrikat TO covering this order's need is late (Halvfabrikat sent).
   componentLate?: boolean;
@@ -2846,14 +2846,14 @@ export interface MOOperationSummary {
 // manufacturing orders' remaining operation time; the web side only renders
 // it, no client-side aggregation.
 // Alternativa resurser (#15, etapp 2): an operation's förslag — derived at
-// every read, never stored. toWeek/currentToWeek are Mondays (YYYY-MM-DD);
-// currentToWeek is null when the operation is unplanned.
+// every read, never stored. toDate/currentToDate are days (YYYY-MM-DD);
+// currentToDate is null when the operation is unplanned.
 export interface ResourceSuggestionOnOperation {
   workCenterId: string;
   code: string;
   name: string;
-  toWeek: string;
-  currentToWeek: string | null;
+  toDate: string;
+  currentToDate: string | null;
   reason: "overloaded" | "unplanned";
 }
 
@@ -2868,8 +2868,8 @@ export interface ResourceSuggestionRow {
   toWorkCenterId: string;
   toCode: string;
   toName: string;
-  currentToWeek: string | null;
-  toWeek: string;
+  currentToDate: string | null;
+  toDate: string;
   reason: "overloaded" | "unplanned";
 }
 
@@ -2881,11 +2881,14 @@ export interface CapacityCellOrder {
   sequenceNo: number;
   dueDate: string | null;
   overdue: boolean;
-  // The operation's whole remaining time; hoursInWeek is the share this cell
-  // carries (a multi-week operation appears in one cell per planned week).
+  // The operation's whole remaining time; hoursInWeek is its share in the
+  // cell's week (week view: the cell itself; day view: the sum of its days in
+  // the ISO week of the cell's day), hoursInDay its share in a day cell
+  // (granularity=day; null in the week view).
   remainingHours: number;
   moOperationId: string;
   hoursInWeek: number;
+  hoursInDay: number | null;
   // Alternativa resurser (#15, etapp 2): förslag on another resource (null =
   // none), Vald för hand, and the ordinary resource's code on an alternative.
   suggestion: ResourceSuggestionOnOperation | null;
@@ -2893,9 +2896,9 @@ export interface CapacityCellOrder {
   ordinaryWorkCenterCode: string | null;
   // Produktionsplanering: false = unplanned (counted in the due-date week).
   planned: boolean;
-  // Mondays (YYYY-MM-DD); null when unplanned.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  // The plan's first and last day (YYYY-MM-DD); null when unplanned.
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   // Moved by hand — Planera leaves it where it is until Lås upp.
   planLocked: boolean;
   // Planned finish is after the order's due date (Sen).
@@ -2914,7 +2917,27 @@ export interface CapacityCell {
   // The API's one overload rule: loadPercent > 100, or load in a week with
   // 0 h capacity (no percentage, but overloaded all the same).
   overloaded: boolean;
+  // Overloaded days in the cell's span: a week cell is red on its sum, but a
+  // day in it can be over while the week is not. Day cell 1/0, Senare/Utan
+  // datum 0.
+  overloadedDays: number;
   orders: CapacityCellOrder[];
+}
+
+// One day of a resource without its orders — Flytta's "ledigt 3 h av 8".
+export interface CapacityDayLoad {
+  date: string;
+  loadHours: number;
+  // null = the resource has no capacity calendar.
+  availableHours: number | null;
+  overloaded: boolean;
+}
+
+export interface CapacityDay {
+  date: string;
+  isoWeek: number;
+  // ISO 1 = Monday … 7 = Sunday.
+  weekday: number;
 }
 
 export interface CapacityResourceRow {
@@ -2925,8 +2948,13 @@ export interface CapacityResourceRow {
   active: boolean;
   capacityFactor: number;
   hasSchedule: boolean;
-  // Index-aligned with CapacityResult.weeks.
+  // Index-aligned with CapacityResult.weeks ([] in the day view).
   weeks: CapacityCell[];
+  // Index-aligned with CapacityResult.days ([] in the week view).
+  days: CapacityCell[];
+  // Every day of the visible columns, ascending — week view: the first
+  // week's Monday to the last week's Sunday; day view: the days.
+  dayLoads: CapacityDayLoad[];
   later: CapacityCell;
   undated: CapacityCell;
 }
@@ -2938,6 +2966,7 @@ export interface CapacityGroupBlock {
   name: string;
   resources: CapacityResourceRow[];
   weekTotals: CapacityCell[];
+  dayTotals: CapacityCell[];
   laterTotal: CapacityCell;
   undatedTotal: CapacityCell;
 }
@@ -2952,14 +2981,23 @@ export interface CapacityWeek {
 export interface CapacitySummary {
   // max(planned_at) over the operations; null = never planned.
   plannedAt: string | null;
+  // Overloaded resource cells in the view's columns (weeks or days).
   overloadedCells: number;
+  // Overloaded resource × day cells over the visible days.
+  overloadedDays: number;
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
   resourceSuggestions: ResourceSuggestionRow[];
 }
 
 export interface CapacityResult {
+  // The Stockholm day the API counted with — Flytta's earliest day.
+  today: string;
+  granularity: "week" | "day";
+  // [] in the day view.
   weeks: CapacityWeek[];
+  // [] in the week view.
+  days: CapacityDay[];
   groups: CapacityGroupBlock[];
   summary: CapacitySummary;
 }
@@ -2988,14 +3026,14 @@ export interface PlanResult {
 
 // POST /planning/operations/:opId/move.
 export interface MoveOperationResult {
-  operation: { plannedStartWeek: string | null; plannedEndWeek: string | null; planLocked: boolean };
-  following: { moOperationId: string; sequenceNo: number; plannedStartWeek: string | null; plannedEndWeek: string | null }[];
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null; planLocked: boolean };
+  following: { moOperationId: string; sequenceNo: number; plannedStartDate: string | null; plannedEndDate: string | null }[];
   warnings: PlanWarning[];
 }
 
 // POST /planning/operations/:opId/unlock.
 export interface UnlockOperationResult {
-  operation: { plannedStartWeek: string | null; plannedEndWeek: string | null; planLocked: boolean };
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null; planLocked: boolean };
 }
 
 export interface MOMaterialConsumption {
@@ -3112,8 +3150,8 @@ export interface MOOperation {
   showNetWeight: boolean;
   // Produktionsplanering: planned weeks (Mondays), null = unplanned. A locked
   // plan was moved by hand and stays put through Planera.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   planLocked: boolean;
   plannedAt: string | null;
   // Alternativa resurser: the possible resources ([] = none, so no choice) and
@@ -5764,6 +5802,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   issued: "Utfärdad",
   released: "Frisläppt",
   component_orders_created: "Halvfabrikat skapade",
+  operation_moved: "Operation flyttad",
+  operation_unlocked: "Operation upplåst",
+  run_order_changed: "Körordning ändrad",
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
@@ -6644,9 +6685,11 @@ export interface TerminalOperation {
   quantityCompleted: string | null;
   quantityScrapped: string;
   dueDate: string | null;
-  // Produktionsplanering: planned weeks (Mondays); null = unplanned.
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  // Produktionsplanering: the planned days; null = unplanned.
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  // The place within the day set by hand in the körplan; null = none.
+  runPosition: number | null;
   readiness: TerminalReadiness;
   available: string;
   materials: TerminalMaterial[];
@@ -6695,13 +6738,13 @@ export type DtcStep =
       description: string | null;
       workCenterCode: string;
       workCenterName: string;
-      // Mondays of the first and last week the operation occupies.
-      fromWeek: string;
-      toWeek: string;
-      // Minutes booked per week (Mondays).
-      weeks?: { monday: string; minutes: number }[];
+      // First and last day the operation occupies.
+      fromDate: string;
+      toDate: string;
+      // Minutes booked per day.
+      days?: { date: string; minutes: number }[];
       date: string;
-      // Set when the step runs on an alternative resource; toWeek is the week
+      // Set when the step runs on an alternative resource; toDate is the day
       // the ordinary resource would have given.
       alternativeOf?: DtcAlternativeOf | null;
     }
@@ -6722,7 +6765,7 @@ export interface DtcAlternativeOf {
   workCenterCode: string;
   workCenterName: string;
   // null = the ordinary resource has no room within the horizon (two years).
-  toWeek: string | null;
+  toDate: string | null;
 }
 
 export interface DeliveryTimeCheckRow {
@@ -6753,7 +6796,7 @@ export interface DtcBatch {
     workCenterCode?: string;
     workCenterName?: string;
     alternativeOf?: DtcAlternativeOf | null;
-    weeks: { monday: string; minutes: number }[];
+    days: { date: string; minutes: number }[];
   }[];
 }
 
@@ -7380,26 +7423,39 @@ export interface RunPlanRow {
   remainingHours: number;
   setupDone: boolean;
   dueDate: string | null;
-  week: string | null;
+  date: string | null;
   late: boolean;
   planned: boolean;
-  plannedStartWeek: string | null;
-  plannedEndWeek: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
   planLocked: boolean;
+  // The place within the day set by hand; null = none.
+  runPosition: number | null;
   status: RunPlanStatus;
   available: number | null;
   waitingForSequenceNo: number | null;
+  // The row takes part in Ordningen inom dagen (a planned operation on its
+  // planned start day) — the day's reorderable ids are what the PUT wants.
+  reorderable: boolean;
 }
 
-export interface RunPlanWeek {
-  kind: "late" | "week" | "unplanned";
-  week: string | null;
-  isoYear: number | null;
+export interface RunPlanDay {
+  kind: "late" | "day" | "unplanned";
+  date: string | null;
+  weekday: number | null;
   isoWeek: number | null;
   late: boolean;
   rows: number;
   minutes: number;
   hours: number;
+  // The group has rows that can be ordered by hand (RunPlanRow.reorderable).
+  reorderable: boolean;
+}
+
+// PUT /planning/run-plan/order — the written order of one day.
+export interface RunPlanOrderResult {
+  date: string;
+  moOperationIds: string[];
 }
 
 export interface RunPlanStation {
@@ -7411,10 +7467,9 @@ export interface RunPlanStation {
 export interface RunPlanResult {
   workCenter: RunPlanStation | null;
   today: string;
-  currentWeek: string;
-  toWeek: string;
+  toDate: string;
   rows: RunPlanRow[];
-  weeks: RunPlanWeek[];
+  days: RunPlanDay[];
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];

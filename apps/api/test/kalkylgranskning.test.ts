@@ -81,7 +81,7 @@ describe("perUnitDivisor — what a saved calculation's totals are divided by", 
 // ---------------------------------------------------------------------------
 
 describe("formatDtcStep — alternativ resurs", () => {
-  const step = (toWeek: string | null) =>
+  const step = (toDate: string | null) =>
     formatDtcStep({
       kind: "operation",
       articleNumber: "BÄNK-1",
@@ -90,21 +90,21 @@ describe("formatDtcStep — alternativ resurs", () => {
       description: "Bocka",
       workCenterCode: "120",
       workCenterName: "Kantpress 2",
-      fromWeek: "2026-11-09",
-      toWeek: "2026-11-09",
+      fromDate: "2026-11-12",
+      toDate: "2026-11-14",
       date: "2026-11-12",
-      alternativeOf: { workCenterId: "w-110", workCenterCode: "110", workCenterName: "Kantpress 1", toWeek },
+      alternativeOf: { workCenterId: "w-110", workCenterCode: "110", workCenterName: "Kantpress 1", toDate },
     });
 
-  it("names the week the ordinary resource would have given", () => {
+  it("names the day the ordinary resource would have given", () => {
     expect(step("2026-11-30")).toBe(
-      "BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie v. 49), vecka 46, klar 2026-11-12"
+      "BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie 30 nov), 12–14 nov, klar 2026-11-12"
     );
   });
 
-  it("does not crash when the ordinary resource gives no week within the horizon", () => {
+  it("does not crash when the ordinary resource gives no day within the horizon", () => {
     expect(step(null)).toBe(
-      "BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie ger ingen vecka inom två år), vecka 46, klar 2026-11-12"
+      "BÄNK-1 op 20 Bocka — Kantpress 2 (120) (alternativ till 110, ordinarie ger ingen dag inom två år), 12–14 nov, klar 2026-11-12"
     );
   });
 });

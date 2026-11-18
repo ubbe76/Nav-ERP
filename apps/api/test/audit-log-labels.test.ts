@@ -51,6 +51,10 @@ describe("händelseloggens etiketter", () => {
     ["action", "component_orders_created"],
     // Prognos (#10).
     ["action", "forecast_updated"],
+    // Produktionsplanering: Flytta, Lås upp, ordningen inom dagen (#18).
+    ["action", "operation_moved"],
+    ["action", "operation_unlocked"],
+    ["action", "run_order_changed"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

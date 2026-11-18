@@ -1094,8 +1094,8 @@ describe("planning service — kundorderns behov på avsändningsdagen", () => {
 });
 
 // Leveranstidskontroll against the database. Today is pinned to Monday
-// 2030-03-04 so the weeks are deterministic: week 10 = 4–10 March, week 11
-// = 11–17, week 12 = 18–24.
+// 2030-03-04 so the days are deterministic: week 10 = 4–10 March, week 11
+// = 11–17, week 12 = 18–24. The book counts per day (#18).
 describe("planning service — leveranstidskontroll", () => {
   const scheduleService = createScheduleService(createScheduleRepository(db), createTimeReportRepository(db), {
     isDateLocked: async () => false,
@@ -1129,10 +1129,13 @@ describe("planning service — leveranstidskontroll", () => {
     const m = await makeArticle({ articleNumber: "DTC-M", type: "manufactured" });
     await articleService.addBomComponent(m.id, { componentArticleId: p.id, quantity: 2 });
     await mfgService.createRoutingOperation(m.id, { sequenceNo: 10, workCenterId: press.id, setupTime: 0, runTimePerUnit: 60 });
-    // Someone else's TO: 38 h on the press in week 11.
+    // Someone else's TO: 38 h on the press, unplanned and due Monday 11 —
+    // its load lies on the due date and rolls forward over week 11 (Monday–
+    // Thursday full, 6 h of Friday). Due Wednesday 13 before #18, when the
+    // load counted in the due date's week; per day that left Monday free.
     const x = await makeArticle({ articleNumber: "DTC-X", type: "manufactured" });
     await mfgService.createRoutingOperation(x.id, { sequenceNo: 10, workCenterId: press.id, setupTime: 38 * 60, runTimePerUnit: 0 });
-    await mfgService.createManufacturingOrder({ articleId: x.id, quantity: 1, dueDate: "2030-03-13" }, user.id);
+    await mfgService.createManufacturingOrder({ articleId: x.id, quantity: 1, dueDate: "2030-03-11" }, user.id);
     // Three in stock, already promised to a KO.
     await addStock(m.id, 3);
     const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Kund AB", active: true }));
@@ -1146,11 +1149,20 @@ describe("planning service — leveranstidskontroll", () => {
   it("material lead time and a busy press decide the date; the KO already owns the stock", async () => {
     const { m } = await world();
     const result = await pinned.checkDeliveryTime({ rows: [{ articleId: m.id, quantity: 3 }] });
-    // P: Monday 4 + 5 working days = Monday 11. The press has 2 h left in
-    // week 11 and the last hour goes in week 12 (ready Friday 22).
+    // P: Monday 4 + 5 working days = Monday 11. The press has 2 h left on
+    // Friday 15 and the last hour goes on Monday 18 — ready that day (the
+    // week's Friday 22 before #18), shipped the working day after.
     expect(result.rows[0]!.chain.map((s) => s.kind)).toEqual(["purchase", "operation"]);
-    expect(result.rows[0]!.chain[1]).toMatchObject({ fromWeek: "2030-03-11", toWeek: "2030-03-18", date: "2030-03-22" });
-    expect(result).toMatchObject({ shipDate: "2030-03-25", deliveryDate: "2030-03-25" });
+    expect(result.rows[0]!.chain[1]).toMatchObject({
+      fromDate: "2030-03-15",
+      toDate: "2030-03-18",
+      days: [
+        { date: "2030-03-15", minutes: 120 },
+        { date: "2030-03-18", minutes: 60 },
+      ],
+      date: "2030-03-18",
+    });
+    expect(result).toMatchObject({ shipDate: "2030-03-19", deliveryDate: "2030-03-19" });
   });
 
   it("checking the order itself: its own rows are not existing demand", async () => {
@@ -1164,7 +1176,7 @@ describe("planning service — leveranstidskontroll", () => {
     const { m } = await world();
     const customer = await salesService.createCustomer(parsed(createCustomerSchema, { name: "Långt bort AB", active: true, deliveryDayMode: "dispatch", transitDays: 2 }));
     const result = await pinned.checkDeliveryTime({ customerId: customer.id, rows: [{ articleId: m.id, quantity: 3 }] });
-    expect(result).toMatchObject({ shipDate: "2030-03-25", deliveryDate: "2030-03-27" });
+    expect(result).toMatchObject({ shipDate: "2030-03-19", deliveryDate: "2030-03-21" });
   });
 
   it("a quote is checked, a cancelled order is refused", async () => {
