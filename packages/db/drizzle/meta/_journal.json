@@ -1611,6 +1611,13 @@
       "when": 1794937536086,
       "tag": "0229_plan_days",
       "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
+      "when": 1794998661667,
+      "tag": "0230_invoice_customer",
+      "breakpoints": true
     }
   ]
 }

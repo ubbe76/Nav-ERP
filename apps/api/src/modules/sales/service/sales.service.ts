@@ -82,6 +82,20 @@ import {
 } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
+  roundToDecimals,
+  type ChangeSalesOrderCustomerInput,
+  type ChangeSalesOrderCustomerPreviewInput,
+  type CustomerChangePreview,
+} from "@navet/shared";
+import {
+  customerChangeBasis,
+  customerChangeChainRows,
+  customerChangeCurrencies,
+  matchesExpectedCustomerChange,
+  planCustomerChange,
+  type CustomerChangeChainAnswer,
+} from "./customer-change.js";
+import {
   addDays,
   deliveryDateWarning,
   deliveryHolidayWindow,
@@ -141,7 +155,15 @@ import {
   MarkupRepricingNotConfirmedError,
   SalesOrderMarkupsChangedError,
   SalesOrderRowsLockedError,
+  CustomerInactiveError,
+  SalesOrderCustomerChangeStaleError,
+  SalesOrderHasDeliveriesError,
+  SalesOrderHasDeviationsError,
+  SalesOrderHasInvoiceRowsError,
+  SalesOrderHasShipmentsError,
+  SalesOrderSameCustomerError,
 } from "./sales.errors.js";
+import { assertInvoiceCustomerSelectable } from "../repository/invoice-customer.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 
 // Narrow slice of the stock service — the pick list shows where each
@@ -863,6 +885,58 @@ export function createSalesService(
     return { repricing, reprice };
   }
 
+  // Byt kund: the facts read unlocked, the price chain's answers for the
+  // rows it priced and the plan — shared by the preview and the change
+  // (which re-reads the facts under its locks and compares them with these,
+  // customerChangeBasis). The rate: the same currency keeps the order's own;
+  // another currency gets today's (documentRate — SEK is 1, a typed rate
+  // wins, none ⇒ 409), rounded to the column's six decimals so the plan and
+  // the stored rate agree. The chain is asked with the NEW customer, in the
+  // new currency at that rate, with the order's own markups (they stay) —
+  // the same call as the markup repricing (planMarkupRepricing).
+  async function planCustomerChangeFor(orderId: string, input: { customerId: string; exchangeRate?: number }) {
+    const loaded = await repo.customerChangeFacts(orderId, input.customerId);
+    if (!loaded.ok) {
+      if (loaded.reason === "order_not_found") throw new SalesOrderNotFoundError(orderId);
+      throw new CustomerNotFoundError(input.customerId);
+    }
+    const { facts } = loaded;
+    if (facts.order.customerId === input.customerId) throw new SalesOrderSameCustomerError();
+    if (!loaded.customerActive) throw new CustomerInactiveError(facts.customer.customerNumber);
+    const currencies = customerChangeCurrencies(facts);
+    const newRate = currencies.changes
+      ? roundToDecimals(await documentRate(currencies.to, input.exchangeRate), 6)
+      : facts.order.exchangeRate;
+    const freightArticleId = await freight.freightArticleId();
+    const pricing: RowPricing = {
+      customerId: facts.customer.id,
+      currency: currencies.to,
+      exchangeRate: newRate,
+      orderMarkups: ownOrderMarkups(salesOrderMarkups(facts.order)),
+    };
+    const chain = new Map<string, CustomerChangeChainAnswer>();
+    for (const row of customerChangeChainRows(facts, freightArticleId)) {
+      const resolution = await resolvePrice({ customerId: facts.customer.id, articleId: row.articleId, quantity: row.quantity, ...chainQuery(pricing) });
+      chain.set(row.rowId, resolution?.price ?? null);
+    }
+    return { facts, plan: planCustomerChange(facts, { newRate, freightArticleId, chain }) };
+  }
+  function customerChangeBlockedError(blockers: CustomerChangePreview["blockers"]): Error {
+    const first = blockers[0]!;
+    switch (first.code) {
+      case "invalid-status-transition":
+        return new InvalidStatusTransitionError(first.message);
+      case "sales-order-has-deliveries":
+        return new SalesOrderHasDeliveriesError(first.message, blockers);
+      case "sales-order-has-invoice-rows":
+        return new SalesOrderHasInvoiceRowsError(first.message, blockers);
+      case "sales-order-has-shipments":
+        return new SalesOrderHasShipmentsError(first.message, blockers);
+      case "sales-order-has-deviations":
+        return new SalesOrderHasDeviationsError(first.message, blockers);
+    }
+  }
+
   // Valuta: a document's rate — SEK is always 1 (another explicit rate is a
   // 400), an explicit rate wins, else today's rate from Riksbanken /
   // Valutakurser. Looked up BEFORE any transaction (it may call Riksbanken);
@@ -1134,7 +1208,10 @@ export function createSalesService(
     // Momskoder (spec 4.5): each row's VAT follows the momskod the invoice
     // row will get (salesVatCode) — an EU customer sees 0 % already on the
     // quote — and the codes' invoice texts are printed like on the invoice.
-    const rowVat = orderRowVat(rows, customer!, freightArticleId, vatCodeTexts, language);
+    // Fakturakund (0230): the VAT facts are the paying customer's — the
+    // presentation (language, Privatperson) stays the ordering customer's.
+    const vatCustomer = (await billToCustomerOf(order, customer))!;
+    const rowVat = orderRowVat(rows, vatCustomer, freightArticleId, vatCodeTexts, language);
     const rowCodes = rowVat.map((vat) => vat.code);
     const usedCodes = new Set<VatCode>(rowCodes);
     const vatTexts = VAT_CODE_CATALOG.flatMap((entry) => {
@@ -1155,6 +1232,8 @@ export function createSalesService(
       title: variant === "quote" ? texts.titles.quote : texts.titles.orderConfirmation,
       documentNumber,
       quoteReference,
+      // Fakturakund: who gets the invoice, when not the ordering customer.
+      invoiceRecipient: order.invoiceCustomerId && order.invoiceCustomerName ? `${order.invoiceCustomerNumber} ${order.invoiceCustomerName}` : null,
       date: order.createdAt,
       partnerLabel: texts.partnerLabels.customer,
       partner: customer!,
@@ -1393,6 +1472,38 @@ export function createSalesService(
     await audit.log({ entityType: "customer", entityId: customerId, action: "markups_changed", detail: { before, after }, userId });
   }
 
+  // Fakturakund (0230): customer / invoice_customer_changed with the two
+  // customers named, only when the choice actually changed.
+  async function logCustomerInvoiceCustomer(
+    customerId: string,
+    before: { invoiceCustomerId: string | null; invoiceCustomerNumber?: string | null; invoiceCustomerName?: string | null } | null,
+    afterId: string | null,
+    userId: string | null
+  ) {
+    if ((before?.invoiceCustomerId ?? null) === afterId) return;
+    const after = afterId ? await repo.findInvoiceCustomerChoice(afterId) : null;
+    await audit.log({
+      entityType: "customer",
+      entityId: customerId,
+      action: "invoice_customer_changed",
+      detail: {
+        before: before?.invoiceCustomerId ? { customerNumber: before.invoiceCustomerNumber ?? null, name: before.invoiceCustomerName ?? null } : null,
+        after: after ? { customerNumber: after.customerNumber, name: after.name } : null,
+      },
+      userId,
+    });
+  }
+
+  // The order's VAT facts are the PAYING customer's (Fakturakund, 0230): the
+  // quote and the confirmation show the VAT the invoice will carry.
+  async function billToCustomerOf<C extends { id: string }>(
+    order: { customerId: string; invoiceCustomerId: string | null },
+    customer: C | null
+  ) {
+    if (!order.invoiceCustomerId) return customer;
+    return (await repo.findCustomerById(order.invoiceCustomerId)) ?? customer;
+  }
+
   return {
     async createCustomer(input: CreateCustomerInput, userId: string | null = null) {
       await validateRegisterRefs(input);
@@ -1406,6 +1517,7 @@ export function createSalesService(
         throw err;
       }
       await logCustomerMarkups(created.id, customerMarkups(null), customerMarkups(created), userId);
+      await logCustomerInvoiceCustomer(created.id, null, created.invoiceCustomerId, userId);
       return withVatTreatment(created);
     },
 
@@ -1413,7 +1525,11 @@ export function createSalesService(
       await validateRegisterRefs(input);
       // Read only when a markup is sent — the audit's before.
       const markupsSent = input.generalMarkupPercent !== undefined || input.materialMarkupPercent !== undefined;
-      const current = markupsSent ? await repo.findCustomerById(id) : null;
+      // Fakturakund: the customer itself is "none"; the choice (exists,
+      // active, no chain) is checked in the repository's transaction.
+      const invoiceCustomerSent = input.invoiceCustomerId !== undefined;
+      if (input.invoiceCustomerId === id) input = { ...input, invoiceCustomerId: null };
+      const current = markupsSent || invoiceCustomerSent ? await repo.findCustomerById(id) : null;
       let row;
       try {
         row = await repo.updateCustomer(id, input);
@@ -1423,6 +1539,7 @@ export function createSalesService(
       }
       if (!row) throw new CustomerNotFoundError(id);
       if (markupsSent) await logCustomerMarkups(id, customerMarkups(current), customerMarkups(row), userId);
+      if (invoiceCustomerSent) await logCustomerInvoiceCustomer(id, current, row.invoiceCustomerId, userId);
       return withVatTreatment(row);
     },
 
@@ -1430,9 +1547,21 @@ export function createSalesService(
     // same rules as the rows' derived momskod (customerVatTreatment) — and
     // vatNumberWarning what the card says about the VAT number of an EU
     // company customer (customerVatNumberWarning, never a refusal).
+    // Fakturakund (0230): invoiceCustomer = the customer this one's invoices
+    // go to by default (null = itself), invoiceCustomerFor = the customers
+    // that name this one — it can then have none of its own.
     async getCustomer(id: string) {
       const customer = await repo.findCustomerById(id);
-      return customer ? withVatTreatment(customer) : null;
+      if (!customer) return null;
+      const { invoiceCustomerNumber, invoiceCustomerName, ...rest } = customer;
+      return {
+        ...withVatTreatment(rest),
+        invoiceCustomer:
+          rest.invoiceCustomerId && invoiceCustomerNumber !== null && invoiceCustomerName !== null
+            ? { id: rest.invoiceCustomerId, customerNumber: invoiceCustomerNumber, name: invoiceCustomerName }
+            : null,
+        invoiceCustomerFor: await repo.listInvoiceCustomerFor(id),
+      };
     },
 
     // Fasta leveransdagar: the earliest Förväntat leveransdatum (the day the
@@ -1543,6 +1672,21 @@ export function createSalesService(
         }
       }
       await validateRegisterRefs(input);
+      // Fakturakund (0230): the ordering customer itself is "none". A new
+      // choice must exist, be active and have no fakturakund of its own (no
+      // chain) — the one the order already has may be sent back as it is.
+      // The order's payment term follows the paying customer unless this
+      // same PATCH sends one.
+      const invoiceCustomerFields: { invoiceCustomerId?: string | null; paymentTermId?: string | null } = {};
+      if (input.invoiceCustomerId !== undefined) {
+        const target = input.invoiceCustomerId === order.customerId ? null : input.invoiceCustomerId;
+        invoiceCustomerFields.invoiceCustomerId = target;
+        if (target !== order.invoiceCustomerId) {
+          const payer = await repo.findInvoiceCustomerChoice(target ?? order.customerId);
+          if (target !== null) assertInvoiceCustomerSelectable(payer, target);
+          if (input.paymentTermId === undefined) invoiceCustomerFields.paymentTermId = payer?.paymentTermId ?? null;
+        }
+      }
       // Kostnadsställen och projekt: a new choice must be active/open, the
       // kept one may stay as it is.
       const dimensions = await repo.resolveDimensions(
@@ -1555,6 +1699,7 @@ export function createSalesService(
       const roundSent = (v: number | null | undefined) => (v === undefined || v === null ? v : roundPercent(v));
       const headerInput = {
         ...sentHeader,
+        ...invoiceCustomerFields,
         ...(input.generalMarkupPercent !== undefined ? { generalMarkupPercent: roundSent(input.generalMarkupPercent) } : {}),
         ...(input.materialMarkupPercent !== undefined ? { materialMarkupPercent: roundSent(input.materialMarkupPercent) } : {}),
       };
@@ -1648,8 +1793,86 @@ export function createSalesService(
         });
       }
       const updated = await repo.findSalesOrderById(saved.order.id);
+      // Fakturakund: logged on the order when the choice actually changed —
+      // from now on its invoices go to another customer.
+      if (invoiceCustomerFields.invoiceCustomerId !== undefined && updated && updated.invoiceCustomerId !== order.invoiceCustomerId) {
+        await audit.log({
+          entityType: "sales_order",
+          entityId: order.orderNumber,
+          action: "invoice_customer_changed",
+          detail: {
+            before: order.invoiceCustomerId ? { customerNumber: order.invoiceCustomerNumber, name: order.invoiceCustomerName } : null,
+            after: updated.invoiceCustomerId ? { customerNumber: updated.invoiceCustomerNumber, name: updated.invoiceCustomerName } : null,
+          },
+          userId: userId ?? null,
+        });
+      }
       // `repricing` only when a markup was sent: what the save did to the rows.
       return updated && repricing ? { ...updated, repricing } : updated;
+    },
+
+    // Byt kund — what the change would do, nothing written. Blockers
+    // (status, delivery, invoice, shipment, deviation) are part of the
+    // answer so the dialog can show them as text.
+    async previewCustomerChange(orderId: string, input: ChangeSalesOrderCustomerPreviewInput): Promise<CustomerChangePreview> {
+      return (await planCustomerChangeFor(orderId, input)).plan;
+    },
+
+    // Byt kund: quote/confirmed/in_production with nothing delivered,
+    // invoiced, shipped or under complaint. The rate is looked up and the
+    // chain asked before the transaction; the plan must be what the user
+    // confirmed (`expected`), and the facts it was made from must still
+    // hold under the row and order locks — otherwise 409 with the fresh
+    // preview and nothing written.
+    async changeCustomer(orderId: string, input: ChangeSalesOrderCustomerInput, userId?: string | null) {
+      const { facts, plan } = await planCustomerChangeFor(orderId, input);
+      if (plan.blockers.length > 0) throw customerChangeBlockedError(plan.blockers);
+      if (!matchesExpectedCustomerChange(plan, input.expected)) throw new SalesOrderCustomerChangeStaleError(plan);
+      const result = await repo.changeCustomer(orderId, input.customerId, plan, customerChangeBasis(facts));
+      if (!result.ok) {
+        switch (result.reason) {
+          case "order_not_found":
+            throw new SalesOrderNotFoundError(orderId);
+          case "customer_not_found":
+            throw new CustomerNotFoundError(input.customerId);
+          case "same_customer":
+            throw new SalesOrderSameCustomerError();
+          case "blocked":
+            throw customerChangeBlockedError(result.blockers);
+          case "stale":
+            throw new SalesOrderCustomerChangeStaleError((await planCustomerChangeFor(orderId, input)).plan);
+        }
+      }
+      await audit.log({
+        entityType: "sales_order",
+        entityId: plan.orderNumber,
+        action: "customer_changed",
+        detail: {
+          before: {
+            customer: `${plan.from.customerNumber} ${plan.from.customerName}`,
+            currency: plan.from.currency,
+            exchangeRate: plan.from.exchangeRate,
+            ...(plan.clears.customerOrderNumber !== null ? { customerOrderNumber: plan.clears.customerOrderNumber } : {}),
+            ...(plan.clears.customerInquiryNumber !== null ? { customerInquiryNumber: plan.clears.customerInquiryNumber } : {}),
+          },
+          after: {
+            customer: `${plan.to.customerNumber} ${plan.to.customerName}`,
+            currency: plan.to.currency,
+            exchangeRate: plan.to.exchangeRate,
+            ...(plan.header.invoiceCustomer !== null ? { invoiceCustomer: plan.header.invoiceCustomer } : {}),
+          },
+          rows: plan.rows
+            .filter((r) => r.before.unitPrice !== r.after.unitPrice || r.before.discountPercent !== r.after.discountPercent)
+            .map((r) => ({
+              articleNumber: r.articleNumber,
+              origin: r.origin,
+              before: { unitPrice: r.before.unitPrice, discountPercent: r.before.discountPercent },
+              after: { unitPrice: r.after.unitPrice, discountPercent: r.after.discountPercent },
+            })),
+        },
+        userId: userId ?? null,
+      });
+      return { order: await this.getSalesOrder(orderId), change: plan };
     },
 
     // Påslag på offert och order (#16 etapp 3): POST
@@ -1761,7 +1984,7 @@ export function createSalesService(
     async getSalesOrder(id: string) {
       const found = await repo.findSalesOrderById(id);
       if (!found) return found;
-      const { sourceQuoteNumber, ...order } = found;
+      const { sourceQuoteNumber, invoiceCustomerNumber, invoiceCustomerName, ...order } = found;
       const [overDeliveryPercent, customer, ordersFromQuote, rows, vatCodeTexts, freightArticleId] = await Promise.all([
         overDeliveryPercentFor(order.customerId),
         repo.findCustomerById(order.customerId),
@@ -1771,6 +1994,7 @@ export function createSalesService(
         repo.vatCodeInvoiceTexts(),
         freight.freightArticleId(),
       ]);
+      const vatCustomer = await billToCustomerOf(order, customer);
       return {
         ...order,
         // Skapa kundorder från offert: the quote this order was created from
@@ -1783,7 +2007,16 @@ export function createSalesService(
         // the quote/order confirmation prints and the invoice will carry —
         // in the order's currency, the codes' Swedish names. Prices are
         // office data; so is this route (module read = office).
-        vatSummary: customer ? salesOrderVatSummary(orderRowVat(rows, customer, freightArticleId, vatCodeTexts, "sv")) : null,
+        // Fakturakund (0230): the VAT facts are the paying customer's.
+        vatSummary: vatCustomer ? salesOrderVatSummary(orderRowVat(rows, vatCustomer, freightArticleId, vatCodeTexts, "sv")) : null,
+        // Fakturakund: who the order is invoiced to when not the orderer
+        // (null = the ordering customer). billToCustomerId and
+        // customerCollectiveInvoicing (found) are the paying customer's —
+        // what the card's Fakturera leads to.
+        invoiceCustomer:
+          order.invoiceCustomerId && invoiceCustomerNumber !== null && invoiceCustomerName !== null
+            ? { id: order.invoiceCustomerId, customerNumber: invoiceCustomerNumber, name: invoiceCustomerName }
+            : null,
         customerMarkups: {
           generalMarkupPercent: customer?.generalMarkupPercent ?? null,
           materialMarkupPercent: customer?.materialMarkupPercent ?? null,

@@ -1,5 +1,7 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
+  changeSalesOrderCustomerPreviewSchema,
+  changeSalesOrderCustomerSchema,
   createContactSchema,
   createCustomerSchema,
   createDeliveryAddressSchema,
@@ -84,6 +86,17 @@ import {
   MarkupRepricingConflictError,
   MarkupRepricingNotConfirmedError,
   SalesOrderMarkupsChangedError,
+  InvoiceCustomerNotFoundError,
+  InvoiceCustomerInactiveError,
+  InvoiceCustomerHasInvoiceCustomerError,
+  CustomerIsInvoiceCustomerError,
+  CustomerInactiveError,
+  SalesOrderCustomerChangeStaleError,
+  SalesOrderHasDeliveriesError,
+  SalesOrderHasDeviationsError,
+  SalesOrderHasInvoiceRowsError,
+  SalesOrderHasShipmentsError,
+  SalesOrderSameCustomerError,
 } from "../service/sales.errors.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
@@ -111,6 +124,43 @@ import { CUSTOMER_CSV_COLUMNS, PRICE_LIST_CSV_COLUMNS, SALES_ORDER_CSV_COLUMNS }
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
+// Fakturakund (0230): the answers shared by the customer card and the order
+// header — an unknown choice is a 404, an unselectable one a 400.
+function invoiceCustomerError(err: unknown, reply: FastifyReply): FastifyReply | null {
+  if (err instanceof InvoiceCustomerNotFoundError) return reply.code(404).send(errorBody(err));
+  if (
+    err instanceof InvoiceCustomerInactiveError ||
+    err instanceof InvoiceCustomerHasInvoiceCustomerError ||
+    err instanceof CustomerIsInvoiceCustomerError
+  ) {
+    return reply.code(400).send(errorBody(err));
+  }
+  return null;
+}
+
+// Byt kund: the answers shared by the preview and the change.
+function customerChangeError(err: unknown, reply: FastifyReply) {
+  if (err instanceof SalesOrderNotFoundError || err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
+  if (err instanceof SalesOrderSameCustomerError || err instanceof CustomerInactiveError || err instanceof SalesOrderExchangeRateError) {
+    return reply.code(400).send(errorBody(err));
+  }
+  if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+  if (
+    err instanceof SalesOrderHasDeliveriesError ||
+    err instanceof SalesOrderHasInvoiceRowsError ||
+    err instanceof SalesOrderHasShipmentsError ||
+    err instanceof SalesOrderHasDeviationsError
+  ) {
+    return reply.code(409).send({ ...errorBody(err), blockers: err.blockers });
+  }
+  if (err instanceof SalesOrderCustomerChangeStaleError) return reply.code(409).send({ ...errorBody(err), preview: err.preview });
+  // Valuta: no rate today for the new customer's currency.
+  if (err instanceof ExchangeRateUnavailableError) {
+    return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+  }
+  throw err;
+}
+
 export async function salesRoutes(app: FastifyInstance, opts: { service: SalesService }) {
   const { service } = opts;
 
@@ -152,6 +202,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // through to the global 500 and the series-exhausted dictionary entry
       // was dead code.
       if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
+      const refused = invoiceCustomerError(err, reply);
+      if (refused) return refused;
       throw err;
     }
   });
@@ -169,6 +221,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof PriceListNotFoundError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidFreightProductError) return reply.code(400).send(errorBody(err));
       if (err instanceof DuplicateCustomerNumberError) return reply.code(409).send(errorBody(err));
+      const refused = invoiceCustomerError(err, reply);
+      if (refused) return refused;
       throw err;
     }
   });
@@ -421,6 +475,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // kept changing under the repricing.
       if (err instanceof MarkupRepricingNotConfirmedError) return reply.code(409).send({ ...errorBody(err), repricing: err.repricing });
       if (err instanceof MarkupRepricingConflictError) return reply.code(409).send(errorBody(err));
+      const refused = invoiceCustomerError(err, reply);
+      if (refused) return refused;
       throw err;
     }
   });
@@ -672,6 +728,36 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       }
       if (err instanceof MailSendError) return reply.code(502).send(errorBody(err));
       throw err;
+    }
+  });
+
+  // Byt kund: what the change would do — computed and answered, nothing
+  // written (readOnlySafe). The module's write rule (Försäljning), like the
+  // change it previews. Blockers come back in the answer (200), not as
+  // errors. No OAuth route.
+  app.post<{ Params: { id: string } }>(
+    "/sales-orders/:id/change-customer/preview",
+    { config: { readOnlySafe: true } },
+    async (req, reply) => {
+      const input = changeSalesOrderCustomerPreviewSchema.parse(req.body ?? {});
+      try {
+        return await service.previewCustomerChange(req.params.id, input);
+      } catch (err) {
+        return customerChangeError(err, reply);
+      }
+    }
+  );
+
+  // Byt kund på en offert eller order (quote/confirmed/in_production).
+  // `expected` is what the preview showed; 409
+  // sales-order-customer-change-stale carries the new preview when it no
+  // longer holds.
+  app.post<{ Params: { id: string } }>("/sales-orders/:id/change-customer", async (req, reply) => {
+    const input = changeSalesOrderCustomerSchema.parse(req.body);
+    try {
+      return await service.changeCustomer(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return customerChangeError(err, reply);
     }
   });
 

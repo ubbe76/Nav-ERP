@@ -629,6 +629,12 @@ export function InvoiceCard({
                   <>
                     {row.description}
                     <ConfigurationLines configuration={row.configuration} />
+                    {/* Fakturakund: the ordering customer, when it is another one than the invoice's. */}
+                    {row.salesOrderNumber && row.orderCustomerId && row.orderCustomerId !== invoice.customerId && (
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                        Beställare: {row.orderCustomerNumber} {row.orderCustomerName}
+                      </div>
+                    )}
                     {/* Räntefaktura: the account Räntefakturering booked the row to. */}
                     {row.revenueAccount && (
                       <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Konto {row.revenueAccount}</div>

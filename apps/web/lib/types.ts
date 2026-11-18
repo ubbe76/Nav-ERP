@@ -1763,8 +1763,22 @@ export interface SupplierInvoicePaymentEntry {
   verificationDisplayNumber: string | null;
 }
 
+// Fakturakund: a customer as it is named on another customer's card or an order.
+export interface CustomerRef {
+  id: string;
+  customerNumber: string;
+  name: string;
+}
+
 export interface Customer extends PartnerCardFields {
   id: string;
+  // Fakturakund (0230): the customer this one's invoices go to by default —
+  // null = itself. invoiceCustomer/invoiceCustomerFor come with GET :id only:
+  // the chosen customer, and the customers that have this one as theirs (it
+  // can then have none of its own).
+  invoiceCustomerId: string | null;
+  invoiceCustomer?: CustomerRef | null;
+  invoiceCustomerFor?: CustomerRef[];
   // Språk: the language of the customer's documents.
   language: DocumentLanguage;
   customerNumber: string;
@@ -2025,9 +2039,15 @@ export interface SalesOrder extends DocumentTermsFields {
   // still short of their ordered quantity (mirrors PurchaseOrder's
   // openRowCount).
   openRowCount?: number;
-  // Detail-only: mirrors the customer's Samlingsfaktura flag — drives
+  // Detail-only: the Samlingsfaktura flag of the customer the order is
+  // INVOICED to (its fakturakund, else the orderer) — drives
   // SalesOrderDetail's "Fakturera" link to /forsaljning/samlingsfakturering.
   customerCollectiveInvoicing?: boolean;
+  // Fakturakund (0230): the customer the order is invoiced to when not the
+  // ordering one (null = the orderer); billToCustomerId is always set.
+  invoiceCustomerId?: string | null;
+  invoiceCustomer?: CustomerRef | null;
+  billToCustomerId?: string;
   // Påslag på offert och order (#16): the order's own markups as decimal
   // strings ("20.00"), null = inherited. customerMarkups (GET :id only) are
   // the customer's own values, the placeholder of the header form.
@@ -2383,6 +2403,11 @@ export interface InvoiceRow {
   articleNumber: string | null;
   articleName: string | null;
   salesOrderNumber: string | null;
+  // Fakturakund: the ordering customer of the row's order (null for a free
+  // row) — shown when it is not the invoice's own customer.
+  orderCustomerId?: string | null;
+  orderCustomerNumber?: string | null;
+  orderCustomerName?: string | null;
   // Konfigurator 4b: copy of the order row's configuration (null for a
   // free/plain row), printed as choice lines on the invoice PDF.
   configuration: OrderRowConfiguration | null;
@@ -2546,6 +2571,11 @@ export interface InvoiceableShipment {
 export interface InvoiceableOrder {
   orderId: string;
   orderNumber: string;
+  // Fakturakund: the ordering customer — another one than the invoice's
+  // when the order is billed to its fakturakund.
+  customerId: string;
+  customerNumber: string;
+  customerName: string;
   // Valuta: the order's currency and rate — an invoice takes one currency, the
   // dialog groups on it. unitPrice on the rows is in this currency.
   currency: string;
@@ -5779,6 +5809,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   created: "Skapad",
   updated: "Ändrad",
   markups_changed: "Påslag ändrade",
+  invoice_customer_changed: "Fakturakund ändrad",
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",
@@ -5845,6 +5876,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   answered: "Besvarad",
   payment_reference_changed: "Betalningsreferens ändrad",
   supplier_changed: "Leverantör bytt",
+  customer_changed: "Kund bytt",
   exported: "Exporterad",
   items_added: "Poster tillagda",
   item_updated: "Post ändrad",

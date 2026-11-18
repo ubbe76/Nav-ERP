@@ -59,6 +59,9 @@ export interface DocumentTexts {
     dueDate: string;
     orderNumber: string;
     ourQuote: string;
+    // Fakturakund: who gets the invoice, on a quote/order confirmation whose
+    // order is invoiced to another customer than the one ordering.
+    invoiceRecipient: string;
     customerNumber: string;
     buyerVatNumber: string;
     customerOrderNumber: string;
@@ -106,7 +109,9 @@ export interface DocumentTexts {
     // Serienummer: "Serienummer: SN-001001–SN-001010, SN-001015" under a row.
     serial: string;
     // "Order KO… · Ert ordernr …" under an invoice row.
-    orderReference: (orderNumber: string, customerOrderNumber: string | null) => string;
+    // `orderedBy` (Fakturakund): the ordering customer, when the invoice
+    // goes to another one — "· Beställare: 1001 Namn".
+    orderReference: (orderNumber: string, customerOrderNumber: string | null, orderedBy?: string | null) => string;
     // "Ytbehandling: … · Färg: …" and "Rev B · Ritn 4711 rev C".
     surfaceTreatment: string;
     colour: string;
@@ -295,6 +300,7 @@ const sv: DocumentTexts = {
     dueDate: "Förfallodatum",
     orderNumber: "Ordernummer",
     ourQuote: "Vår offert",
+    invoiceRecipient: "Fakturamottagare",
     customerNumber: "Kundnr",
     buyerVatNumber: "Ert momsreg.nr",
     customerOrderNumber: "Ert ordernummer",
@@ -335,8 +341,8 @@ const sv: DocumentTexts = {
     batch: "Batch",
     expires: "utg.",
     serial: "Serienummer",
-    orderReference: (orderNumber, customerOrderNumber) =>
-      `Order ${orderNumber}${customerOrderNumber ? ` · Ert ordernr ${customerOrderNumber}` : ""}`,
+    orderReference: (orderNumber, customerOrderNumber, orderedBy) =>
+      `Order ${orderNumber}${customerOrderNumber ? ` · Ert ordernr ${customerOrderNumber}` : ""}${orderedBy ? ` · Beställare: ${orderedBy}` : ""}`,
     surfaceTreatment: "Ytbehandling",
     colour: "Färg",
     revision: (rev) => `Rev ${rev}`,
@@ -518,6 +524,7 @@ const en: DocumentTexts = {
     dueDate: "Due date",
     orderNumber: "Order number",
     ourQuote: "Our quotation",
+    invoiceRecipient: "Invoice to",
     customerNumber: "Customer no.",
     buyerVatNumber: "Your VAT no.",
     customerOrderNumber: "Your order number",
@@ -558,8 +565,8 @@ const en: DocumentTexts = {
     batch: "Batch",
     expires: "exp.",
     serial: "Serial no.",
-    orderReference: (orderNumber, customerOrderNumber) =>
-      `Order ${orderNumber}${customerOrderNumber ? ` · Your order no. ${customerOrderNumber}` : ""}`,
+    orderReference: (orderNumber, customerOrderNumber, orderedBy) =>
+      `Order ${orderNumber}${customerOrderNumber ? ` · Your order no. ${customerOrderNumber}` : ""}${orderedBy ? ` · Ordered by: ${orderedBy}` : ""}`,
     surfaceTreatment: "Surface treatment",
     colour: "Colour",
     revision: (rev) => `Rev ${rev}`,

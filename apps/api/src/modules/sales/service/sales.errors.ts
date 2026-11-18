@@ -1,4 +1,4 @@
-import type { MarkupRepricing } from "@navet/shared";
+import type { CustomerChangePreview, MarkupRepricing } from "@navet/shared";
 
 // Domain errors for C3 Kundpriser: the price-list register (price_lists /
 // price_list_rows) and the price-resolution chain (Task 7). The rest of the
@@ -322,5 +322,90 @@ export class SalesOrderRowsLockedError extends Error {
   constructor(public status: string) {
     super(`Cannot add rows to an order in status "${status}"`);
     this.name = "SalesOrderRowsLockedError";
+  }
+}
+
+// Fakturakund (migration 0230): the customer an order's invoices go to, on
+// the customer card (the förval) and on the order header. One class and
+// code per refusal.
+// The chosen fakturakund does not exist. 404.
+export class InvoiceCustomerNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Fakturakunden ${id} finns inte`);
+    this.name = "InvoiceCustomerNotFoundError";
+  }
+}
+// The chosen fakturakund is inactive. 400.
+export class InvoiceCustomerInactiveError extends Error {
+  constructor(customerNumber: string) {
+    super(`Kund ${customerNumber} är inaktiv och kan inte väljas som fakturakund`);
+    this.name = "InvoiceCustomerInactiveError";
+  }
+}
+// No chain: the chosen fakturakund has a fakturakund of its own. 400.
+export class InvoiceCustomerHasInvoiceCustomerError extends Error {
+  constructor(customerNumber: string) {
+    super(`Kund ${customerNumber} har själv en fakturakund och kan inte väljas som fakturakund`);
+    this.name = "InvoiceCustomerHasInvoiceCustomerError";
+  }
+}
+// No chain, the other way: the customer is already the fakturakund of
+// another customer and cannot get one of its own. 400.
+export class CustomerIsInvoiceCustomerError extends Error {
+  constructor(customerNumbers: string[]) {
+    super(`Kunden är fakturakund åt ${customerNumbers.join(", ")} och kan inte själv ha en fakturakund`);
+    this.name = "CustomerIsInvoiceCustomerError";
+  }
+}
+
+// Byt kund på en offert eller kundorder: the order already has this
+// customer. 400.
+export class SalesOrderSameCustomerError extends Error {
+  constructor() {
+    super("Ordern har redan den kunden");
+    this.name = "SalesOrderSameCustomerError";
+  }
+}
+// Byt kund: the chosen customer is inactive. 400.
+export class CustomerInactiveError extends Error {
+  constructor(customerNumber: string) {
+    super(`Kund ${customerNumber} är inaktiv`);
+    this.name = "CustomerInactiveError";
+  }
+}
+// Byt kund: something has already happened with the order at the current
+// customer — one class (and code) per cause, all 409 with the full list in
+// `blockers`. (The status blocker is an InvalidStatusTransitionError.)
+export class SalesOrderHasDeliveriesError extends Error {
+  constructor(message: string, readonly blockers: CustomerChangePreview["blockers"]) {
+    super(message);
+    this.name = "SalesOrderHasDeliveriesError";
+  }
+}
+export class SalesOrderHasInvoiceRowsError extends Error {
+  constructor(message: string, readonly blockers: CustomerChangePreview["blockers"]) {
+    super(message);
+    this.name = "SalesOrderHasInvoiceRowsError";
+  }
+}
+export class SalesOrderHasShipmentsError extends Error {
+  constructor(message: string, readonly blockers: CustomerChangePreview["blockers"]) {
+    super(message);
+    this.name = "SalesOrderHasShipmentsError";
+  }
+}
+export class SalesOrderHasDeviationsError extends Error {
+  constructor(message: string, readonly blockers: CustomerChangePreview["blockers"]) {
+    super(message);
+    this.name = "SalesOrderHasDeviationsError";
+  }
+}
+// Byt kund: what the user confirmed is no longer what the change would do
+// (a price, the rate, a row or the customer moved). 409 with the fresh
+// preview; nothing written.
+export class SalesOrderCustomerChangeStaleError extends Error {
+  constructor(readonly preview: CustomerChangePreview) {
+    super("Förhandsvisningen gäller inte längre — granska ändringarna igen");
+    this.name = "SalesOrderCustomerChangeStaleError";
   }
 }
