@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.19 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.20 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -683,7 +683,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Tidrapportering & personal** — **stämpelterminal** (helskärmsvy för en
   delad skärm i verkstaden: närvarostämpling kom/gå med sifferknappsats,
   in-/utstämpling på order/operationer som materialiserar tidrapporter,
-  ATF-uttag; valfri uppdelning av tiden i **Ställ** och **Produktion**
+  ATF-uttag; valfri **kod på 4 siffror** efter anställningsnumret;
+  **meddelanden** på en anslagstavla för alla och till enskilda anställda,
+  som kvitterar eller svarar i terminalen; valfri uppdelning av tiden i **Ställ** och **Produktion**
   med **Ställ klart**; valfritt krav på **anledning vid sen ankomst och tidig
   hemgång** och val mellan utbetald och sparad övertid vid Gå hem; gå hem pausar pågående arbeten så att bortavaron inte
   räknas in i rapporterad tid; planerat, klart och **kvar** visas per
@@ -773,8 +775,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Gränssnitt** — svenskt webbgränssnitt med färgtemana **Ljust**,
   **Mörkt** och **Dracula** och egna teman (all text klarar WCAG AA i
   alla teman — även egna teman kontrolleras), mobilanpassat; egna
-  **favoriter** i sidomenyn — även förvalda per behörighetsgrupp och
-  genvägar som **+ Ny kundorder**
+  **favoriter** i sidomenyn och grupperade per modul på Översikten — även
+  förvalda per behörighetsgrupp och genvägar som **+ Ny kundorder**;
+  **meddelanden** mellan användarna med kuvert i toppremsan, en tråd per
+  konversation och en valfri länk till sidan man står på
 - **Hjälp** — inbyggd användarmanual på `/hjalp` (renderad från
   [`docs/manual/`](docs/manual/) och publicerad på
   [naverp.se/hjalp](https://naverp.se/hjalp/)) med kapitel för alla rutiner
