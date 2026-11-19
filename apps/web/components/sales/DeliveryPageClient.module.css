@@ -92,3 +92,35 @@
   font-size: 14px;
   color: var(--color-text-secondary);
 }
+
+/* Benämning with the row's TOs under it (number, status, inlevererat). */
+.nameCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.moLine {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* I lager when the stock does not cover Leverera nu. */
+.short {
+  font-weight: 600;
+  color: var(--status-delayed-text);
+}
+
+.shortageNotice {
+  margin-bottom: var(--space-3);
+}
+
+/* A row's saldo warning sits in the right-aligned Leverera nu cell. */
+.rowNotice {
+  text-align: left;
+}

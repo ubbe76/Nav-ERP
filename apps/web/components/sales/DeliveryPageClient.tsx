@@ -24,6 +24,13 @@ import { notify } from "../../lib/notice";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
 import { deliveryBlockedText } from "../../lib/deliveryBlocked";
+import {
+  deliveryShortageSummary,
+  deliveryShortageText,
+  deliveryStockShortages,
+  unfinishedManufacturingOrders,
+  usableOnHand,
+} from "../../lib/deliveryStock";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import {
   countScan,
@@ -39,7 +46,9 @@ import {
   type OrderScanRow,
 } from "../../lib/orderScan";
 import {
+  MANUFACTURING_ORDER_STATUS_PILL,
   SALES_ORDER_STATUS_PILL,
+  type ManufacturingOrderStatus,
   type SalesOrder,
   type SalesOrderRow,
   type SalesOrderStatus,
@@ -50,6 +59,7 @@ import {
 } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { GatedLink } from "../ui/GatedLink";
 import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { BookTransportButton } from "../shipping/BookTransportButton";
 import { PalletCardDialog } from "../documents/PalletCardDialog";
@@ -147,9 +157,10 @@ export function DeliveryPageClient({
   const [locationId, setLocationId] = useState(""); // "" = Automatiskt
   // Lagerplats per rad: "" = Som ovan (follows the field above). Balances of
   // the open rows' articles per location, fetched once per order (and again
-  // after a delivery changed them).
+  // after a delivery changed them); null = not known (loading or the read
+  // failed), so I lager shows "–" and no row is warned about.
   const [rowLocations, rowLocationsRef, setRowLocations] = useScanState<Record<string, string>>({});
-  const [balances, setBalances] = useState<Record<string, ArticleLocationBalance[]>>({});
+  const [balances, setBalances] = useState<Record<string, ArticleLocationBalance[]> | null>(null);
   // Batch (#8) per row: "" = Automatiskt. Only batch-tracked rows have a choice.
   const [rowBatches, rowBatchesRef, setRowBatches] = useScanState<Record<string, string>>({});
   // Serienummer (#8 etapp 2): numbers picked in stock (serialIds, stock per
@@ -214,7 +225,7 @@ export function DeliveryPageClient({
   }, [selectedId]);
   useEffect(() => {
     if (!openArticleKey) {
-      setBalances({});
+      setBalances(null);
       return;
     }
     let cancelled = false;
@@ -234,7 +245,7 @@ export function DeliveryPageClient({
       })
       .catch(() => {
         // The per-row choice just offers no balances; Som ovan still works.
-        if (!cancelled) setBalances({});
+        if (!cancelled) setBalances(null);
       });
     return () => {
       cancelled = true;
@@ -243,6 +254,34 @@ export function DeliveryPageClient({
 
   const locationOptions: LocationOption[] =
     scannedLocation && !locations.some((l) => l.id === scannedLocation.id) ? [...locations, scannedLocation] : locations;
+
+  // Saldot mot Leverera nu: the rows the stock does not cover (a warning, the
+  // server books the shortage as a minus), from the place each row takes from.
+  const rowSource = (row: SalesOrderRow) => rowLocations[row.id] || locationId || null;
+  const shortages = deliveryStockShortages(
+    openRows.map((row) => ({
+      id: row.id,
+      articleId: row.articleId,
+      articleType: row.articleType,
+      quantity: toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count, suggestRest)) || 0, row.unitFactor),
+      locationId: rowSource(row),
+    })),
+    balances
+  );
+  const shortRows = openRows.filter((row) => shortages[row.id]);
+  const shortageSummary = deliveryShortageSummary(
+    shortRows.map((row) => ({
+      articleNumber: row.articleNumber,
+      unfinishedMo: unfinishedManufacturingOrders(row.manufacturingOrders).length > 0,
+    }))
+  );
+  const placeName = (id: string | null): string | null => {
+    if (!id) return null;
+    const option = locationOptions.find((l) => l.id === id);
+    if (option) return placeLabels.place(option.warehouseName, option.name);
+    const balance = Object.values(balances ?? {}).flat().find((b) => b.locationId === id);
+    return balance ? placeLabels.place(balance.warehouseName, balance.locationName) : "den valda lagerplatsen";
+  };
 
   function goToOrder(id: string) {
     setCount(NO_COUNT);
@@ -521,6 +560,12 @@ export function DeliveryPageClient({
     }
     if (Object.keys(serialErrors).length > 0) {
       setRowErrors(serialErrors);
+      return;
+    }
+
+    // Saldot räcker inte: asked once before anything is booked (the server
+    // would take the rest as a minus without a word).
+    if (shortageSummary && !(await confirmDialog(shortageSummary, { confirmLabel: "Leverera ändå" }))) {
       return;
     }
 
@@ -825,6 +870,11 @@ export function DeliveryPageClient({
               </Button>
             </div>
           )}
+          {shortageSummary && (
+            <FormNotice role="status" className={styles.shortageNotice}>
+              {shortageSummary}
+            </FormNotice>
+          )}
           <Table<SalesOrderRow>
             columns={[
               // Narrower than Inleverans' columns: counting adds Kvar att
@@ -835,6 +885,8 @@ export function DeliveryPageClient({
               { key: "unitCode", label: "Enhet", width: "60px" },
               { key: "quantityDelivered", label: "Levererat", width: "80px", align: "right" },
               { key: "remaining", label: "Rest", width: "70px", align: "right" },
+              // Usable saldo of the article (spärrade lagerplatser left out), in the row's unit.
+              { key: "onHand", label: "I lager", width: "80px", align: "right" },
               ...(count.counting
                 ? [{ key: "left", label: "Kvar att plocka", width: "110px", align: "right" as const }]
                 : []),
@@ -848,6 +900,35 @@ export function DeliveryPageClient({
             highlightedRowId={lastRowId}
             renderCell={(row, key) => {
               switch (key) {
+                case "articleName":
+                  return row.manufacturingOrders.length === 0 ? (
+                    row.articleName
+                  ) : (
+                    <span className={styles.nameCell}>
+                      <span>{row.articleName}</span>
+                      {/* The row's TOs (not Makulerad): done or not, and how much has come in. */}
+                      {row.manufacturingOrders.map((mo) => {
+                        const moPill = MANUFACTURING_ORDER_STATUS_PILL[mo.status as ManufacturingOrderStatus];
+                        return (
+                          <span key={mo.id} className={styles.moLine}>
+                            <GatedLink href={`/tillverkning/ordrar/${mo.id}`}>{mo.orderNumber}</GatedLink>
+                            {moPill && <StatusPill status={moPill.status} label={moPill.label} compact />}
+                            <span>
+                              {toUnitQuantity(Number(mo.quantityReceived), row.unitFactor).toLocaleString("sv-SE")} av{" "}
+                              {toUnitQuantity(Number(mo.quantity), row.unitFactor).toLocaleString("sv-SE")} {row.unitCode} inlevererade
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </span>
+                  );
+                case "onHand": {
+                  if (row.articleType === "service" || !balances) return "–";
+                  const onHand = toUnitQuantity(usableOnHand(balances[row.articleId] ?? []), row.unitFactor);
+                  return (
+                    <span className={shortages[row.id] ? styles.short : undefined}>{onHand.toLocaleString("sv-SE")}</span>
+                  );
+                }
                 case "quantityOrdered":
                 case "quantityDelivered":
                   return toUnitQuantity(Number(row[key]), row.unitFactor);
@@ -862,7 +943,7 @@ export function DeliveryPageClient({
                   return left === null ? "–" : left;
                 }
                 case "location": {
-                  const onHand = (balances[row.articleId] ?? []).filter((b) => Number(b.quantityOnHand) > 0 && !b.locationBlocked);
+                  const onHand = (balances?.[row.articleId] ?? []).filter((b) => Number(b.quantityOnHand) > 0 && !b.locationBlocked);
                   return (
                     <Select
                       aria-label={`Lagerplats — ${row.articleNumber}`}
@@ -912,6 +993,14 @@ export function DeliveryPageClient({
                         }}
                       />
                       {serialControl(row)}
+                      {(() => {
+                        const shortage = shortages[row.id];
+                        return shortage ? (
+                          <FormNotice className={styles.rowNotice}>
+                            {deliveryShortageText(shortage, row, placeName(shortage.locationId))}
+                          </FormNotice>
+                        ) : null;
+                      })()}
                       {(() => {
                         const warning = configuredDeliveryWarning(
                           row,
