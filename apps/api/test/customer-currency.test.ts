@@ -778,7 +778,11 @@ describe("rapporter i SEK", () => {
     const { createOrderRegisterRepository } = await import("../src/modules/reports/repository/order-register.repository.js");
     const { buildOrderRegister } = await import("../src/modules/reports/service/order-register.js");
     const customer = await makeCustomer("EUR");
-    await salesService.createQuote({ customerId: customer.id, exchangeRate: 11, rows: [{ articleId: (await makeArticle()).id, quantity: 2, unitPrice: 50 }] } as never, userId);
+    // An order (confirm: true) — the register lists orders, never quotes.
+    await salesService.createQuote(
+      { customerId: customer.id, exchangeRate: 11, confirm: true, rows: [{ articleId: (await makeArticle()).id, quantity: 2, unitPrice: 50 }] } as never,
+      userId
+    );
     const repo = createOrderRegisterRepository(db);
     const rows = await repo.loadSalesRows({ dateBasis: "order" } as never, 100);
     expect(rows[0]).toMatchObject({ currency: "EUR", exchangeRate: 11 });
