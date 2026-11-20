@@ -40,6 +40,7 @@ Andra regelfiler: radernas leveransdatum `order-dates.md`, leveransdagar `delive
 ## Kortet (Programramen steg 3)
 
 - Huvudet ändras direkt på kortet (`PurchaseHeaderEditor` i `HeaderEditor`-ramen, `system.md`; Växelkurs bara i annan valuta än SEK och Projekt under **Fler uppgifter**), leveransadressen behåller sin egen dialog och PATCH (`DeliveryAddressForm`). `+ Ny rad` = `usePurchaseRowEntry` (`PurchaseRowEntry.tsx`): samma POST och regler som `AddRowForm` — inköpsenheten, katalogpriset med staffel (annan valuta än orderns lämnar fältet), `priceTouchedNow` + sekvensen, Enter väntar in prisförslaget — och artikelns ankomstförslag som radens Önskat leveransdatum när det är senare än orderns (dialogens regel; utan det följde raden orderns datum fast ledtiden inte räckte). Mottagning, Avsändning (bara med legorader eller avsändningar), Dokument, Avvikelser och Historik är flikar som sidan skickar.
+- **Förfrågan:** `InquiryHeaderEditor` (villkoren + Frakt på vårt konto, ingen revisionsfråga — förfrågan har ingen revision) och `useInquiryRowEntry` (`InquiryRowEntry.tsx`): en vanlig rad med valfritt á-pris; en legorad (operationen, ställpriset) bara via **Fler fält…** = `AddInquiryRowForm` med `initialArticle`, som hämtar artikelns legooperationer vid montering. Raden säger till när den valda artikeln har legooperationer.
 
 ## Byt leverantör på inköpsordern (ingen migration)
 

@@ -3,10 +3,10 @@
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { openDocument } from "../../lib/tabNavigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Table } from "../ui/Table";
+import { Table, shareTrack } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { Field, Input, Select, Toggle } from "../ui/Field";
@@ -28,13 +28,36 @@ import {
   type PurchaseOrder,
 } from "../../lib/types";
 import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
+import { useCan } from "../PermissionsProvider";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { DocumentIdentity } from "../documents/DocumentIdentity";
+import { StatusStepper } from "../documents/StatusStepper";
+import { CardTabs, type CardTab } from "../documents/CardTabs";
+import { HeaderCell, HeaderEditor, HeaderValue } from "../documents/HeaderEditor";
+import { useInquiryRowEntry } from "./InquiryRowEntry";
 
 interface InquiryDetailProps {
   inquiry: Inquiry;
   rows: InquiryRow[];
   registers: TermsRegisters;
+  // Programramen steg 3: the card's head and its other tabs, from the page.
+  pageTitle: string;
+  help?: ReactNode;
+  tabs?: CardTab[];
+}
+
+// The status steps (Programramen steg 3); Avbruten stands outside the flow.
+const INQUIRY_STEPS = ["draft", "sent", "answered", "ordered"] as const;
+
+function inquirySteps(inquiry: Inquiry) {
+  const pill = INQUIRY_STATUS_PILL[inquiry.status];
+  if (inquiry.status === "cancelled") return { steps: [], current: null, outside: { status: pill.status, label: pill.label } };
+  return {
+    steps: INQUIRY_STEPS.map((key) => ({ key, label: INQUIRY_STATUS_PILL[key].label })),
+    current: inquiry.status,
+    outside: null,
+  };
 }
 
 // A row bought from a subcontractor against one of the article's own
@@ -45,12 +68,16 @@ function isLegoRow(row: InquiryRow): boolean {
 
 // Förfrågansdetalj — rows stay editable through "answered" (that's when
 // supplier prices are filled in); ordered/cancelled inquiries are frozen.
-export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) {
+export function InquiryDetail({ inquiry, rows, registers, pageTitle, help, tabs = [] }: InquiryDetailProps) {
   const router = useRouter();
   const pill = INQUIRY_STATUS_PILL[inquiry.status];
   const editable = inquiry.status === "draft" || inquiry.status === "sent" || inquiry.status === "answered";
 
-  const [modal, setModal] = useState<"header" | "addRow" | null>(null);
+  const [modal, setModal] = useState<"addRow" | null>(null);
+  // Ångra ändringar in the header: mounts the editor afresh from the inquiry.
+  const [headerReset, setHeaderReset] = useState(0);
+  const [addRowInitial, setAddRowInitial] = useState<{ article: Article | null; quantity: string }>({ article: null, quantity: "1" });
+  const canInkop = useCan()(["inkop"]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Info banner for "Uppdatera beredningens legopris" — a success message
@@ -84,6 +111,17 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
   // order — and dropped the edit; webbgranskningen 2026-11-11).
   const rowEditOpen = editingRowId !== null;
   const rowEditTitle = rowEditOpen ? "Spara eller avbryt raden du ändrar först" : undefined;
+  // + Ny rad straight in the rows table (Programramen steg 3).
+  const entryEnabled = editable && canInkop;
+  const entry = useInquiryRowEntry({
+    inquiryId: inquiry.id,
+    disabled: rowEditOpen,
+    onDialog: (article, quantity) => {
+      setAddRowInitial({ article, quantity });
+      setModal("addRow");
+    },
+  });
+  const entryAlready = alreadyOnDocumentText(rows, entry.article?.id, "förfrågan");
   const rawEditUnitOptions = useUnitOptions(editArticle);
   // The row's own unit counts with the factor SAVED on the row until the
   // unit is switched — the article's factor may have changed since.
@@ -221,12 +259,6 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
         pill={pill}
         error={error}
       >
-        {editable && (
-          <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("addRow")}>
-            Lägg till rad
-          </Button>
-        )}
-
         {inquiry.status === "draft" && (
           <Button type="button" variant="primary" disabled={pending || rowEditOpen} title={rowEditTitle} onClick={() => action("send")}>
             Skicka förfrågan
@@ -280,41 +312,74 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
         {!editable && !inquiry.purchaseOrderId && <FormHint>Inga åtgärder tillgängliga.</FormHint>}
       </DocumentActionBar>
 
-      <DocumentHeaderCard
+      <DocumentIdentity
+        pageTitle={pageTitle}
+        number={inquiry.inquiryNumber}
         pill={pill}
-        meta={
+        note={
           inquiry.purchaseOrderId && inquiry.purchaseOrderNumber ? (
             <>
               Beställd som <Link href={`/inkop/ordrar/${inquiry.purchaseOrderId}`}>{inquiry.purchaseOrderNumber}</Link>
             </>
           ) : undefined
         }
-        fields={[
-          { label: "Leverantör", value: inquiry.supplierName, href: `/leverantorer/${inquiry.supplierId}` },
-          { label: "Önskad leverans", value: inquiry.expectedDeliveryDate },
-          { label: "Frakt på vårt konto", value: inquiry.freightPaidByUs ? "Ja" : "Nej" },
-          { label: "Leveransvillkor", value: termsLabel(inquiry.deliveryTermCode, inquiry.deliveryTermName) },
-          { label: "Betalningsvillkor", value: termsLabel(inquiry.paymentTermCode, inquiry.paymentTermName) },
-          { label: "Speditör", value: termsLabel(inquiry.carrierCode, inquiry.carrierName) },
-        ]}
-        note={inquiry.note}
-        onEdit={editable ? () => setModal("header") : undefined}
+        help={help}
+        title={inquiry.supplierName}
+        titleHref={`/leverantorer/${inquiry.supplierId}`}
+        steps={<StatusStepper {...inquirySteps(inquiry)} />}
       />
+
+      {editable && canInkop ? (
+        <InquiryHeaderEditor
+          key={`${inquiryHeaderSignature(inquiry)}|${headerReset}`}
+          inquiry={inquiry}
+          registers={registers}
+          onDone={() => router.refresh()}
+          onReset={() => setHeaderReset((n) => n + 1)}
+        />
+      ) : (
+        <DocumentHeaderCard
+          fields={[
+            { label: "Leverantör", value: inquiry.supplierName, href: `/leverantorer/${inquiry.supplierId}` },
+            { label: "Önskad leverans", value: inquiry.expectedDeliveryDate },
+            { label: "Frakt på vårt konto", value: inquiry.freightPaidByUs ? "Ja" : "Nej" },
+            { label: "Leveransvillkor", value: termsLabel(inquiry.deliveryTermCode, inquiry.deliveryTermName) },
+            { label: "Betalningsvillkor", value: termsLabel(inquiry.paymentTermCode, inquiry.paymentTermName) },
+            { label: "Speditör", value: termsLabel(inquiry.carrierCode, inquiry.carrierName) },
+          ]}
+          note={inquiry.note}
+        />
+      )}
+
+      <CardTabs
+        label="Förfrågans delar"
+        tabs={[
+          {
+            key: "rader",
+            label: "Rader",
+            count: rows.length,
+            node: (
+              <>
 
       {infoMessage && <FormSaved>{infoMessage}</FormSaved>}
 
-      {rows.length > 0 ? (
+      {rows.length > 0 || entryEnabled ? (
         <Table<InquiryRow>
           columns={[
-            { key: "articleNumber", label: "Artikel", width: "1fr" },
-            { key: "quantity", label: "Antal", width: "140px", align: "right" },
-            { key: "unitCode", label: "Enhet", width: "90px" },
-            { key: "unitPrice", label: "Á-pris", width: "160px", align: "right" },
-            { key: "setupPrice", label: "Ställpris", width: "130px", align: "right" },
-            { key: "lineAmount", label: "Belopp", width: "140px", align: "right" },
-            { key: "id", label: "", width: "180px", align: "right" },
+            // As on the order cards: floors as tight as the contents allow,
+            // the spare width shared out, Enhet fixed beside the quantity,
+            // the action column as wide as its buttons (+ Ny rad's Lägg till
+            // too). The inputs' tracks widen while a row is edited.
+            { key: "articleNumber", label: "Artikel", width: "minmax(160px, 3fr)" },
+            { key: "quantity", label: "Antal", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
+            { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
+            { key: "unitPrice", label: "Á-pris", width: shareTrack(editingRowId ? 100 : 84), align: "right" },
+            { key: "setupPrice", label: "Ställpris", width: shareTrack(editingRowId ? 100 : 80), align: "right" },
+            { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
+            { key: "id", label: "", width: "max-content", align: "right" },
           ]}
           rows={rows}
+          entryRow={entryEnabled ? { cells: entry.cells } : undefined}
           footer={
             priced.length > 0
               ? {
@@ -454,14 +519,22 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
         <p>Inga rader tillagda än.</p>
       )}
       <FormError>{rowError}</FormError>
-
-
-      <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra villkor och frakt">
-        <EditHeaderForm inquiry={inquiry} registers={registers} onDone={refresh} onCancel={() => setModal(null)} />
-      </Modal>
+      <FormError>{entry.error}</FormError>
+      {entryAlready && <FormNotice>{entryAlready}</FormNotice>}
+      {entry.hasLego && (
+        <FormHint>Artikeln har legooperationer — en rad för en legooperation läggs till med ikonen Fler fält…</FormHint>
+      )}
+              </>
+            ),
+          },
+          ...tabs,
+        ]}
+      />
 
       <Modal open={modal === "addRow"} onClose={() => setModal(null)} title="Lägg till rad">
         <AddInquiryRowForm
+          initialArticle={addRowInitial.article}
+          initialQuantity={addRowInitial.quantity}
           inquiryId={inquiry.id}
           currency={inquiry.supplierCurrency ?? "SEK"}
           existingRows={rows}
@@ -478,24 +551,28 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
 // revision. Freight prints our carrier customer number on the förfrågan PDF
 // and carries to the purchase order on convert.
 
-function EditHeaderForm({
+function InquiryHeaderEditor({
   inquiry,
   registers,
   onDone,
-  onCancel,
+  onReset,
 }: {
   inquiry: Inquiry;
   registers: TermsRegisters;
   onDone: () => void;
-  onCancel: () => void;
+  onReset: () => void;
 }) {
   const [terms, setTerms] = useState<TermsValue>(termsFrom(inquiry));
   const [freightPaidByUs, setFreightPaidByUs] = useState(inquiry.freightPaidByUs);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const snapshot = JSON.stringify({ terms, freightPaidByUs });
+  const [baseline, setBaseline] = useState(snapshot);
+  const dirty = snapshot !== baseline;
 
   async function save(e: FormEvent) {
     e.preventDefault();
+    if (!dirty || pending) return;
     setError(null);
     setPending(true);
     try {
@@ -503,6 +580,7 @@ function EditHeaderForm({
         method: "PATCH",
         body: JSON.stringify({ ...termsPayload(terms), freightPaidByUs }),
       });
+      setBaseline(snapshot);
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara"));
@@ -512,38 +590,45 @@ function EditHeaderForm({
   }
 
   return (
-    <Form onSubmit={save}>
-      <FormError>{error}</FormError>
-
-      <TermsFields registers={registers} value={terms} onChange={setTerms} />
-
-      <Field label="Frakt på vårt konto" htmlFor="inquiryFreightPaidByUs">
-        <Toggle
-          id="inquiryFreightPaidByUs"
-          checked={freightPaidByUs}
-          onChange={(e) => setFreightPaidByUs(e.target.checked)}
-        />
-      </Field>
-
-      <FormActions>
-        <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Sparar…" : "Spara"}
-        </Button>
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          Avbryt
-        </Button>
-      </FormActions>
-    </Form>
+    <HeaderEditor label="Förfrågans huvud" dirty={dirty} pending={pending} error={error} onSubmit={save} onReset={onReset}>
+      <HeaderValue label="Leverantör" value={inquiry.supplierName} href={`/leverantorer/${inquiry.supplierId}`} />
+      <HeaderValue label="Önskad leverans" value={inquiry.expectedDeliveryDate} />
+      <HeaderCell>
+        <Field label="Frakt på vårt konto" htmlFor="inquiryFreightPaidByUs">
+          <Toggle id="inquiryFreightPaidByUs" checked={freightPaidByUs} onChange={(e) => setFreightPaidByUs(e.target.checked)} />
+        </Field>
+      </HeaderCell>
+      <TermsFields registers={registers} value={terms} onChange={setTerms} cells />
+      {inquiry.note && <HeaderValue label="Notering" value={inquiry.note} wide />}
+    </HeaderEditor>
   );
 }
 
+// The header fields the editor starts from (see headerSignature on the
+// kundorder card).
+function inquiryHeaderSignature(inquiry: Inquiry): string {
+  return JSON.stringify([
+    inquiry.supplierId,
+    inquiry.status,
+    inquiry.freightPaidByUs,
+    inquiry.deliveryTermId,
+    inquiry.paymentTermId,
+    inquiry.carrierId,
+  ]);
+}
+
 function AddInquiryRowForm({
+  initialArticle = null,
+  initialQuantity = "1",
   inquiryId,
   currency,
   existingRows,
   onDone,
   onCancel,
 }: {
+  // From + Ny rad in the table: the article and the quantity typed there.
+  initialArticle?: Article | null;
+  initialQuantity?: string;
   inquiryId: string;
   // The supplier's currency. The operation's ställpris is kronor, so it is
   // only prefilled on an SEK inquiry; otherwise the field stays empty and the
@@ -555,7 +640,7 @@ function AddInquiryRowForm({
 }) {
   const [article, setArticle] = useState<Article | null>(null);
   const alreadyOnInquiry = alreadyOnDocumentText(existingRows, article?.id, "förfrågan");
-  const [quantity, setQuantity] = useState("1");
+  const [quantity, setQuantity] = useState(initialQuantity);
   const [unitPrice, setUnitPrice] = useState("");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
   // Legooperation the row buys, if any — "" = ordinary purchase row.
@@ -584,6 +669,13 @@ function AddInquiryRowForm({
         .catch(() => setLegoOptions([]));
     }
   }
+
+  // The article chosen in the table's + Ny rad, picked as if chosen here
+  // (its lego operations are fetched).
+  useEffect(() => {
+    if (initialArticle) handleArticleChange(initialArticle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleUnitChange(option: UnitOption) {
     setQuantity((q) => convertQuantityInput(q, currentFactor, option.factor));

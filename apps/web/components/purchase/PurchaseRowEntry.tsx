@@ -19,10 +19,13 @@ const PICKER_ID = "purchaseRowEntryArticle";
 const QUANTITY_ID = "purchaseRowEntryQuantity";
 
 function focusField(id: string, select = false) {
+  // After React has drawn the field (a new article shows the inputs). The
+  // article picker refills its last search on focus, so the text is selected
+  // a frame later — the next article number then replaces it.
   window.setTimeout(() => {
     const el = document.getElementById(id) as HTMLInputElement | null;
     el?.focus();
-    if (select) el?.select();
+    if (select) window.requestAnimationFrame(() => el?.select());
   }, 0);
 }
 
@@ -174,7 +177,7 @@ export function usePurchaseRowEntry({
       });
       clear();
       router.refresh();
-      focusField(PICKER_ID);
+      focusField(PICKER_ID, true);
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
     } finally {
