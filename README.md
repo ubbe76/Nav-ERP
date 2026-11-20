@@ -68,11 +68,7 @@ exempeldata. Klicka på en bild för full storlek.
   <tr>
     <td width="50%">
       <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png" alt="Fyra dokument öppna i flikar med kundordern framme"></a>
-      <br><sub><b>Flikar</b> — flera dokument öppna samtidigt</sub>
-    </td>
-    <td width="50%">
-      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-delad-vy-dark.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-delad-vy-dark.png" alt="Delad vy med listan över tillverkningsordrar till vänster och en tillverkningsorder till höger, i mörkt tema"></a>
-      <br><sub><b>Delad vy</b> — listan och dokumentet sida vid sida, i mörkt tema</sub>
+      <br><sub><b>Flikar</b> — flera funktioner öppna samtidigt</sub>
     </td>
   </tr>
 </table>
@@ -523,7 +519,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.21 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.22 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -541,8 +537,8 @@ försäljning) med bevakningslista, där varje användare väljer sina egna kort
 (veckans leveranser och inleveranser, beläggning, fakturor, offerter,
 avvikelser m.fl.), sidan **Aviseringar** (negativa saldon,
 försenade ordrar, förfallna fakturor, offerter att följa upp m.fl.,
-grupperade per område, med valfri daglig sammanställning per e-post), sidomeny med undermenyer per modul,
-modulhubbar med grupperade listkort, och modul-UI för hela byggordningen.
+grupperade per område, med valfri daglig sammanställning per e-post), en ram med ikonlist och modulpanel,
+flikar per funktion och lista och kort, modulhubbar med grupperade listkort, och modul-UI för hela byggordningen.
 Alla registerlistor har serversidig fritextsökning, filtrering och
 paginering (`?search/filter/limit/offset` → `{ rows, total }`), så
 registren skalar till tusentals poster; artikelval i order- och
@@ -778,8 +774,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   E-post/SMTP)
 - **Gränssnitt** — svenskt webbgränssnitt med färgtemana **Ljust**,
   **Mörkt** och **Dracula** och egna teman (all text klarar WCAG AA i
-  alla teman — även egna teman kontrolleras), mobilanpassat; egna
-  **favoriter** i sidomenyn och grupperade per modul på Översikten — även
+  alla teman — även egna teman kontrolleras), mobilanpassat; en ram som i
+  ett program med **ikonlist och modulpanel**, **flikar per funktion** och
+  **lista och kort** (en smal lista bredvid dokumentet för tio register);
+  egna **favoriter** i menyn och grupperade per modul på Översikten — även
   förvalda per behörighetsgrupp och genvägar som **+ Ny kundorder**;
   **meddelanden** mellan användarna med kuvert i toppremsan, en tråd per
   konversation och en valfri länk till sidan man står på
