@@ -519,7 +519,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.22 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.23 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -776,7 +776,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **Mörkt** och **Dracula** och egna teman (all text klarar WCAG AA i
   alla teman — även egna teman kontrolleras), mobilanpassat; en ram som i
   ett program med **ikonlist och modulpanel**, **flikar per funktion** och
-  **lista och kort** (en smal lista bredvid dokumentet för tio register);
+  **lista och kort** (en smal lista bredvid dokumentet för tio register),
+  dokumentkort där huvudet ändras direkt och nya rader skrivs in sist i
+  radlistan, och en sammanfattning av artikeln bredvid artikelregistret;
   egna **favoriter** i menyn och grupperade per modul på Översikten — även
   förvalda per behörighetsgrupp och genvägar som **+ Ny kundorder**;
   **meddelanden** mellan användarna med kuvert i toppremsan, en tråd per
