@@ -1,6 +1,22 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Children,
+  Fragment,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import Link from "next/link";
+import { Button } from "../ui/Button";
+import buttonStyles from "../ui/Button.module.css";
+import { PrintButton } from "./PrintButton";
+import { actionIcon } from "./actionIcons";
 import { StatusPill, type Status } from "../ui/StatusPill";
 import { FormError } from "../ui/Form";
 import { RowMenu, type RowMenuItem } from "../ui/RowMenu";
@@ -14,6 +30,50 @@ interface Overflowed {
 }
 
 const isAction = (el: HTMLElement) => el.matches("button, a");
+
+function textOf(node: ReactNode): string | null {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node) && node.every((n) => typeof n === "string" || typeof n === "number")) return node.join("");
+  return null;
+}
+
+function iconFor(label: string | null): ReactNode {
+  const Icon = label ? actionIcon(label) : null;
+  return Icon ? <Icon size={15} strokeWidth={1.9} aria-hidden="true" /> : null;
+}
+
+type ActionElement = ReactElement<{ children?: ReactNode; label?: string; className?: string; icon?: ReactNode }>;
+
+// Programramen (the user's sketch): every action gets the icon for its label
+// (actionIcons.tsx) — the cards pass plain labelled buttons and links,
+// through conditionals and fragments. A link styled as a button gets the
+// variant as data-variant, like a Button, so the bar can place it.
+function decorate(children: ReactNode): ReactNode {
+  return Children.map(children, (child) => {
+    if (!isValidElement(child)) return child;
+    const el = child as ActionElement;
+    if (el.type === Fragment) return <>{decorate(el.props.children)}</>;
+    if (el.type === Button) {
+      const icon = iconFor(textOf(el.props.children));
+      return icon ? cloneElement(el, { icon }) : el;
+    }
+    if (el.type === PrintButton) return cloneElement(el, { icon: iconFor(el.props.label ?? "Skriv ut") });
+    if (el.type === Link || el.type === "a") {
+      const className = el.props.className ?? "";
+      const variant = (["primary", "danger", "ghost", "secondary"] as const).find((v) => className.split(" ").includes(buttonStyles[v]!));
+      return cloneElement(el, {
+        children: (
+          <>
+            {iconFor(textOf(el.props.children))}
+            {el.props.children}
+          </>
+        ),
+        ...(variant ? { "data-variant": variant } : {}),
+      } as Partial<ActionElement["props"]>);
+    }
+    return el;
+  });
+}
 
 // The document's toolbar (Nav som program, punkt 3): the flow actions in one
 // row at the top of the card, which stays under the app toolbar while the
@@ -147,7 +207,7 @@ export function DocumentActionBar({
           </span>
         )}
         <div ref={actionsRef} className={styles.actions}>
-          {children}
+          {decorate(children)}
           {/* Always rendered (hidden when nothing overflows) so its width is
               known before it is needed. */}
           <span className={styles.more} data-bar-more="" hidden={moreItems.length === 0}>

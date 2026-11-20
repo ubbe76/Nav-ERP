@@ -58,6 +58,24 @@
   flex-shrink: 0;
   white-space: nowrap;
 }
+/* Programramen (the user's sketch): compact framed buttons with an icon, the
+   primary (green) action last — then only the ⋯ menu. */
+.bar .actions > :is(button, a) {
+  height: 32px;
+  padding: 0 12px;
+  gap: 6px;
+  font-size: 13px;
+  border-radius: var(--radius-control-sm);
+}
+.bar .actions > [data-variant="ghost"] {
+  border-color: var(--color-border-control);
+}
+.actions > [data-variant="primary"] {
+  order: 1;
+}
+.actions > [data-bar-more] {
+  order: 2;
+}
 .actions > [data-overflow] {
   display: none;
 }
