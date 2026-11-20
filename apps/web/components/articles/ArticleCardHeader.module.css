@@ -18,6 +18,20 @@
 .main {
   flex: 1;
   min-width: 0;
+  /* The header sits beside the narrow list (Lista och kort) as well as on
+     the full width: its columns follow its own width, not the window's. */
+  container-type: inline-size;
+}
+
+@container (max-width: 720px) {
+  .grid {
+    grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+  }
+}
+@container (max-width: 400px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .field {
