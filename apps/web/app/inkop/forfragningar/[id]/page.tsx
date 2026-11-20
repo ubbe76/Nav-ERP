@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
+import { SplitView } from "../../../../components/split/SplitView";
 import { InquiryDetail } from "../../../../components/purchase/InquiryDetail";
 import { MailSection } from "../../../../components/mail/MailSection";
 import { documentLanguageOf } from "../../../../lib/documentLanguage";
@@ -31,44 +32,47 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
 
   return (
     <AppShell>
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{inquiry.inquiryNumber}</div>
-          <div className={shellStyles.meta}>Förfrågan · {inquiry.supplierName}</div>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/inkop/forfragningar" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{inquiry.inquiryNumber}</div>
+            <div className={shellStyles.meta}>Förfrågan · {inquiry.supplierName}</div>
+          </div>
+          <HelpLink chapter="inkop" anchor="forfragningar-prisforfragan" label="Hjälp om förfrågningar" />
         </div>
-        <HelpLink chapter="inkop" anchor="forfragningar-prisforfragan" label="Hjälp om förfrågningar" />
-      </div>
 
-      <InquiryDetail inquiry={inquiry} rows={rows} registers={{ deliveryTerms, paymentTerms, carriers }} />
+        <InquiryDetail inquiry={inquiry} rows={rows} registers={{ deliveryTerms, paymentTerms, carriers }} />
 
-      <MailSection
-        documentLanguage={documentLanguageOf(inquiry.supplierLanguage)}
-        emails={emails}
-        defaultTo={defaultTo}
-        sendButtons={
-          mailable
-            ? [
-                {
-                  label: "Skicka via e-post",
-                  modalTitle: `Skicka ${inquiry.inquiryNumber} via e-post`,
-                  endpoint: `/api/v1/inquiries/${inquiry.id}/send-email`,
-                  ccSupplierId: inquiry.supplierId,
-                  mail: {
-                    kind: "inquiry",
-                    language: documentLanguageOf(inquiry.supplierLanguage),
-                    values: {
-                      number: inquiry.inquiryNumber,
-                      supplier: inquiry.supplierName,
-                      deliveryDate: inquiry.expectedDeliveryDate,
+        <MailSection
+          documentLanguage={documentLanguageOf(inquiry.supplierLanguage)}
+          emails={emails}
+          defaultTo={defaultTo}
+          sendButtons={
+            mailable
+              ? [
+                  {
+                    label: "Skicka via e-post",
+                    modalTitle: `Skicka ${inquiry.inquiryNumber} via e-post`,
+                    endpoint: `/api/v1/inquiries/${inquiry.id}/send-email`,
+                    ccSupplierId: inquiry.supplierId,
+                    mail: {
+                      kind: "inquiry",
+                      language: documentLanguageOf(inquiry.supplierLanguage),
+                      values: {
+                        number: inquiry.inquiryNumber,
+                        supplier: inquiry.supplierName,
+                        deliveryDate: inquiry.expectedDeliveryDate,
+                      },
                     },
                   },
-                },
-              ]
-            : []
-        }
-        pdfLinks={[{ label: "Ladda ner PDF", href: `/api/v1/inquiries/${inquiry.id}/pdf` }]}
-        drawingCount={drawingCount}
-      />
+                ]
+              : []
+          }
+          pdfLinks={[{ label: "Ladda ner PDF", href: `/api/v1/inquiries/${inquiry.id}/pdf` }]}
+          drawingCount={drawingCount}
+        />
+      </SplitView>
     </AppShell>
   );
 }

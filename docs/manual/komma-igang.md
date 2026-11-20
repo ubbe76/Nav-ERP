@@ -203,6 +203,16 @@ Dialogen har en rad per kort. Kryssrutan **Visa** bestämmer om kortet visas, oc
 
 Översikten hämtar bara det korten du valt behöver. Döljer du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram alla aviseringar, vilket gör den snabbare att öppna — korten för fakturor och offerter hämtar då bara sina egna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
 
+## Lista och kort
+
+Kundorder, Offerter, Inköpsorder, Förfrågningar, Tillverkningsordrar, Fakturor, Leverantörsfakturor, Artikelregister, Kunder och Leverantörer visas med en **smal lista** till vänster och det dokument du har valt till höger, så att du kan gå från dokument till dokument utan att lämna listan.
+
+- Listan har ett sökfält, knappar för de vanligaste urvalen (till exempel **Alla**, **Öppna**, **Levererade** och **Fakturerade** under Kundorder) och två rader per dokument: kundens eller leverantörens namn, numret med datum och status. Längst ned står hur många som visas av hur många det finns, och fler rader hämtas när du rullar mot slutet.
+- **Klicka på en rad** så visas dokumentet till höger, och raden markeras i listan. Listan står kvar med samma sökning, urval och rullning när du byter dokument.
+- **+** överst i listan skapar ett nytt dokument, som **+ Ny kundorder**.
+- **Visa som tabell** (knappen med rutnätet överst i listan) visar i stället den breda tabellen med alla kolumner, **Kolumner** och **Exportera**. **Visa som lista** i tabellens verktygsrad går tillbaka. Valet gäller den listan och sparas i webbläsaren. Öppnar du listan med ett filter, en sökning eller en genväg som **+ Ny kundorder**, till exempel från en favorit, visas tabellen.
+- På **mobilen** och i smala fönster visas listan eller dokumentet, inte båda.
+
 ## Listor: sök, filter och bläddring
 
 Alla registerlistor (artiklar, kunder, leverantörer, ordrar, saldon, transaktioner, tidrapporter…) fungerar likadant:

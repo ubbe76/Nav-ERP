@@ -8,6 +8,7 @@ import { API_URL, apiFetch } from "../../lib/api";
 import { confirmLeave } from "../../lib/unsavedGuard";
 import styles from "./ListControls.module.css";
 import { ExportMenu } from "./ExportMenu";
+import { ListViewToggle } from "../split/ListViewToggle";
 
 // Återkoppling (Nav som program, punkt 7): while a list's new search, filter
 // or page is on its way, <html data-list-pending> fades the table
@@ -154,6 +155,7 @@ export function ListToolbar({ placeholder = "Sök…", onSearchKeyDown, children
         />
       </div>
       {children}
+      <ListViewToggle />
     </div>
   );
 }

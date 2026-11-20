@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
+import { SplitView } from "../../../../components/split/SplitView";
 import { InvoiceCard } from "../../../../components/sales/InvoiceCard";
 import { EInvoiceSection } from "../../../../components/sales/EInvoiceSection";
 import { MailSection, type SendButtonConfig } from "../../../../components/mail/MailSection";
@@ -97,63 +98,66 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
 
   return (
     <AppShell>
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{invoice.invoiceNumber ?? "Utkast"}</div>
-          <div className={shellStyles.meta}>
-            {documentLabel} · {invoice.customerName}
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/forsaljning/fakturor" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{invoice.invoiceNumber ?? "Utkast"}</div>
+            <div className={shellStyles.meta}>
+              {documentLabel} · {invoice.customerName}
+            </div>
           </div>
+          <HelpLink chapter="forsaljning" anchor="fakturor" label="Hjälp om fakturor" />
         </div>
-        <HelpLink chapter="forsaljning" anchor="fakturor" label="Hjälp om fakturor" />
-      </div>
 
-      <InvoiceCard
-        invoice={invoice}
-        paymentTerms={paymentTerms}
-        creditedInvoiceNumber={creditedInvoice?.invoiceNumber ?? null}
-        canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false}
-        reminderDefaultTo={reminderDefaultTo}
-        reminderFee={settings.reminderFee}
-        vatCodes={vatCodes}
-        customerOnHold={customer?.invoiceOnHold ?? false}
-        customerVat={
-          customer
-            ? {
-                country: customer.country,
-                vatNumber: customer.vatNumber,
-                privatePerson: customer.privatePerson,
-                reverseChargeConstruction: customer.reverseChargeConstruction,
-              }
-            : null
-        }
-      />
-
-      {invoice.type === "invoice" && invoice.invoiceNumber && (
-        <DeviationsSection
-          filter={{ invoiceId: invoice.id }}
-          newDeviation={{ type: "customer", customerId: invoice.customerId, invoiceId: invoice.id }}
-          buttonLabel="Ny reklamation"
+        <InvoiceCard
+          invoice={invoice}
+          paymentTerms={paymentTerms}
+          creditedInvoiceNumber={creditedInvoice?.invoiceNumber ?? null}
+          canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false}
+          reminderDefaultTo={reminderDefaultTo}
+          reminderFee={settings.reminderFee}
+          vatCodes={vatCodes}
+          customerOnHold={customer?.invoiceOnHold ?? false}
+          customerVat={
+            customer
+              ? {
+                  country: customer.country,
+                  vatNumber: customer.vatNumber,
+                  privatePerson: customer.privatePerson,
+                  reverseChargeConstruction: customer.reverseChargeConstruction,
+                }
+              : null
+          }
         />
-      )}
 
-      {canMail && invoice.invoiceNumber && (
-        <EInvoiceSection invoiceId={invoice.id} invoiceNumber={invoice.invoiceNumber} />
-      )}
+        {invoice.type === "invoice" && invoice.invoiceNumber && (
+          <DeviationsSection
+            filter={{ invoiceId: invoice.id }}
+            newDeviation={{ type: "customer", customerId: invoice.customerId, invoiceId: invoice.id }}
+            buttonLabel="Ny reklamation"
+          />
+        )}
 
-      {canMail && (
-        <MailSection
-          emails={emails}
-          defaultTo={invoiceEmail}
-          sendButtons={sendButtons}
-          documentLanguage={documentLanguageOf(invoice.language)}
-          pdfLinks={[{ label: `${documentLabel} (PDF)`, href: `/api/v1/invoices/${invoice.id}/pdf` }]}
-        />
-      )}
+        {canMail && invoice.invoiceNumber && (
+          <EInvoiceSection invoiceId={invoice.id} invoiceNumber={invoice.invoiceNumber} />
+        )}
 
-      {/* Drafts have no number yet — and no audit history either, since
-          issue() is what writes the first entry — so the section only
-          mounts once the invoice has its own displayed number. */}
-      {invoice.invoiceNumber && <AuditTrailSection entityType="invoice" entityId={invoice.invoiceNumber} />}
+        {canMail && (
+          <MailSection
+            emails={emails}
+            defaultTo={invoiceEmail}
+            sendButtons={sendButtons}
+            documentLanguage={documentLanguageOf(invoice.language)}
+            pdfLinks={[{ label: `${documentLabel} (PDF)`, href: `/api/v1/invoices/${invoice.id}/pdf` }]}
+          />
+        )}
+
+        {/* Drafts have no number yet — and no audit history either, since
+            issue() is what writes the first entry — so the section only
+            mounts once the invoice has its own displayed number. */}
+        {invoice.invoiceNumber && <AuditTrailSection entityType="invoice" entityId={invoice.invoiceNumber} />}
+      </SplitView>
     </AppShell>
   );
 }

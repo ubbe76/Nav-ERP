@@ -2,6 +2,7 @@ import { PalletCardButton } from "../documents/PalletCardButton";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppShell } from "../AppShell";
+import { SplitView } from "../split/SplitView";
 import { SalesOrderDetail } from "./SalesOrderDetail";
 import { MailSection, type SendButtonConfig } from "../mail/MailSection";
 import { AuditTrailSection } from "../system/AuditTrailSection";
@@ -136,144 +137,147 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
 
   return (
     <AppShell>
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>
-            {docLabel} {kind === "quote" ? (quoteNumber ?? order.orderNumber) : order.orderNumber}
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list={route === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>
+              {docLabel} {kind === "quote" ? (quoteNumber ?? order.orderNumber) : order.orderNumber}
+            </div>
+            <div className={shellStyles.meta}>
+              {order.customerName}
+              {fromQuote && ` · Från offert ${fromQuote}`}
+            </div>
           </div>
-          <div className={shellStyles.meta}>
-            {order.customerName}
-            {fromQuote && ` · Från offert ${fromQuote}`}
+          <div className={shellStyles.topbarActions}>
+            <Link href={kind === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              {kind === "quote" ? "Offerter" : "Kundorder"}
+            </Link>
+            <HelpLink
+              chapter="forsaljning"
+              anchor={kind === "quote" ? "offerter" : "kundorder"}
+              label={kind === "quote" ? "Hjälp om offerter" : "Hjälp om kundorder"}
+            />
           </div>
         </div>
-        <div className={shellStyles.topbarActions}>
-          <Link href={kind === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            {kind === "quote" ? "Offerter" : "Kundorder"}
-          </Link>
-          <HelpLink
-            chapter="forsaljning"
-            anchor={kind === "quote" ? "offerter" : "kundorder"}
-            label={kind === "quote" ? "Hjälp om offerter" : "Hjälp om kundorder"}
-          />
-        </div>
-      </div>
 
-      <SalesOrderDetail
-        order={order}
-        rows={rows}
-        locations={locations}
-        deliveryAddresses={deliveryAddresses}
-        registers={{ deliveryTerms, paymentTerms, carriers }}
-        freightEnabled={freightStatus.enabled}
-      />
-
-      {deliveries.length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <SectionHeading>Följesedlar</SectionHeading>
-          <Table<SalesDelivery>
-            columns={[
-              { key: "deliveryNumber", label: "Följesedel", width: "160px" },
-              { key: "deliveredAt", label: "Datum", width: "180px" },
-              { key: "rowCount", label: "Rader", width: "100px", align: "right" },
-              { key: "shipment", label: "Frakt", width: "1.4fr" },
-              { key: "id", label: "", width: "1fr", align: "right" },
-            ]}
-            rows={deliveries}
-            renderCell={(row, key) => {
-              switch (key) {
-                case "deliveryNumber":
-                  return isUndone(row) ? (
-                    <span>
-                      {row.deliveryNumber}{" "}
-                      <span style={{ background: "var(--status-stopped-bg)", color: "var(--status-stopped-text)", padding: "1px 8px", borderRadius: "var(--radius-control-sm)", fontSize: 12, fontWeight: 600 }}>
-                        Ångrad
-                      </span>
-                    </span>
-                  ) : (
-                    row.deliveryNumber
-                  );
-                case "deliveredAt":
-                  return formatStockholmDateTime(row.deliveredAt);
-                case "rowCount":
-                  return row.rowCount;
-                case "shipment":
-                  return isUndone(row) ? null : (
-                    <BookTransportButton
-                      deliveryId={row.id}
-                      shipment={row.shipment}
-                      enabled={freightStatus.enabled}
-                      carriers={carriers}
-                      defaultCarrierId={order.carrierId ?? customer?.carrierId ?? null}
-                    />
-                  );
-                case "id":
-                  return (
-                    <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
-                      <a href={`/api/v1/deliveries/${row.id}/pdf`} target="_blank" rel="noopener noreferrer">
-                        PDF
-                      </a>
-                      {!(isUndone(row)) && <PalletCardButton deliveryId={row.id} />}
-                      {!(isUndone(row)) && (
-                        <UndoDeliveryButton orderId={order.id} deliveryId={row.id} orderStatus={order.status} />
-                      )}
-                    </span>
-                  );
-                default:
-                  return null;
-              }
-            }}
-          />
-        </div>
-      )}
-
-      {kind === "order" && (
-        <DeviationsSection
-          filter={{ salesOrderId: order.id }}
-          newDeviation={{ type: "customer", customerId: order.customerId, salesOrderId: order.id }}
-          buttonLabel="Ny reklamation"
+        <SalesOrderDetail
+          order={order}
+          rows={rows}
+          locations={locations}
+          deliveryAddresses={deliveryAddresses}
+          registers={{ deliveryTerms, paymentTerms, carriers }}
+          freightEnabled={freightStatus.enabled}
         />
-      )}
 
-      <MailSection
-        emails={emails}
-        defaultTo={defaultTo}
-        sendButtons={sendButtons}
-        documentLanguage={documentLanguage}
-        configurationPrices={
-          rows.some((r) => r.configuration !== null)
-            ? { defaultChecked: customer?.showConfigurationPrices ?? false }
-            : undefined
-        }
-        pdfLinks={
-          order.status === "lost"
-            ? []
-            : [
-          { label: "Offert (PDF)", href: `/api/v1/sales-orders/${order.id}/pdf?variant=quote`, configurationPrices: true },
-          // Only on the order card — a quote has neither an order
-          // confirmation nor anything to pick.
-          ...(kind === "order"
-            ? [
-                {
-                  label: "Orderbekräftelse (PDF)",
-                  href: `/api/v1/sales-orders/${order.id}/pdf?variant=confirmation`,
-                  configurationPrices: true,
-                },
-                { label: "Plocklista (PDF)", href: `/api/v1/sales-orders/${order.id}/pick-list` },
-              ]
-            : []),
-          ...(order.status === "invoiced" && order.invoiceNumber
-            ? [{ label: "Faktura (PDF)", href: `/api/v1/sales-orders/${order.id}/invoice-pdf` }]
-            : []),
-        ]}
-        showDocumentColumn
-        drawingCount={drawingCount}
-      />
+        {deliveries.length > 0 && (
+          <div style={{ marginTop: 28 }}>
+            <SectionHeading>Följesedlar</SectionHeading>
+            <Table<SalesDelivery>
+              columns={[
+                { key: "deliveryNumber", label: "Följesedel", width: "160px" },
+                { key: "deliveredAt", label: "Datum", width: "180px" },
+                { key: "rowCount", label: "Rader", width: "100px", align: "right" },
+                { key: "shipment", label: "Frakt", width: "1.4fr" },
+                { key: "id", label: "", width: "1fr", align: "right" },
+              ]}
+              rows={deliveries}
+              renderCell={(row, key) => {
+                switch (key) {
+                  case "deliveryNumber":
+                    return isUndone(row) ? (
+                      <span>
+                        {row.deliveryNumber}{" "}
+                        <span style={{ background: "var(--status-stopped-bg)", color: "var(--status-stopped-text)", padding: "1px 8px", borderRadius: "var(--radius-control-sm)", fontSize: 12, fontWeight: 600 }}>
+                          Ångrad
+                        </span>
+                      </span>
+                    ) : (
+                      row.deliveryNumber
+                    );
+                  case "deliveredAt":
+                    return formatStockholmDateTime(row.deliveredAt);
+                  case "rowCount":
+                    return row.rowCount;
+                  case "shipment":
+                    return isUndone(row) ? null : (
+                      <BookTransportButton
+                        deliveryId={row.id}
+                        shipment={row.shipment}
+                        enabled={freightStatus.enabled}
+                        carriers={carriers}
+                        defaultCarrierId={order.carrierId ?? customer?.carrierId ?? null}
+                      />
+                    );
+                  case "id":
+                    return (
+                      <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
+                        <a href={`/api/v1/deliveries/${row.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                          PDF
+                        </a>
+                        {!(isUndone(row)) && <PalletCardButton deliveryId={row.id} />}
+                        {!(isUndone(row)) && (
+                          <UndoDeliveryButton orderId={order.id} deliveryId={row.id} orderStatus={order.status} />
+                        )}
+                      </span>
+                    );
+                  default:
+                    return null;
+                }
+              }}
+            />
+          </div>
+        )}
 
-      <AuditTrailSection
-        entityType="sales_order"
-        entityId={order.orderNumber}
-        alsoEntityId={quoteNumber && quoteNumber !== order.orderNumber ? quoteNumber : undefined}
-      />
+        {kind === "order" && (
+          <DeviationsSection
+            filter={{ salesOrderId: order.id }}
+            newDeviation={{ type: "customer", customerId: order.customerId, salesOrderId: order.id }}
+            buttonLabel="Ny reklamation"
+          />
+        )}
+
+        <MailSection
+          emails={emails}
+          defaultTo={defaultTo}
+          sendButtons={sendButtons}
+          documentLanguage={documentLanguage}
+          configurationPrices={
+            rows.some((r) => r.configuration !== null)
+              ? { defaultChecked: customer?.showConfigurationPrices ?? false }
+              : undefined
+          }
+          pdfLinks={
+            order.status === "lost"
+              ? []
+              : [
+            { label: "Offert (PDF)", href: `/api/v1/sales-orders/${order.id}/pdf?variant=quote`, configurationPrices: true },
+            // Only on the order card — a quote has neither an order
+            // confirmation nor anything to pick.
+            ...(kind === "order"
+              ? [
+                  {
+                    label: "Orderbekräftelse (PDF)",
+                    href: `/api/v1/sales-orders/${order.id}/pdf?variant=confirmation`,
+                    configurationPrices: true,
+                  },
+                  { label: "Plocklista (PDF)", href: `/api/v1/sales-orders/${order.id}/pick-list` },
+                ]
+              : []),
+            ...(order.status === "invoiced" && order.invoiceNumber
+              ? [{ label: "Faktura (PDF)", href: `/api/v1/sales-orders/${order.id}/invoice-pdf` }]
+              : []),
+          ]}
+          showDocumentColumn
+          drawingCount={drawingCount}
+        />
+
+        <AuditTrailSection
+          entityType="sales_order"
+          entityId={order.orderNumber}
+          alsoEntityId={quoteNumber && quoteNumber !== order.orderNumber ? quoteNumber : undefined}
+        />
+      </SplitView>
     </AppShell>
   );
 }

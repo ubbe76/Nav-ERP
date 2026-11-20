@@ -1,5 +1,8 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
+import { SplitListPage } from "../../../components/split/SplitListPage";
+import { TableView } from "../../../components/split/ListViewToggle";
+import { listPageView } from "../../../lib/listViewServer";
 import { InvoicesPageClient } from "../../../components/sales/InvoicesPageClient";
 import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
@@ -8,6 +11,9 @@ import type { Invoice, Paged } from "../../../lib/types";
 
 export default async function InvoicesPage(props: { searchParams: Promise<PageSearchParams> }) {
   const searchParams = await props.searchParams;
+  // Lista och kort: without a filter or a shortcut in the address, the narrow
+  // list beside an empty card (unless the user chose Visa som tabell).
+  if ((await listPageView("/forsaljning/fakturor", searchParams)) === "list") return <SplitListPage list="/forsaljning/fakturor" />;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const invoices = await apiGet<Paged<Invoice>>(
@@ -20,7 +26,9 @@ export default async function InvoicesPage(props: { searchParams: Promise<PageSe
 
   return (
     <AppShell>
-      <InvoicesPageClient invoices={invoices} initialOrderId={orderId} pageSize={pageSize} />
+      <TableView list="/forsaljning/fakturor">
+        <InvoicesPageClient invoices={invoices} initialOrderId={orderId} pageSize={pageSize} />
+      </TableView>
     </AppShell>
   );
 }

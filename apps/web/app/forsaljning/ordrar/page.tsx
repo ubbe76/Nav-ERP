@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
+import { SplitListPage } from "../../../components/split/SplitListPage";
+import { TableView } from "../../../components/split/ListViewToggle";
+import { listPageView } from "../../../lib/listViewServer";
 import { SalesOrdersPageClient } from "../../../components/sales/SalesOrdersPageClient";
 import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
@@ -17,6 +20,9 @@ export default async function SalesOrdersPage(props: { searchParams: Promise<Pag
     ).toString();
     redirect(`/forsaljning/offerter?${qs}`);
   }
+  // Lista och kort: without a filter or a shortcut in the address, the narrow
+  // list beside an empty card (unless the user chose Visa som tabell).
+  if ((await listPageView("/forsaljning/ordrar", searchParams)) === "list") return <SplitListPage list="/forsaljning/ordrar" />;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const orders = await apiGet<Paged<SalesOrder>>(
@@ -26,7 +32,9 @@ export default async function SalesOrdersPage(props: { searchParams: Promise<Pag
 
   return (
     <AppShell>
-      <SalesOrdersPageClient orders={orders} pageSize={pageSize} kind="order" />
+      <TableView list="/forsaljning/ordrar">
+        <SalesOrdersPageClient orders={orders} pageSize={pageSize} kind="order" />
+      </TableView>
     </AppShell>
   );
 }

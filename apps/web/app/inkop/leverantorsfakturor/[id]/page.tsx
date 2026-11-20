@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
+import { SplitView } from "../../../../components/split/SplitView";
 import { SupplierInvoiceCard } from "../../../../components/purchase/SupplierInvoiceCard";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { canOpen } from "../../../../lib/pageAccess";
@@ -29,19 +30,22 @@ export default async function SupplierInvoiceDetailPage(props: { params: Promise
 
   return (
     <AppShell>
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{invoice.registrationNumber}</div>
-          <div className={shellStyles.meta}>Leverantörsfaktura · {invoice.supplierName}</div>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/inkop/leverantorsfakturor" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{invoice.registrationNumber}</div>
+            <div className={shellStyles.meta}>Leverantörsfaktura · {invoice.supplierName}</div>
+          </div>
+          <HelpLink chapter="inkop" anchor="leverantorsfakturor" label="Hjälp om leverantörsfakturor" />
         </div>
-        <HelpLink chapter="inkop" anchor="leverantorsfakturor" label="Hjälp om leverantörsfakturor" />
-      </div>
 
-      <SupplierInvoiceCard
-        invoice={invoice}
-        canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false}
-        vatCodes={vatCodes}
-      />
+        <SupplierInvoiceCard
+          invoice={invoice}
+          canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false}
+          vatCodes={vatCodes}
+        />
+      </SplitView>
     </AppShell>
   );
 }
