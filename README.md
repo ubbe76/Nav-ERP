@@ -57,8 +57,8 @@ exempeldata. Klicka på en bild för full storlek.
   </tr>
   <tr>
     <td width="50%">
-      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-manufacturing-orders-dark.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-manufacturing-orders-dark.png" alt="Listan över tillverkningsorder i mörkt tema"></a>
-      <br><sub><b>Tillverkningsorder</b> i mörkt tema</sub>
+      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-manufacturing-orders-dark.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-manufacturing-orders-dark.png" alt="Tillverkningsordrarna med den smala listan bredvid en tillverkningsorder, i mörkt tema"></a>
+      <br><sub><b>Lista och kort</b> — tillverkningsordrarna i mörkt tema</sub>
     </td>
     <td width="50%">
       <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-article-overview-dracula.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-article-overview-dracula.png" alt="Artikelöversikten med behov, inkommande och disponibelt i temat Dracula"></a>
@@ -67,7 +67,7 @@ exempeldata. Klicka på en bild för full storlek.
   </tr>
   <tr>
     <td width="50%">
-      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png" alt="Fyra dokument öppna i flikar med kundordern framme"></a>
+      <a href="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png"><img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/screenshot-flikar.png" alt="Fyra funktioner öppna i flikar med kundordern framme bredvid listan"></a>
       <br><sub><b>Flikar</b> — flera funktioner öppna samtidigt</sub>
     </td>
   </tr>
