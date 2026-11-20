@@ -11,7 +11,7 @@ export default async function AnlaggningsgrupperPage() {
 
   if (!user || !canOpen(user, "/ekonomi/anlaggningsgrupper")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function AnlaggningsgrupperPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <AnlaggningsgrupperPageClient categories={categories} accounts={accounts.rows} />
     </AppShell>
   );

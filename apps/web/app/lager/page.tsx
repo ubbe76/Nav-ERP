@@ -29,7 +29,7 @@ export default async function StockPage() {
   const sections = await withPluginPages(visible, "lager", cookieHeader);
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lager</div>

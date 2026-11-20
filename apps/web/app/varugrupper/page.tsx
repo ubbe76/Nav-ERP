@@ -9,7 +9,7 @@ export default async function ArticleGroupsPage() {
   const groups = await apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader);
 
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <ArticleGroupsPageClient groups={groups} />
     </AppShell>
   );

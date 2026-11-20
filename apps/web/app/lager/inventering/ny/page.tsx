@@ -15,7 +15,7 @@ export default async function NewStockCountPage(props: { searchParams: Promise<{
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Lager">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -24,7 +24,7 @@ export default async function NewStockCountPage(props: { searchParams: Promise<{
   const locations = await apiGet<StockLocation[]>("/api/v1/stock/locations", cookieHeader);
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Ny inventering</div>

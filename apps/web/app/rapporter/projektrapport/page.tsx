@@ -18,14 +18,14 @@ export default async function ProjektrapportPage(props: { searchParams: Promise<
 
   if (!user || !canOpen(user, "/rapporter/projektrapport")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Projektrapport</div>

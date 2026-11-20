@@ -21,7 +21,7 @@ export default async function OpenSupplierInvoicesPage(props: { searchParams: Pr
   ]);
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <OpenSupplierInvoicesPageClient openInvoices={openInvoices} suppliers={suppliers.rows} pageSize={pageSize} bankMissing={bank?.missing ?? []} />
     </AppShell>
   );

@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
+import { SplitView } from "../../../components/split/SplitView";
 import { ArticleTabs } from "../../../components/articles/ArticleTabs";
 import { ArticleCardHeader } from "../../../components/articles/ArticleCardHeader";
 import { apiGet } from "../../../lib/api";
@@ -34,20 +35,23 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
   const blockedOnHand = balances.reduce((sum, b) => sum + (b.locationBlocked && Number(b.quantityOnHand) > 0 ? Number(b.quantityOnHand) : 0), 0);
 
   return (
-    <AppShell active="Artiklar">
-      <ArticleCardHeader article={article} totalOnHand={totalOnHand} blockedOnHand={blockedOnHand} />
+    <AppShell>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/artiklar/register" selectedId={params.id}>
+        <ArticleCardHeader article={article} totalOnHand={totalOnHand} blockedOnHand={blockedOnHand} />
 
-      <ArticleTabs
-        article={article}
-        bom={bom}
-        bomTree={bomTree}
-        balances={balances}
-        calculations={calculations}
-        routing={routing}
-        workCenters={workCenters}
-        groups={groups}
-        articleLocations={articleLocations}
-      />
+        <ArticleTabs
+          article={article}
+          bom={bom}
+          bomTree={bomTree}
+          balances={balances}
+          calculations={calculations}
+          routing={routing}
+          workCenters={workCenters}
+          groups={groups}
+          articleLocations={articleLocations}
+        />
+      </SplitView>
     </AppShell>
   );
 }

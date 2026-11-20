@@ -53,7 +53,7 @@ export default async function StockTransactionsPage(props: { searchParams: Promi
   ]);
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Transaktioner</div>

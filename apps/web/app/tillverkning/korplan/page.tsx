@@ -7,7 +7,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 // side (URL-driven ?resurs=&tom=); this server component owns the topbar.
 export default function RunPlanPage() {
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Körplan</div>

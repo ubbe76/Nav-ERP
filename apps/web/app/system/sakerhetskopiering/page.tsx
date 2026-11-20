@@ -14,7 +14,7 @@ export default async function BackupPage() {
   // Admin-only, matching the rest of System.
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function BackupPage() {
   const usage = await apiGet<StorageUsage>("/api/v1/storage", cookieHeader);
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Säkerhetskopiering</div>

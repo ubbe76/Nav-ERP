@@ -11,14 +11,14 @@ export default async function InvoiceScanSettingsPage() {
   const settings = await apiGet<InvoiceScanSettings>("/api/v1/settings/invoice-scan", cookieHeader).catch(() => null);
   if (settings === null) {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Fakturaskanning</div>

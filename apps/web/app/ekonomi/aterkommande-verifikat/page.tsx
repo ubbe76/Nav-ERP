@@ -11,7 +11,7 @@ export default async function AterkommandeVerifikatPage() {
 
   if (!user || !canOpen(user, "/ekonomi/aterkommande-verifikat")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function AterkommandeVerifikatPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <AterkommandeVerifikatPageClient recurring={recurring.rows} templates={templates.rows} />
     </AppShell>
   );

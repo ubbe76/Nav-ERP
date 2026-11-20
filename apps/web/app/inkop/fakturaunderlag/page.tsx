@@ -20,7 +20,7 @@ export default async function PurchaseInvoiceBasisPage(props: { searchParams: Pr
   ]);
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <PurchaseInvoiceBasisPageClient basis={basis} suppliers={suppliers.rows} pageSize={pageSize} />
     </AppShell>
   );

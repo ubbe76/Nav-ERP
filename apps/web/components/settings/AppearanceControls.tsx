@@ -10,7 +10,7 @@ import { DENSITY_LABELS, TABLE_DENSITIES } from "../../lib/listColumns";
 import { FAVORITES_PLACEMENTS, FAVORITES_PLACEMENT_LABELS, favoritesPlacement, type FavoritesPlacement } from "../../lib/overviewCards";
 import segmentedStyles from "../ThemeToggle.module.css";
 
-// Tema, Täthet, Dokument i flikar and Favoriter — the user menu's settings,
+// Tema, Täthet, Flikar and Favoriter — the user menu's settings,
 // also shown on Mina inställningar (the user's choice 2026-11-13: copied to
 // the page, nothing moved out of the menu yet). One component, so the two
 // places can never disagree; each passes its own section/label classes.
@@ -59,10 +59,10 @@ export function AppearanceControls({ classes }: { classes: { section?: string; l
           ))}
         </div>
       </div>
-      {/* Flikar (punkt 5): documents as tabs on a wide screen. */}
+      {/* Flikar (Programramen): a tab per function on a wide screen. */}
       <div className={classes.section}>
-        <span className={classes.label}>Dokument i flikar</span>
-        <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Dokument i flikar">
+        <span className={classes.label}>Flikar</span>
+        <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Flikar">
           {[true, false].map((on) => (
             <button
               key={String(on)}

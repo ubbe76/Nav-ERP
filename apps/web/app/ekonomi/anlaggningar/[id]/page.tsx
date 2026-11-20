@@ -16,7 +16,7 @@ export default async function AnlaggningPage(props: { params: Promise<{ id: stri
 
   if (!user || !canOpen(user, "/ekonomi/anlaggningar")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -31,7 +31,7 @@ export default async function AnlaggningPage(props: { params: Promise<{ id: stri
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>

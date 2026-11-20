@@ -18,14 +18,14 @@ export default async function OrderforteckningInkopPage(props: { searchParams: P
 
   if (!user || !canOpen(user, "/rapporter/orderforteckning-inkop")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Orderförteckning inköp</div>

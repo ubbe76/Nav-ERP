@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
+import { SplitView } from "../../../components/split/SplitView";
 import { PartnerTabs } from "../../../components/partners/PartnerTabs";
 import { NewQuoteFromCustomerButton } from "../../../components/sales/NewQuoteFromCustomerButton";
 import { apiGet } from "../../../lib/api";
@@ -46,40 +47,43 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
     ]);
 
   return (
-    <AppShell active="Försäljning">
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{customer.name}</div>
-          <div className={shellStyles.meta}>Kund</div>
+    <AppShell>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/kunder" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{customer.name}</div>
+            <div className={shellStyles.meta}>Kund</div>
+          </div>
+          <div className={shellStyles.topbarActions}>
+            <NewQuoteFromCustomerButton customer={customer} />
+            <HelpLink chapter="forsaljning" anchor="kunder" label="Hjälp om kunder" />
+          </div>
         </div>
-        <div className={shellStyles.topbarActions}>
-          <NewQuoteFromCustomerButton customer={customer} />
-          <HelpLink chapter="forsaljning" anchor="kunder" label="Hjälp om kunder" />
-        </div>
-      </div>
 
-      <PartnerTabs
-        partner={customer}
-        endpointBase="/api/v1/customers"
-        kind="customer"
-        showCurrency
-        registers={{ deliveryTerms, paymentTerms, carriers }}
-        contacts={contacts}
-        deliveryAddresses={deliveryAddresses}
-        priceLists={priceLists.rows}
-        customerPrices={customerPrices}
-        customerArticleNumbers={customerArticleNumbers}
-        articleGroups={articleGroups}
-        deliveryDayDefaults={
-          settings ? { mode: settings.customerDeliveryDayMode, transitDays: settings.customerTransitDays } : null
-        }
-      />
+        <PartnerTabs
+          partner={customer}
+          endpointBase="/api/v1/customers"
+          kind="customer"
+          showCurrency
+          registers={{ deliveryTerms, paymentTerms, carriers }}
+          contacts={contacts}
+          deliveryAddresses={deliveryAddresses}
+          priceLists={priceLists.rows}
+          customerPrices={customerPrices}
+          customerArticleNumbers={customerArticleNumbers}
+          articleGroups={articleGroups}
+          deliveryDayDefaults={
+            settings ? { mode: settings.customerDeliveryDayMode, transitDays: settings.customerTransitDays } : null
+          }
+        />
 
-      <DeviationsSection
-        filter={{ customerId: customer.id }}
-        newDeviation={{ type: "customer", customerId: customer.id }}
-        buttonLabel="Ny reklamation"
-      />
+        <DeviationsSection
+          filter={{ customerId: customer.id }}
+          newDeviation={{ type: "customer", customerId: customer.id }}
+          buttonLabel="Ny reklamation"
+        />
+      </SplitView>
     </AppShell>
   );
 }

@@ -1,0 +1,286 @@
+/* Lista och kort (Programramen, steg 2): the narrow list and the card side
+   by side, edge to edge in the content column. The list stays (sticky) and
+   scrolls on its own; the card scrolls with the page as before, so the
+   card's own sticky rows keep working. */
+:global([data-app-main]):has(.split) {
+  padding: 0;
+}
+
+.split {
+  display: flex;
+  align-items: flex-start;
+  min-height: calc(100vh - var(--app-toolbar-height) - var(--app-statusbar-height));
+}
+
+.list {
+  position: sticky;
+  top: var(--app-toolbar-height);
+  width: 340px;
+  flex-shrink: 0;
+  height: calc(100vh - var(--app-toolbar-height) - var(--app-statusbar-height));
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+}
+
+.detail {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 32px 48px;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  min-height: 50vh;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 16px 10px;
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+}
+.iconButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-divider);
+}
+.iconButton[data-new] {
+  color: var(--accent-fg);
+}
+.iconButton:focus-visible,
+.chip:focus-visible,
+.row:focus-visible,
+.viewButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 10px;
+  padding: 0 10px;
+  height: 34px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-input-surface);
+  color: var(--color-text-muted);
+}
+.search:focus-within {
+  border-color: var(--accent);
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.chip {
+  padding: 3px 10px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-pill);
+  background: none;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--color-divider);
+}
+.chip[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  transition: opacity 150ms ease;
+}
+.rows[data-pending] {
+  opacity: 0.75;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 10px 16px 10px 13px;
+  border-bottom: 1px solid var(--color-divider);
+  border-left: 3px solid transparent;
+  text-decoration: none;
+  color: inherit;
+  font-family: var(--font-body);
+}
+.row:hover {
+  background: var(--color-divider);
+}
+.row[data-selected] {
+  background: var(--color-divider);
+  border-left-color: var(--accent);
+}
+
+.primary {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.amount {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.secondary {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status {
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+.status[data-tone="running"] {
+  color: var(--status-running-text);
+}
+.status[data-tone="delayed"] {
+  color: var(--status-delayed-text);
+}
+.status[data-tone="stopped"] {
+  color: var(--status-stopped-text);
+}
+.status[data-tone="done"] {
+  color: var(--status-done-text);
+}
+.status[data-tone="draft"] {
+  color: var(--status-draft-text);
+}
+
+.note {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.sentinel {
+  height: 1px;
+}
+
+.foot {
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Visa som lista, at the end of a table page's toolbar. */
+.viewButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-divider);
+}
+
+/* Narrow screens: the card, or the list when no card is chosen. */
+@media (max-width: 1024px) {
+  .split {
+    display: block;
+    min-height: 0;
+  }
+  .split[data-selected] .list {
+    display: none;
+  }
+  .split:not([data-selected]) .detail {
+    display: none;
+  }
+  .list {
+    position: static;
+    width: 100%;
+    height: auto;
+    border-right: none;
+  }
+  .rows {
+    overflow: visible;
+  }
+  .detail {
+    padding: 20px 20px 32px;
+  }
+}
+@media (max-width: 640px) {
+  .detail {
+    padding: 16px 16px 40px;
+  }
+}

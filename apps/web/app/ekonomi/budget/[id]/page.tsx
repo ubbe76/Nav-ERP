@@ -18,7 +18,7 @@ export default async function BudgetDetailPage(props: {
 
   if (!user || !canOpen(user, "/ekonomi/budget")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -34,7 +34,7 @@ export default async function BudgetDetailPage(props: {
   const dropped = Number(typeof searchParams.dropped === "string" ? searchParams.dropped : 0);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <BudgetDetailPageClient
         initial={detail}
         accounts={accounts.rows}

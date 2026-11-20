@@ -18,7 +18,7 @@ export default async function PersonalPage() {
   const sections = await withPluginPages(sectionsForUser(PERSONAL_SECTIONS, user ?? { role: "user", permissions: [] }), "personal", cookieHeader);
 
   return (
-    <AppShell active="Personal & lön">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Personal &amp; lön</div>

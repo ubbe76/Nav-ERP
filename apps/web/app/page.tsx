@@ -3,12 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import styles from "./page.module.css";
-import shellStyles from "../components/AppShell.module.css";
-import { AppToolbar } from "../components/AppToolbar";
-import { StatusBar } from "../components/StatusBar";
-import { ReadOnlyBanner } from "../components/ReadOnlyBanner";
-import { Nav } from "../components/ui/Nav";
-import { PermissionsProvider } from "../components/PermissionsProvider";
+import { AppShell } from "../components/AppShell";
 import { Button } from "../components/ui/Button";
 import { FlowStrip, type FlowStation } from "../components/dashboard/FlowStrip";
 import { AttentionCard } from "../components/dashboard/AttentionCard";
@@ -18,13 +13,7 @@ import { CustomizeOverview } from "../components/dashboard/CustomizeOverview";
 import { ListCard } from "../components/dashboard/ListCard";
 import { FavoritesCard } from "../components/dashboard/FavoritesCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
-import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
-import { NoticeHost } from "../components/ui/NoticeHost";
-import { EmbeddedBridge } from "../components/tabs/EmbeddedBridge";
-import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
-import { loadShellSettings } from "../lib/favorites";
-import { UserPrefsProvider } from "../components/UserPrefsProvider";
 import { attentionSections, type AlertKind, type AlertsResponse } from "../lib/alerts";
 import {
   OVERVIEW_CARDS,
@@ -58,13 +47,10 @@ import {
   type StockTransaction,
 } from "../lib/types";
 
-const ROLE_LABELS: Record<string, string> = { admin: "Administratör", supervisor: "Arbetsledare", user: "Användare" };
-
 export default async function OverviewPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
   if (!user) redirect("/login");
-  const roleLabel = ROLE_LABELS[user.role] ?? user.role;
 
   // The user's own choice of cards (null = the standard). Fetched first: the
   // page only loads what the visible cards need.
@@ -100,7 +86,6 @@ export default async function OverviewPage() {
     articlesInStockSummary,
     recentTransactionsPage,
     alerts,
-    favorites,
     deliveriesPage,
     arrivalsPage,
     capacity,
@@ -130,8 +115,6 @@ export default async function OverviewPage() {
     // drive the behovsberäkning, so they are fetched only when one of those
     // shows; a failing call must not take Översikten down.
     alertsUrl ? apiGet<AlertsResponse>(alertsUrl, cookieHeader).catch((): AlertsResponse | null => null) : null,
-    // The sidebar's Favoriter (null on failure — the group then stays hidden).
-    loadShellSettings(cookieHeader),
     // Leveranser / Inleveranser denna vecka: open orders whose Nästa
     // leveransdatum is on or before Sunday, earliest (late) first.
     has("deliveries")
@@ -343,68 +326,48 @@ export default async function OverviewPage() {
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Stockholm" });
 
   return (
-    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview} initialFromGroup={favorites.fromGroup}>
-    <UserPrefsProvider
-      className={shellStyles.frame}
-      initialDensity={favorites.density}
-      initialListColumns={favorites.listColumns}
-        initialDocumentTabs={favorites.documentTabs}
-    >
-      {/* The sidebar inside too: its Favoriter → Ändra offers shortcuts by the user's access. */}
-      <PermissionsProvider role={user.role} permissions={user.permissions}>
-      <Nav active="Översikt" role={user.role} permissions={user.permissions} />
-      <div className={shellStyles.column}>
-      <AppToolbar userName={user.name} userRole={roleLabel} />
-      <main className={shellStyles.main} data-app-main="">
-        <ReadOnlyBanner readOnly={user.readOnly} />
-
-        <div className={styles.topbar}>
-          <div>
-            <div className={styles.title}>Översikt</div>
-            <div className={styles.meta} style={{ textTransform: "capitalize" }}>
-              {todayLabel}
-            </div>
-          </div>
-          {/* Creating an order needs Tillverkning itself — the list page also
-              opens in read-only mode (Tillverkningsorder (läsläge)). */}
-          <div className={styles.topbarActions}>
-            <CustomizeOverview shown={cards} available={available} />
-            {satisfiesRule(user, ["tillverkning"]) && (
-              <Link href="/tillverkning/ordrar">
-                <Button variant="primary">+ Ny order</Button>
-              </Link>
-            )}
+    // AppShell: the frame as on every page; Översikten has no floating
+    // Artikelöversikt panel.
+    <AppShell articleOverview={false}>
+      <div className={styles.topbar}>
+        <div>
+          <div className={styles.title}>Översikt</div>
+          <div className={styles.meta} style={{ textTransform: "capitalize" }}>
+            {todayLabel}
           </div>
         </div>
-
-        {onboarding && <OnboardingCard initial={onboarding} />}
-
-        {cards.length === 0 && (
-          <p className={styles.noCards}>
-            Inga kort valda. Använd <strong>Anpassa</strong> för att välja vad Översikten visar.
-          </p>
-        )}
-
-        {overviewRows(cards).map((row) =>
-          row.length === 2 ? (
-            // Two half cards share a row; a lone one takes the full width.
-            <div className={styles.topRow} key={row.join("-")}>
-              {row.map((card) => cardNodes[card])}
-            </div>
-          ) : (
-            <div className={styles.fullRow} key={row[0]}>
-              {cardNodes[row[0]!]}
-            </div>
-          )
-        )}
-        <ConfirmDialogHost />
-        <NoticeHost />
-        <EmbeddedBridge />
-      </main>
-      <StatusBar userName={user.name} userRole={roleLabel} />
+        {/* Creating an order needs Tillverkning itself — the list page also
+            opens in read-only mode (Tillverkningsorder (läsläge)). */}
+        <div className={styles.topbarActions}>
+          <CustomizeOverview shown={cards} available={available} />
+          {satisfiesRule(user, ["tillverkning"]) && (
+            <Link href="/tillverkning/ordrar">
+              <Button variant="primary">+ Ny order</Button>
+            </Link>
+          )}
+        </div>
       </div>
-      </PermissionsProvider>
-    </UserPrefsProvider>
-    </FavoritesProvider>
+
+      {onboarding && <OnboardingCard initial={onboarding} />}
+
+      {cards.length === 0 && (
+        <p className={styles.noCards}>
+          Inga kort valda. Använd <strong>Anpassa</strong> för att välja vad Översikten visar.
+        </p>
+      )}
+
+      {overviewRows(cards).map((row) =>
+        row.length === 2 ? (
+          // Two half cards share a row; a lone one takes the full width.
+          <div className={styles.topRow} key={row.join("-")}>
+            {row.map((card) => cardNodes[card])}
+          </div>
+        ) : (
+          <div className={styles.fullRow} key={row[0]}>
+            {cardNodes[row[0]!]}
+          </div>
+        )
+      )}
+    </AppShell>
   );
 }

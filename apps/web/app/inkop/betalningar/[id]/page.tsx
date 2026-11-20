@@ -19,7 +19,7 @@ export default async function SupplierPaymentDetailPage(props: { params: Promise
   if (!payment) notFound();
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{payment.paymentNumber}</div>

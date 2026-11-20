@@ -12,13 +12,13 @@ export default async function DemoDataPage() {
   const status = await apiGet<DemoDataStatus>("/api/v1/demo-data", cookieHeader).catch(() => null);
   if (status === null) {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Kunde inte hämta exempeldatans status. Försök igen om en stund.</p>
       </AppShell>
     );
   }
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Exempeldata</div>

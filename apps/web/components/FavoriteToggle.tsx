@@ -11,11 +11,13 @@ import { useFavorites } from "./FavoritesProvider";
 import { FAVORITE_TITLE_MAX, favoriteHref } from "../lib/favorites";
 import shellStyles from "./AppShell.module.css";
 import styles from "./FavoriteToggle.module.css";
+import { useDocumentTabs } from "./tabs/DocumentTabs";
 
 // The page's own name as its topbar shows it (a card shows its number or
-// name there), offered as the favourite's name.
-function pageTitle(): string {
-  const text = document.querySelector(`.${shellStyles.title}`)?.textContent?.trim() ?? "";
+// name there), offered as the favourite's name — the shown tab's name when
+// the page is in a tab.
+function pageTitle(tabTitle: string | null): string {
+  const text = tabTitle ?? document.querySelector(`.${shellStyles.title}`)?.textContent?.trim() ?? "";
   return text.slice(0, FAVORITE_TITLE_MAX);
 }
 
@@ -27,6 +29,8 @@ export function FavoriteToggle() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { favorites, has, add, remove } = useFavorites();
+  const tabs = useDocumentTabs();
+  const tabTitle = tabs.available ? (tabs.tabs.find((t) => t.id === tabs.activeId)?.title ?? null) : null;
   const [naming, setNaming] = useState<string | null>(null);
 
   if (favorites === null || pathname === "/") return null;
@@ -50,7 +54,7 @@ export function FavoriteToggle() {
         className={styles.toggle}
         aria-pressed={active}
         title={active ? "Ta bort sidan ur Favoriter" : "Lägg till sidan i Favoriter"}
-        onClick={() => (active ? void remove(href) : setNaming(pageTitle()))}
+        onClick={() => (active ? void remove(href) : setNaming(pageTitle(tabTitle)))}
       >
         <Star size={14} strokeWidth={1.9} fill={active ? "currentColor" : "none"} aria-hidden="true" />
         Favorit
@@ -71,7 +75,7 @@ export function FavoriteToggle() {
           <FormHint>
             {filtered
               ? "Sidan sparas med sina filter och sin sökning, så favoriten öppnar samma urval."
-              : "Sidan läggs till under Favoriter överst i sidomenyn."}
+              : "Sidan läggs till under Favoriter, stjärnan i menyn."}
           </FormHint>
           <FormActions>
             <Button type="submit" variant="primary" disabled={!(naming ?? "").trim()}>

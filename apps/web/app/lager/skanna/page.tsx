@@ -5,7 +5,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 
 export default function ScanPage() {
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Skanna</div>

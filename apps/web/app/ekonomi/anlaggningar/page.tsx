@@ -15,7 +15,7 @@ export default async function AnlaggningarPage(props: { searchParams: Promise<Pa
 
   if (!user || !canOpen(user, "/ekonomi/anlaggningar")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -32,7 +32,7 @@ export default async function AnlaggningarPage(props: { searchParams: Promise<Pa
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <AnlaggningarPageClient assets={assets} categories={categories} runs={runs} supplierInvoices={supplierInvoices.rows} pageSize={pageSize} />
     </AppShell>
   );

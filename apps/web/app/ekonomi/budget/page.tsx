@@ -18,7 +18,7 @@ export default async function BudgetPage(props: { searchParams: Promise<PageSear
 
   if (!user || !canOpen(user, "/ekonomi/budget")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -38,7 +38,7 @@ export default async function BudgetPage(props: { searchParams: Promise<PageSear
     : { rows: [], total: 0 };
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <BudgetListPageClient fiscalYears={fiscalYears} fiscalYearId={selected?.id ?? ""} budgets={budgets.rows} />
     </AppShell>
   );

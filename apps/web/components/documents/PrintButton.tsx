@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { printPdf } from "../../lib/printPdf";
 import { Button } from "../ui/Button";
@@ -14,11 +14,13 @@ export function PrintButton({
   label = "Skriv ut",
   variant = "ghost",
   size = "small",
+  icon,
 }: {
   href: string;
   label?: string;
   variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "default" | "small";
+  icon?: ReactNode;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +36,7 @@ export function PrintButton({
 
   return (
     <>
-      <Button type="button" variant={variant} size={size} onClick={print} disabled={pending}>
+      <Button type="button" variant={variant} size={size} onClick={print} disabled={pending} icon={icon}>
         {pending ? "Skriver ut…" : label}
       </Button>
       <FormError inline>{error}</FormError>

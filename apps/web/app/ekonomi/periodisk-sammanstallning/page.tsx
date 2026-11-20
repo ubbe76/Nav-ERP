@@ -22,14 +22,14 @@ export default async function PeriodiskSammanstallningPage(props: { searchParams
 
   if (!user || !canOpen(user, "/ekonomi/periodisk-sammanstallning")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Periodisk sammanställning</div>

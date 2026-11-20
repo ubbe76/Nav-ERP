@@ -14,7 +14,7 @@ export default async function ThemesPage() {
     apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
   ]);
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Teman</div>

@@ -32,7 +32,7 @@ export default async function MySettingsPage() {
       ]);
 
   return (
-    <AppShell active="Översikt">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Mina inställningar</div>

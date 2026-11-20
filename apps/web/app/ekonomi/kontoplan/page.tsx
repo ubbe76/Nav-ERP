@@ -17,7 +17,7 @@ export default async function KontoplanPage(props: { searchParams: Promise<PageS
 
   if (!user || !canOpen(user, "/ekonomi/kontoplan")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -30,7 +30,7 @@ export default async function KontoplanPage(props: { searchParams: Promise<PageS
   );
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <KontoplanPageClient accounts={accounts} pageSize={pageSize} />
     </AppShell>
   );

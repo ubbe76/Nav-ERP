@@ -14,7 +14,7 @@ export default async function RapporterPage() {
 
   if (!user || !canOpen(user, "/rapporter")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function RapporterPage() {
   const sections = await withPluginPages(sectionsForUser(RAPPORTER_SECTIONS, user), "rapporter", cookieHeader);
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Rapporter</div>

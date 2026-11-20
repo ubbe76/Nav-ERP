@@ -13,14 +13,14 @@ export default async function ArticleImportPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Artiklar">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <ArticleImportTabs />
     </AppShell>
   );

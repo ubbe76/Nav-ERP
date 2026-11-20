@@ -15,7 +15,7 @@ export default async function AvskrivningsplanPage(props: { searchParams: Promis
 
   if (!user || !canOpen(user, "/ekonomi/avskrivningsplan")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -28,7 +28,7 @@ export default async function AvskrivningsplanPage(props: { searchParams: Promis
   const plan = selectedId ? await apiGet<FixedAssetPlan>(`/api/v1/fixed-asset-plan?fiscalYearId=${selectedId}`, cookieHeader) : null;
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Avskrivningsplan</div>

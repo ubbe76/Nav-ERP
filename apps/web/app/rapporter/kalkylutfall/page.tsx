@@ -20,14 +20,14 @@ export default async function KalkylutfallPage(props: { searchParams: Promise<Pa
 
   if (!user || !canOpen(user, "/rapporter/kalkylutfall")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Kalkylutfall</div>

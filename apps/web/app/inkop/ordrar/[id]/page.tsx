@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
+import { SplitView } from "../../../../components/split/SplitView";
 import { PurchaseOrderDetail } from "../../../../components/purchase/PurchaseOrderDetail";
 import { DispatchesSection } from "../../../../components/purchase/DispatchesSection";
 import { ReceiptsSection } from "../../../../components/purchase/ReceiptsSection";
@@ -45,63 +46,66 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   const mailable = order.status !== "cancelled" && order.status !== "closed";
 
   return (
-    <AppShell active="Inköp">
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{order.orderNumber}</div>
-          <div className={shellStyles.meta}>{order.supplierName}</div>
+    <AppShell>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/inkop/ordrar" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{order.orderNumber}</div>
+            <div className={shellStyles.meta}>{order.supplierName}</div>
+          </div>
+          <HelpLink chapter="inkop" anchor="inkopsorder" label="Hjälp om inköpsorder" />
         </div>
-        <HelpLink chapter="inkop" anchor="inkopsorder" label="Hjälp om inköpsorder" />
-      </div>
 
-      <PurchaseOrderDetail
-        order={order}
-        rows={rows}
-        locations={locations}
-        registers={{ deliveryTerms, paymentTerms, carriers }}
-      />
+        <PurchaseOrderDetail
+          order={order}
+          rows={rows}
+          locations={locations}
+          registers={{ deliveryTerms, paymentTerms, carriers }}
+        />
 
-      <ReceiptsSection orderId={order.id} orderStatus={order.status} receipts={receipts} rows={rows} />
+        <ReceiptsSection orderId={order.id} orderStatus={order.status} receipts={receipts} rows={rows} />
 
-      <DispatchesSection orderId={order.id} dispatches={dispatches} hideWhenEmpty />
+        <DispatchesSection orderId={order.id} dispatches={dispatches} hideWhenEmpty />
 
-      <DeviationsSection
-        filter={{ purchaseOrderId: order.id }}
-        newDeviation={{ type: "supplier", supplierId: order.supplierId, purchaseOrderId: order.id }}
-        buttonLabel="Ny avvikelse"
-      />
+        <DeviationsSection
+          filter={{ purchaseOrderId: order.id }}
+          newDeviation={{ type: "supplier", supplierId: order.supplierId, purchaseOrderId: order.id }}
+          buttonLabel="Ny avvikelse"
+        />
 
-      <MailSection
-        documentLanguage={documentLanguageOf(order.supplierLanguage)}
-        emails={emails}
-        defaultTo={defaultTo}
-        sendButtons={
-          mailable
-            ? [
-                {
-                  label: "Skicka via e-post",
-                  modalTitle: `Skicka ${order.orderNumber} via e-post`,
-                  endpoint: `/api/v1/purchase-orders/${order.id}/send-email`,
-                  ccSupplierId: order.supplierId,
-                  mail: {
-                    kind: "purchaseOrder",
-                    language: documentLanguageOf(order.supplierLanguage),
-                    values: {
-                      number: order.orderNumber,
-                      supplier: order.supplierName,
-                      contact: order.yourReference,
-                      deliveryDate: order.expectedDeliveryDate,
+        <MailSection
+          documentLanguage={documentLanguageOf(order.supplierLanguage)}
+          emails={emails}
+          defaultTo={defaultTo}
+          sendButtons={
+            mailable
+              ? [
+                  {
+                    label: "Skicka via e-post",
+                    modalTitle: `Skicka ${order.orderNumber} via e-post`,
+                    endpoint: `/api/v1/purchase-orders/${order.id}/send-email`,
+                    ccSupplierId: order.supplierId,
+                    mail: {
+                      kind: "purchaseOrder",
+                      language: documentLanguageOf(order.supplierLanguage),
+                      values: {
+                        number: order.orderNumber,
+                        supplier: order.supplierName,
+                        contact: order.yourReference,
+                        deliveryDate: order.expectedDeliveryDate,
+                      },
                     },
                   },
-                },
-              ]
-            : []
-        }
-        pdfLinks={[{ label: "Ladda ner PDF", href: `/api/v1/purchase-orders/${order.id}/pdf` }]}
-        drawingCount={drawingCount}
-      />
+                ]
+              : []
+          }
+          pdfLinks={[{ label: "Ladda ner PDF", href: `/api/v1/purchase-orders/${order.id}/pdf` }]}
+          drawingCount={drawingCount}
+        />
 
-      <AuditTrailSection entityType="purchase_order" entityId={order.orderNumber} />
+        <AuditTrailSection entityType="purchase_order" entityId={order.orderNumber} />
+      </SplitView>
     </AppShell>
   );
 }

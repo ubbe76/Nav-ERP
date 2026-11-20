@@ -17,8 +17,8 @@ import styles from "./KeyboardShortcuts.module.css";
 //   elsewhere the arrows scroll as usual), Enter opens it, Esc unmarks it,
 // - a right-click on a table row opens its ⋯ menu (a right-click on a link
 //   keeps the browser's menu, e.g. Öppna i ny flik),
-// - 1–9 switch tab (punkt 5): 1 the page, 2.. the documents — from inside a
-//   tab too (the page there asks the frame around it). Ctrl+Tab and
+// - 1–9 switch tab (flikar per funktion): tab n in the strip — from inside
+//   a tab too (the page there asks the frame around it). Ctrl+Tab and
 //   Ctrl+1–9 stay the browser's.
 export const SHORTCUTS: { keys: string[]; text: string }[] = [
   { keys: ["Ctrl", "K"], text: "Sök eller gå till" },
@@ -27,7 +27,7 @@ export const SHORTCUTS: { keys: string[]; text: string }[] = [
   { keys: ["Enter"], text: "Öppna den markerade raden" },
   { keys: ["Ctrl", "S"], text: "Spara formuläret du står i" },
   { keys: ["Esc"], text: "Stäng dialogen eller avmarkera raden" },
-  { keys: ["1", "–", "9"], text: "Byt flik (1 = sidan, 2 = första dokumentet …)" },
+  { keys: ["1", "–", "9"], text: "Byt flik (1 = första fliken, 2 = andra …)" },
   { keys: ["?"], text: "Visa kortkommandon" },
 ];
 

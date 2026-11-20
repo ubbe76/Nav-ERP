@@ -32,7 +32,7 @@ export default async function HuvudbokPage(props: { searchParams: Promise<PageSe
 
   if (!user || !canOpen(user, "/ekonomi/huvudbok")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -59,7 +59,7 @@ export default async function HuvudbokPage(props: { searchParams: Promise<PageSe
   const calendarYear = currentCalendarYearBounds();
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Huvudbok</div>

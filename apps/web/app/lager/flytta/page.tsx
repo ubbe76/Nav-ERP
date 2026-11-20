@@ -24,7 +24,7 @@ export default async function StockTransferPage(props: {
     : null;
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <StockTransferPageClient
         locations={locations}
         fromLocationId={searchParams.from ?? null}

@@ -14,7 +14,7 @@ export default async function EmployeesPage() {
 
   if (!user || !["admin", "supervisor"].includes(user.role)) {
     return (
-      <AppShell active="Personal & lön">
+      <AppShell>
         <p>Endast arbetsledare och administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function EmployeesPage() {
   const employees = await apiGet<Employee[]>("/api/v1/employees", cookieHeader);
 
   return (
-    <AppShell active="Personal & lön">
+    <AppShell>
       <EmployeesPageClient employees={employees} />
     </AppShell>
   );

@@ -35,7 +35,7 @@ export default async function PayrollReportPage(props: {
 
   if (!user || !["admin", "supervisor"].includes(user.role)) {
     return (
-      <AppShell active="Personal & lön">
+      <AppShell>
         <p>Endast arbetsledare och administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -50,7 +50,7 @@ export default async function PayrollReportPage(props: {
   const monthLabel = `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)}`;
 
   return (
-    <AppShell active="Personal & lön">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Löneunderlag</div>

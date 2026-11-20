@@ -1,12 +1,17 @@
-/* The tab strip (Nav som program, punkt 5): a row at the bottom of the
-   toolbar, --app-tabstrip-height high (globals.css). */
+/* The tab strip (Programramen): a row above the content, right of the menu,
+   --app-tabstrip-height high (globals.css). It stays at the top of the
+   content column (sticky under the toolbar). */
 .strip {
+  position: sticky;
+  top: var(--app-toolbar-base);
+  z-index: 29;
   display: flex;
   align-items: flex-end;
-  gap: 8px;
   height: var(--app-tabstrip-height);
-  padding: 0 40px;
+  padding: 0 12px;
   min-width: 0;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .tabs {
@@ -23,14 +28,18 @@
 }
 
 .tabWrap {
+  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
   max-width: 220px;
   flex-shrink: 0;
+  margin-bottom: -1px;
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: var(--radius-control-sm) var(--radius-control-sm) 0 0;
+}
+.tabWrap:hover {
   background: var(--color-divider);
 }
 .tabWrap[data-active] {
@@ -38,9 +47,6 @@
   border-color: var(--color-border);
 }
 /* Dra en flik: the dragged tab dims, a line marks where it lands. */
-.tabWrap {
-  position: relative;
-}
 .tabWrap[data-dragging] {
   opacity: 0.5;
 }
@@ -63,9 +69,10 @@
 .tab {
   display: flex;
   align-items: center;
+  gap: 7px;
   min-width: 0;
   height: calc(var(--app-tabstrip-height) - 6px);
-  padding: 0 10px 0 12px;
+  padding: 0 6px 0 12px;
   border: none;
   background: none;
   font-family: var(--font-body);
@@ -78,24 +85,19 @@
   font-weight: 600;
 }
 .tab:focus-visible,
-.close:focus-visible,
-.split:focus-visible {
+.close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-/* The page itself: the first tab, never closed. */
-.pageTab {
+.icon {
+  display: inline-flex;
   flex-shrink: 0;
-  max-width: 220px;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: var(--radius-control-sm) var(--radius-control-sm) 0 0;
-  background: var(--color-divider);
+  color: var(--color-text-muted);
 }
-.pageTab[aria-selected="true"] {
-  background: var(--color-bg);
-  border-color: var(--color-border);
+.icon :global(svg) {
+  width: 14px;
+  height: 14px;
 }
 
 .title {
@@ -119,25 +121,4 @@
 .close:hover {
   background: var(--color-border);
   color: var(--color-text-primary);
-}
-
-.split {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-  padding: 4px 10px;
-  border: 1px solid var(--color-border-control);
-  border-radius: var(--radius-control-sm);
-  background: var(--color-surface);
-  font-family: var(--font-body);
-  font-size: 12.5px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.split[aria-pressed="true"] {
-  color: var(--accent-text);
-  background: var(--accent);
-  border-color: var(--accent);
 }

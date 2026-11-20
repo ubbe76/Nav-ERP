@@ -11,7 +11,7 @@ export default async function FreightSettingsPage() {
   const settings = await apiGet<FreightSettings>("/api/v1/freight-settings", cookieHeader).catch(() => null);
   if (settings === null) {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -25,7 +25,7 @@ export default async function FreightSettingsPage() {
   ]);
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Frakt</div>

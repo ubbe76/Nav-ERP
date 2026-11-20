@@ -16,7 +16,7 @@ export default async function PriceListsPage(props: { searchParams: Promise<Page
   );
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <PriceListsPageClient priceLists={priceLists} pageSize={pageSize} />
     </AppShell>
   );

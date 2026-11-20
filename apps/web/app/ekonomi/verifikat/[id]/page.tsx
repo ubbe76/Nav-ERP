@@ -17,7 +17,7 @@ export default async function VerificationDetailPage(props: { params: Promise<{ 
 
   if (!user || !canOpen(user, "/ekonomi/verifikat")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -45,7 +45,7 @@ export default async function VerificationDetailPage(props: { params: Promise<{ 
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{verification.displayNumber}</div>

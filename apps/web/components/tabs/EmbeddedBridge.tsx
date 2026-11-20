@@ -1,20 +1,26 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
-import { documentHref, isEmbedded, provisionalTitle, sameDocument } from "../../lib/documentTabs";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { appHref, documentHref, isEmbedded, provisionalTitle, type TabMessage } from "../../lib/documentTabs";
+import { functionOf } from "../../lib/navFunctions";
 import { postToFrame } from "../../lib/tabNavigation";
+import { confirmLeave } from "../../lib/unsavedGuard";
 import shellStyles from "../AppShell.module.css";
 
-// The page's side of a document tab (Nav som program, punkt 5) — does
+// The page's side of a tab (Programramen, flikar per funktion) — does
 // nothing on an ordinary page. It tells the frame around where the tab is
-// now and what it is called, opens another document's link as a tab of its
-// own, and sends any other page (a list, a hub) to the frame instead of
-// opening it inside the tab. Window capture runs before the unsaved-changes
-// guard: neither leaves this page.
+// now and what it is called; a link to a page of the same function
+// navigates inside the tab as usual, a link to another function goes to the
+// frame (that function's tab), and Ctrl/⌘-click on a document asks for a tab
+// of its own. Window capture runs before the unsaved-changes guard: a link
+// that leaves for another tab leaves nothing here. The frame can also send
+// the tab somewhere (nav-tab-go: a menu choice or a link to a document of
+// this function from another tab).
 export function EmbeddedBridge() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   useEffect(() => {
     if (!isEmbedded()) return;
@@ -29,26 +35,44 @@ export function EmbeddedBridge() {
   useEffect(() => {
     if (!isEmbedded()) return;
     function onClick(e: MouseEvent) {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (e.defaultPrevented || e.button !== 0 || e.shiftKey || e.altKey) return;
       const anchor = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!anchor || (anchor.target && anchor.target !== "_self") || anchor.hasAttribute("download")) return;
-      const url = new URL(anchor.href, window.location.href);
-      if (url.origin !== window.location.origin || url.pathname.startsWith("/api/")) return;
-      const here = `${window.location.pathname}${window.location.search}`;
-      const doc = documentHref(anchor.href, window.location.origin);
-      // Within this document (an anchor, another flik of the card): stays.
-      if (doc ? sameDocument(doc, here) : url.pathname === window.location.pathname) return;
+      const page = appHref(anchor.href, window.location.origin);
+      if (!page) return;
+      if (e.metaKey || e.ctrlKey) {
+        // A document in a tab of its own; any other page as the browser does.
+        const doc = documentHref(anchor.href, window.location.origin);
+        if (!doc) return;
+        e.preventDefault();
+        e.stopPropagation();
+        postToFrame({ type: "nav-tab-open", href: doc, title: provisionalTitle(anchor.textContent), own: true });
+        return;
+      }
+      if (functionOf(page) === functionOf(window.location.pathname)) return;
       e.preventDefault();
       e.stopPropagation();
-      postToFrame(
-        doc
-          ? { type: "nav-tab-open", href: doc, title: provisionalTitle(anchor.textContent) }
-          : { type: "nav-tab-navigate", href: `${url.pathname}${url.search}${url.hash}` }
-      );
+      postToFrame({ type: "nav-tab-open", href: page, title: provisionalTitle(anchor.textContent) });
     }
     window.addEventListener("click", onClick, true);
     return () => window.removeEventListener("click", onClick, true);
   }, []);
+
+  useEffect(() => {
+    if (!isEmbedded()) return;
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin || e.source !== window.parent) return;
+      const message = e.data as TabMessage | null;
+      if (!message || typeof message !== "object" || message.type !== "nav-tab-go") return;
+      const page = appHref(message.href, window.location.origin);
+      if (!page) return;
+      void confirmLeave().then((ok) => {
+        if (ok) router.push(page);
+      });
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [router]);
 
   return null;
 }

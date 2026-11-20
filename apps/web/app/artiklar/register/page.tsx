@@ -1,5 +1,8 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
+import { SplitListPage } from "../../../components/split/SplitListPage";
+import { TableView } from "../../../components/split/ListViewToggle";
+import { listPageView } from "../../../lib/listViewServer";
 import { ArticlesPageClient } from "../../../components/articles/ArticlesPageClient";
 import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
@@ -8,6 +11,9 @@ import type { Article, ArticleGroup, Paged, RegisterEntry } from "../../../lib/t
 
 export default async function ArticlesPage(props: { searchParams: Promise<PageSearchParams> }) {
   const searchParams = await props.searchParams;
+  // Lista och kort: without a filter or a shortcut in the address, the narrow
+  // list beside an empty card (unless the user chose Visa som tabell).
+  if ((await listPageView("/artiklar/register", searchParams)) === "list") return <SplitListPage list="/artiklar/register" />;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const [articles, groups, articleCodes] = await Promise.all([
@@ -17,8 +23,10 @@ export default async function ArticlesPage(props: { searchParams: Promise<PageSe
   ]);
 
   return (
-    <AppShell active="Artiklar">
-      <ArticlesPageClient articles={articles} groups={groups} articleCodes={articleCodes} pageSize={pageSize} />
+    <AppShell>
+      <TableView list="/artiklar/register">
+        <ArticlesPageClient articles={articles} groups={groups} articleCodes={articleCodes} pageSize={pageSize} />
+      </TableView>
     </AppShell>
   );
 }

@@ -20,14 +20,14 @@ export default async function KassationPage(props: { searchParams: Promise<PageS
 
   if (!user || !canOpen(user, "/rapporter/kassation")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Kassationsstatistik</div>

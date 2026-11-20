@@ -11,7 +11,7 @@ export default async function VerifikatmallarPage() {
 
   if (!user || !canOpen(user, "/ekonomi/verifikatmallar")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -24,7 +24,7 @@ export default async function VerifikatmallarPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <VerifikatmallarPageClient templates={templates.rows} accounts={accounts.rows} series={series} />
     </AppShell>
   );

@@ -11,7 +11,7 @@ export default async function PluginsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const plugins = await apiGet<PluginListRow[]>("/api/v1/plugins", cookieHeader);
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Tillägg</div>

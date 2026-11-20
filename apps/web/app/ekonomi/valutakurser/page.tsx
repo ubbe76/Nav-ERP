@@ -26,7 +26,7 @@ export default async function ValutakurserPage(props: { searchParams: Promise<Pa
 
   if (!user || !canOpen(user, "/ekonomi/valutakurser")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -45,7 +45,7 @@ export default async function ValutakurserPage(props: { searchParams: Promise<Pa
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <ValutakurserPageClient rates={rates} settings={settings} pageSize={pageSize} />
     </AppShell>
   );

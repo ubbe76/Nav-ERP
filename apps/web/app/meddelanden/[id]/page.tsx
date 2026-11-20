@@ -20,7 +20,7 @@ export default async function ConversationPage(props: { params: Promise<{ id: st
 
   if (!user || !canOpen(user, "/meddelanden")) {
     return (
-      <AppShell active="Översikt">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -29,7 +29,7 @@ export default async function ConversationPage(props: { params: Promise<{ id: st
   const conversation = await apiGet<ConversationDetail>(`/api/v1/conversations/${id}`, cookieHeader).catch(() => null);
 
   return (
-    <AppShell active="Översikt">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{conversation ? conversation.subject : "Meddelanden"}</div>

@@ -10,7 +10,7 @@ export default async function UsersPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -21,7 +21,7 @@ export default async function UsersPage() {
   const groups = await apiGet<PermissionGroup[]>("/api/v1/permission-groups", cookieHeader);
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <UsersPageClient users={users} groups={groups} currentUserId={user.id} />
     </AppShell>
   );

@@ -41,6 +41,7 @@ const OVERVIEW_CARDS_KEY = "overview_cards";
 const DENSITY_KEY = "table_density";
 // Flikar (punkt 5): absent = true.
 const DOCUMENT_TABS_KEY = "document_tabs";
+const NAV_PANEL_COLLAPSED_KEY = "nav_panel_collapsed";
 const LIST_COLUMNS_KEY = "list_columns";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
@@ -196,6 +197,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       density: decodeDensity(byKey.get(DENSITY_KEY)),
       listColumns: decodeListColumns(byKey.get(LIST_COLUMNS_KEY)),
       documentTabs: byKey.get(DOCUMENT_TABS_KEY) !== "false",
+      navPanelCollapsed: byKey.get(NAV_PANEL_COLLAPSED_KEY) === "true",
     };
   }
 
@@ -241,6 +243,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       }
       if (input.documentTabs !== undefined) {
         await repo.upsert(userId, DOCUMENT_TABS_KEY, String(input.documentTabs));
+      }
+      if (input.navPanelCollapsed !== undefined) {
+        await repo.upsert(userId, NAV_PANEL_COLLAPSED_KEY, String(input.navPanelCollapsed));
       }
       if (input.density !== undefined) {
         await repo.upsert(userId, DENSITY_KEY, input.density);

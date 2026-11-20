@@ -12,7 +12,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 export default async function BehovsberakningPage() {
   const pageSize = await getListPageSize();
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Behovsberäkning</div>

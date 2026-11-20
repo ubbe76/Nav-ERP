@@ -170,7 +170,7 @@ export const PLUGIN_TAB_TARGET_LABELS: Record<PluginTabTarget, string> = {
   supplier: "Leverantörskortet",
 };
 
-// The sidebar entry (AppShell `active`) of a module.
+// A module's name as the menu shows it.
 export const PLUGIN_MODULE_NAV: Record<PluginPageModule, string> = {
   artiklar: "Artiklar",
   inkop: "Inköp",

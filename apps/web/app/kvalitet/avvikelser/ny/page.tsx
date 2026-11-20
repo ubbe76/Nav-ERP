@@ -109,7 +109,7 @@ export default async function NewDeviationPage(props: { searchParams: Promise<Pa
   if (type && reason && reason.active && reasonAppliesToType(reason, type)) draft.reasonId = reason.id;
 
   return (
-    <AppShell active="Kvalitet">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Ny avvikelse</div>

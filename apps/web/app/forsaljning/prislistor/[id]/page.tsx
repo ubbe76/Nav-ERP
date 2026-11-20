@@ -18,7 +18,7 @@ export default async function PriceListDetailPage(props: { params: Promise<{ id:
   if (!priceList) notFound();
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <PriceListDetail priceList={priceList} />
     </AppShell>
   );

@@ -19,14 +19,14 @@ export default async function ProdukterIArbetePage(props: { searchParams: Promis
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Produkter i arbete</div>

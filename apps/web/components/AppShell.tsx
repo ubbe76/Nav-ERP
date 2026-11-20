@@ -9,10 +9,13 @@ import { ArticleOverviewProvider } from "./articles/ArticleOverviewProvider";
 import { ConfirmDialogHost } from "./ui/ConfirmDialogHost";
 import { NoticeHost } from "./ui/NoticeHost";
 import { EmbeddedBridge } from "./tabs/EmbeddedBridge";
+import { TabbedContent } from "./tabs/DocumentTabs";
+import { TabStrip } from "./tabs/TabStrip";
 import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { FavoritesProvider } from "./FavoritesProvider";
 import { getCurrentUser } from "../lib/api";
 import { loadShellSettings } from "../lib/favorites";
+import { loadNavPanel } from "../lib/navPanel";
 import { UserPrefsProvider } from "./UserPrefsProvider";
 import { WarehouseModeProvider } from "./stock/WarehouseMode";
 import { loadMultipleWarehouses } from "../lib/warehouseMode";
@@ -20,55 +23,60 @@ import styles from "./AppShell.module.css";
 
 const ROLE_LABELS: Record<string, string> = { admin: "Administratör", supervisor: "Arbetsledare", user: "Användare" };
 
-type NavActive = Parameters<typeof Nav>[0]["active"];
-
 interface AppShellProps {
-  active: NavActive;
   children: ReactNode;
+  // The floating Artikelöversikt panel, opened from any row's
+  // ArticleOverviewButton — Översikten deliberately has none.
+  articleOverview?: boolean;
 }
 
-// Shared frame for pages beyond the dashboard: the sidebar with Favoriter,
-// the toolbar (Favorit, Aviseringar, the user menu with theme and Logga ut),
-// the content and the status bar — Nav som program, punkt 1. app/page.tsx
-// keeps its own inline copy with the same parts.
-export async function AppShell({ active, children }: AppShellProps) {
+// The app frame around every page (Programramen, 2026-11-20): the toolbar
+// across the window (logo, Ctrl+K, Favorit, Aviseringar, Meddelanden, the
+// user menu), under it the icon rail with the module panel (Nav) and the
+// content column — the tab strip and the page — and the status bar at the
+// bottom. With the tabs on, the page itself is shown in its tab
+// (TabbedContent).
+export async function AppShell({ children, articleOverview = true }: AppShellProps) {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
-  const [user, favorites, multipleWarehouses] = await Promise.all([
+  const [user, settings, multipleWarehouses] = await Promise.all([
     getCurrentUser(cookieHeader),
     loadShellSettings(cookieHeader),
     loadMultipleWarehouses(cookieHeader),
   ]);
   if (!user) redirect("/login");
   const roleLabel = ROLE_LABELS[user.role] ?? user.role;
+  const navPanel = await loadNavPanel(user, cookieHeader);
+  const page = <WarehouseModeProvider multipleWarehouses={multipleWarehouses}>{children}</WarehouseModeProvider>;
 
   return (
-    <FavoritesProvider initial={favorites.favorites} initialInSidebar={favorites.inSidebar} initialOnOverview={favorites.onOverview} initialFromGroup={favorites.fromGroup}>
+    <FavoritesProvider initial={settings.favorites} initialInSidebar={settings.inSidebar} initialOnOverview={settings.onOverview} initialFromGroup={settings.fromGroup}>
       <UserPrefsProvider
         className={styles.frame}
-        initialDensity={favorites.density}
-        initialListColumns={favorites.listColumns}
-        initialDocumentTabs={favorites.documentTabs}
+        initialDensity={settings.density}
+        initialListColumns={settings.listColumns}
+        initialDocumentTabs={settings.documentTabs}
+        initialNavPanelCollapsed={settings.navPanelCollapsed}
       >
-        {/* The sidebar inside too: its Favoriter → Ändra offers shortcuts by the user's access. */}
+        {/* The menu inside too: its Favoriter → Ändra offers shortcuts by the user's access. */}
         <PermissionsProvider role={user.role} permissions={user.permissions}>
-          <Nav active={active} role={user.role} permissions={user.permissions} />
-          <div className={styles.column}>
-            <AppToolbar userName={user.name} userRole={roleLabel} />
-            <main className={styles.main} data-app-main="">
-              <ReadOnlyBanner readOnly={user.readOnly} />
-              {/* One floating Artikelöversikt panel per page, opened from any
-                  row's ArticleOverviewButton. The dashboard (own inline shell)
-                  deliberately has none. */}
-              {/* Flera lager: whether a place is shown with its warehouse. */}
-              <WarehouseModeProvider multipleWarehouses={multipleWarehouses}>
-                <ArticleOverviewProvider>{children}</ArticleOverviewProvider>
-              </WarehouseModeProvider>
-              <ConfirmDialogHost />
-              <NoticeHost />
-              <EmbeddedBridge />
-            </main>
-            <StatusBar userName={user.name} userRole={roleLabel} />
+          <AppToolbar userName={user.name} userRole={roleLabel} />
+          <div className={styles.body}>
+            <Nav role={user.role} permissions={user.permissions} modules={navPanel} />
+            <div className={styles.column} data-app-column="">
+              <TabStrip />
+              <main className={styles.main} data-app-main="">
+                <TabbedContent>
+                  <ReadOnlyBanner readOnly={user.readOnly} />
+                  {/* Flera lager: whether a place is shown with its warehouse. */}
+                  {articleOverview ? <ArticleOverviewProvider>{page}</ArticleOverviewProvider> : page}
+                </TabbedContent>
+                <ConfirmDialogHost />
+                <NoticeHost />
+                <EmbeddedBridge />
+              </main>
+            </div>
           </div>
+          <StatusBar userName={user.name} userRole={roleLabel} />
         </PermissionsProvider>
       </UserPrefsProvider>
     </FavoritesProvider>

@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
+import { SplitView } from "../../../../components/split/SplitView";
 import { ManufacturingOrderDetail } from "../../../../components/manufacturing/ManufacturingOrderDetail";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { satisfiesRule } from "../../../../lib/permissions";
@@ -59,38 +60,41 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
   ]);
 
   return (
-    <AppShell active="Tillverkning">
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{order.orderNumber}</div>
-          <div className={shellStyles.meta}>
-            {order.articleNumber} — {order.articleName}
+    <AppShell>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/tillverkning/ordrar" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{order.orderNumber}</div>
+            <div className={shellStyles.meta}>
+              {order.articleNumber} — {order.articleName}
+            </div>
           </div>
+          <HelpLink chapter="tillverkning" anchor="tillverkningsorder" label="Hjälp om tillverkningsorder" />
         </div>
-        <HelpLink chapter="tillverkning" anchor="tillverkningsorder" label="Hjälp om tillverkningsorder" />
-      </div>
 
-      <ManufacturingOrderDetail
-        order={order}
-        materials={materials}
-        operations={operations}
-        locations={locations}
-        timeReports={timeReports}
-        employees={employees}
-        costCalculations={costCalculations}
-        scrap={scrap}
-        reports={reports}
-        legoPurchases={legoPurchases}
-        canUndoReports={canUndoReports}
-        timeKindSplit={timeSettings.timeKindSplit === true}
-        suggestRest={suggestsRest(timeSettings, "report")}
-      />
+        <ManufacturingOrderDetail
+          order={order}
+          materials={materials}
+          operations={operations}
+          locations={locations}
+          timeReports={timeReports}
+          employees={employees}
+          costCalculations={costCalculations}
+          scrap={scrap}
+          reports={reports}
+          legoPurchases={legoPurchases}
+          canUndoReports={canUndoReports}
+          timeKindSplit={timeSettings.timeKindSplit === true}
+          suggestRest={suggestsRest(timeSettings, "report")}
+        />
 
-      <DeviationsSection
-        filter={{ manufacturingOrderId: order.id }}
-        newDeviation={{ type: "internal", manufacturingOrderId: order.id, articleId: order.articleId }}
-        buttonLabel="Ny avvikelse"
-      />
+        <DeviationsSection
+          filter={{ manufacturingOrderId: order.id }}
+          newDeviation={{ type: "internal", manufacturingOrderId: order.id, articleId: order.articleId }}
+          buttonLabel="Ny avvikelse"
+        />
+      </SplitView>
     </AppShell>
   );
 }

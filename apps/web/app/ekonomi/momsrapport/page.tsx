@@ -22,7 +22,7 @@ export default async function MomsrapportPage(props: { searchParams: Promise<Pag
 
   if (!user || !canOpen(user, "/ekonomi/momsrapport")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -39,7 +39,7 @@ export default async function MomsrapportPage(props: { searchParams: Promise<Pag
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Momsrapport</div>

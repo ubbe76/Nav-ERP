@@ -20,7 +20,7 @@ export default async function OpenInvoicesPage(props: { searchParams: Promise<Pa
   ]);
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <OpenInvoicesPageClient openInvoices={openInvoices} customers={customers.rows} pageSize={pageSize} />
     </AppShell>
   );

@@ -17,7 +17,7 @@ export default async function InvoiceInboxPage(props: { searchParams: Promise<Pa
   );
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <InvoiceInboxPageClient scans={scans} pageSize={pageSize} />
     </AppShell>
   );

@@ -11,7 +11,7 @@ export default async function EditThemePage({ params }: { params: Promise<{ id: 
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const theme = await apiGet<ThemeDetail>(`/api/v1/themes/${id}`, cookieHeader).catch(() => null);
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{theme ? theme.name : "Tema"}</div>

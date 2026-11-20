@@ -16,7 +16,7 @@ export default async function ReferensrantaPage() {
 
   if (!user || !canOpen(user, "/ekonomi/referensranta")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -25,7 +25,7 @@ export default async function ReferensrantaPage() {
   const rates = await apiGet<Paged<ReferenceRateEntry>>("/api/v1/reference-rates", cookieHeader);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <ReferenceRatesPageClient rates={rates} today={stockholmToday()} />
     </AppShell>
   );

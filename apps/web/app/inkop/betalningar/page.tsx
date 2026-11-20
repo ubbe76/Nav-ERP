@@ -30,7 +30,7 @@ export default async function SupplierPaymentsPage(props: { searchParams: Promis
   const invoiceId = typeof searchParams.invoice === "string" ? searchParams.invoice : undefined;
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <SupplierPaymentsPageClient
         payments={payments}
         suppliers={suppliers.rows}

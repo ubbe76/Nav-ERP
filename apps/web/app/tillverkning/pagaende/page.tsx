@@ -17,7 +17,7 @@ export default async function InProgressPage() {
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <InProgressPageClient stamps={stamps} attendance={attendance} suggestRest={suggestsRest(settings, "stamp")} />
     </AppShell>
   );

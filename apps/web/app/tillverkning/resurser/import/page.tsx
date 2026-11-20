@@ -14,14 +14,14 @@ export default async function ResourceImportPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Tillverkning">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <ResourceImportTabs />
     </AppShell>
   );

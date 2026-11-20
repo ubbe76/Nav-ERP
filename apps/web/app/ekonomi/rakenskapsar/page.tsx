@@ -14,7 +14,7 @@ export default async function RakenskapsarPage() {
 
   if (!user || !canOpen(user, "/ekonomi/rakenskapsar")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -25,7 +25,7 @@ export default async function RakenskapsarPage() {
   const fiscalYears = await apiGet<FiscalYear[]>("/api/v1/fiscal-years", cookieHeader);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <RakenskapsarPageClient fiscalYears={fiscalYears} />
     </AppShell>
   );

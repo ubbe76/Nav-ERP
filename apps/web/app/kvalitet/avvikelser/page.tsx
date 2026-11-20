@@ -38,7 +38,7 @@ export default async function DeviationsPage(props: { searchParams: Promise<Page
   ]);
 
   return (
-    <AppShell active="Kvalitet">
+    <AppShell>
       <DeviationsPageClient deviations={deviations} pageSize={pageSize} reasons={reasons} responsible={responsible} />
     </AppShell>
   );

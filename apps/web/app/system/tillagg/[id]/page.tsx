@@ -15,7 +15,7 @@ export default async function PluginCardPage({ params }: { params: Promise<{ id:
     apiGet<PluginDeliveryRow[]>(`/api/v1/plugins/${id}/deliveries`, cookieHeader).catch(() => []),
   ]);
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{plugin ? plugin.name : "Tillägg"}</div>

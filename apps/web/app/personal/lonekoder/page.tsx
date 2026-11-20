@@ -16,7 +16,7 @@ export default async function LonekoderPage(props: { searchParams: Promise<{ fli
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Personal & lön">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -30,7 +30,7 @@ export default async function LonekoderPage(props: { searchParams: Promise<{ fli
   ]);
 
   return (
-    <AppShell active="Personal & lön">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lönekoder</div>

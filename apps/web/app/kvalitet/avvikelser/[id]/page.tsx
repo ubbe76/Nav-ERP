@@ -53,7 +53,7 @@ export default async function DeviationPage(props: { params: Promise<{ id: strin
   const endpoint = `/api/v1/deviations/${deviation.id}/email`;
 
   return (
-    <AppShell active="Kvalitet">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{deviation.deviationNumber}</div>

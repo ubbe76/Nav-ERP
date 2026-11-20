@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
+import { SplitView } from "../../../components/split/SplitView";
 import { PartnerTabs } from "../../../components/partners/PartnerTabs";
 import { NewOrderFromSupplierButton } from "../../../components/purchase/NewOrderFromSupplierButton";
 import { apiGet } from "../../../lib/api";
@@ -30,36 +31,39 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
   ]);
 
   return (
-    <AppShell active="Inköp">
-      <div className={shellStyles.topbar}>
-        <div>
-          <div className={shellStyles.title}>{supplier.name}</div>
-          <div className={shellStyles.meta}>Leverantör</div>
+    <AppShell>
+      {/* Lista och kort: the function's narrow list beside the card. */}
+      <SplitView list="/leverantorer" selectedId={params.id}>
+        <div className={shellStyles.topbar}>
+          <div>
+            <div className={shellStyles.title}>{supplier.name}</div>
+            <div className={shellStyles.meta}>Leverantör</div>
+          </div>
+          <div className={shellStyles.topbarActions}>
+            <NewOrderFromSupplierButton supplier={supplier} />
+            <HelpLink chapter="inkop" anchor="leverantorer" label="Hjälp om leverantörer" />
+          </div>
         </div>
-        <div className={shellStyles.topbarActions}>
-          <NewOrderFromSupplierButton supplier={supplier} />
-          <HelpLink chapter="inkop" anchor="leverantorer" label="Hjälp om leverantörer" />
-        </div>
-      </div>
 
-      <PartnerTabs
-        partner={supplier}
-        endpointBase="/api/v1/suppliers"
-        kind="supplier"
-        showCurrency
-        registers={{ deliveryTerms, paymentTerms, carriers }}
-        contacts={contacts}
-        deliveryAddresses={deliveryAddresses}
-        deliveryDayDefaults={
-          settings ? { mode: settings.supplierDeliveryDayMode, transitDays: settings.supplierTransitDays } : null
-        }
-      />
+        <PartnerTabs
+          partner={supplier}
+          endpointBase="/api/v1/suppliers"
+          kind="supplier"
+          showCurrency
+          registers={{ deliveryTerms, paymentTerms, carriers }}
+          contacts={contacts}
+          deliveryAddresses={deliveryAddresses}
+          deliveryDayDefaults={
+            settings ? { mode: settings.supplierDeliveryDayMode, transitDays: settings.supplierTransitDays } : null
+          }
+        />
 
-      <DeviationsSection
-        filter={{ supplierId: supplier.id }}
-        newDeviation={{ type: "supplier", supplierId: supplier.id }}
-        buttonLabel="Ny avvikelse"
-      />
+        <DeviationsSection
+          filter={{ supplierId: supplier.id }}
+          newDeviation={{ type: "supplier", supplierId: supplier.id }}
+          buttonLabel="Ny avvikelse"
+        />
+      </SplitView>
     </AppShell>
   );
 }
