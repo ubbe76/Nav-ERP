@@ -22,6 +22,11 @@ interface TableProps<T extends { id: string }> {
   // Summary row keyed by column — omitted keys render empty. Used for the
   // order total on the document cards.
   footer?: Record<string, ReactNode>;
+  // A row typed straight into the table (Programramen steg 3: + Ny rad on the
+  // order cards) — after the rows, before the summary row, keyed by column
+  // like the footer. `span` lets a cell take the next columns too (the
+  // article picker over Artikelnummer and Benämning).
+  entryRow?: { cells: Record<string, ReactNode>; span?: Record<string, number> };
   // A row marked from the keyboard (artikelregistret's search field walks it
   // with the arrow keys) — styled like a hovered row with an accent edge.
   highlightedRowId?: string | null;
@@ -81,6 +86,7 @@ export function Table<T extends { id: string }>({
   renderCell,
   emptyText = "Inga rader att visa",
   footer,
+  entryRow,
   highlightedRowId,
   onColumnResize,
   onColumnReorder,
@@ -130,7 +136,7 @@ export function Table<T extends { id: string }>({
           </div>
         ))}
       {skeleton && <span className={styles.srOnly}>Hämtar …</span>}
-      {rows.length === 0 && !skeleton && <div className={styles.empty}>{emptyText}</div>}
+      {rows.length === 0 && !skeleton && !entryRow && <div className={styles.empty}>{emptyText}</div>}
       {rows.map((row) => (
         <div className={styles.row} key={row.id} data-row="" data-highlighted={row.id === highlightedRowId || undefined}>
           {columns.map((col) => (
@@ -140,6 +146,21 @@ export function Table<T extends { id: string }>({
           ))}
         </div>
       ))}
+      {entryRow && (
+        <div className={styles.entryRow} data-entry-row="">
+          {entryCells(columns, entryRow.span).map(({ col, span }) => (
+            <div
+              key={col.key}
+              className={styles.cell}
+              data-align={col.align ?? "left"}
+              data-label={entryRow.cells[col.key] === undefined ? undefined : col.label}
+              style={span > 1 ? { gridColumn: `span ${span}` } : undefined}
+            >
+              {entryRow.cells[col.key]}
+            </div>
+          ))}
+        </div>
+      )}
       {footer && rows.length > 0 && (
         <div className={styles.footerRow}>
           {columns.map((col) => (
@@ -158,6 +179,18 @@ export function Table<T extends { id: string }>({
       )}
     </div>
   );
+}
+
+// The entry row's cells: a spanning cell swallows the columns it covers.
+function entryCells(columns: Column[], spans: Record<string, number> = {}): { col: Column; span: number }[] {
+  const out: { col: Column; span: number }[] = [];
+  for (let i = 0; i < columns.length; i++) {
+    const col = columns[i]!;
+    const span = Math.max(1, Math.min(spans[col.key] ?? 1, columns.length - i));
+    out.push({ col, span });
+    i += span - 1;
+  }
+  return out;
 }
 
 // Återkoppling (Nav som program, punkt 7): a table-shaped placeholder for a

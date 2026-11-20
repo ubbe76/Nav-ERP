@@ -8,7 +8,6 @@ import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import type { Inquiry, InquiryRow, RegisterEntry, Supplier } from "../../../../lib/types";
-import shellStyles from "../../../../components/AppShell.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 
 export default async function InquiryDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -34,16 +33,17 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
       <SplitView list="/inkop/forfragningar" selectedId={params.id}>
-        <div className={shellStyles.topbar}>
-          <div>
-            <div className={shellStyles.title}>{inquiry.inquiryNumber}</div>
-            <div className={shellStyles.meta}>Förfrågan · {inquiry.supplierName}</div>
-          </div>
-          <HelpLink chapter="inkop" anchor="forfragningar-prisforfragan" label="Hjälp om förfrågningar" />
-        </div>
-
-        <InquiryDetail inquiry={inquiry} rows={rows} registers={{ deliveryTerms, paymentTerms, carriers }} />
-
+        <InquiryDetail
+          inquiry={inquiry}
+          rows={rows}
+          registers={{ deliveryTerms, paymentTerms, carriers }}
+          pageTitle={`Förfrågan ${inquiry.inquiryNumber}`}
+          help={<HelpLink chapter="inkop" anchor="forfragningar-prisforfragan" label="Hjälp om förfrågningar" />}
+          tabs={[
+            {
+              key: "dokument",
+              label: "Dokument",
+              node: (
         <MailSection
           documentLanguage={documentLanguageOf(inquiry.supplierLanguage)}
           emails={emails}
@@ -71,6 +71,10 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
           }
           pdfLinks={[{ label: "Ladda ner PDF", href: `/api/v1/inquiries/${inquiry.id}/pdf` }]}
           drawingCount={drawingCount}
+        />
+              ),
+            },
+          ]}
         />
       </SplitView>
     </AppShell>

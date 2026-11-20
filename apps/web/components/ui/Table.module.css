@@ -22,7 +22,8 @@
 
 .headerRow,
 .row,
-.footerRow {
+.footerRow,
+.entryRow {
   display: contents;
 }
 
@@ -97,13 +98,47 @@
 
 .headerRow > .headerCell:first-child,
 .row > .cell:first-child,
-.footerRow > .cell:first-child {
+.footerRow > .cell:first-child,
+.entryRow > .cell:first-child {
   padding-left: 20px;
 }
 .headerRow > .headerCell:last-child,
 .row > .cell:last-child,
-.footerRow > .cell:last-child {
+.footerRow > .cell:last-child,
+.entryRow > .cell:last-child {
   padding-right: 20px;
+}
+
+/* The row typed into the table (+ Ny rad): inputs, so a little tighter
+   vertically and set off from the rows above. */
+.entryRow > .cell {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-top: 1px solid var(--color-divider);
+  border-bottom: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.entryRow > .cell[data-align="right"] {
+  justify-content: flex-end;
+}
+/* Compact inputs that fit the columns' normal widths: less padding, no
+   number spinners (the keyboard and the wheel still step). */
+.entryRow input:not([role="combobox"]),
+.entryRow select {
+  padding: 5px 7px;
+  min-width: 0;
+}
+.entryRow input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.entryRow input[type="number"]::-webkit-inner-spin-button,
+.entryRow input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* hover-capable devices only — prevents the highlight sticking to the last
@@ -232,10 +267,14 @@
   }
 
   .row,
-  .footerRow {
+  .footerRow,
+  .entryRow {
     display: block;
     padding: 14px 16px;
     border-bottom: 1px solid var(--color-divider);
+  }
+  .entryRow .cell:empty {
+    display: none;
   }
   .row:last-child {
     border-bottom: none;
@@ -260,7 +299,10 @@
   .row > .cell:last-child,
   .footerRow > .cell,
   .footerRow > .cell:first-child,
-  .footerRow > .cell:last-child {
+  .footerRow > .cell:last-child,
+  .entryRow > .cell,
+  .entryRow > .cell:first-child,
+  .entryRow > .cell:last-child {
     display: flex;
     justify-content: space-between;
     gap: 12px;

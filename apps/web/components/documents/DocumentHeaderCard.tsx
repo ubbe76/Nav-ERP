@@ -16,7 +16,8 @@ export interface HeaderField {
 }
 
 interface DocumentHeaderCardProps {
-  pill: { status: Status; label: string };
+  // Omitted on the cards whose status stands in DocumentIdentity above.
+  pill?: { status: Status; label: string };
   // Free-form line next to the pill: "Rev 2 · SEK", invoice number, a link to
   // the purchase order an inquiry became, …
   meta?: ReactNode;
@@ -34,8 +35,9 @@ export function DocumentHeaderCard({ pill, meta, fields, note, onEdit }: Documen
 
   return (
     <Card maxWidth="none" className={styles.card}>
+      {(pill || meta || onEdit) && (
       <div className={styles.strip}>
-        <StatusPill status={pill.status} label={pill.label} />
+        {pill && <StatusPill status={pill.status} label={pill.label} />}
         {meta && <span className={styles.meta}>{meta}</span>}
         {onEdit && (
           <span className={styles.edit}>
@@ -45,6 +47,7 @@ export function DocumentHeaderCard({ pill, meta, fields, note, onEdit }: Documen
           </span>
         )}
       </div>
+      )}
 
       <div className={styles.grid}>
         {shown.map((field) => (

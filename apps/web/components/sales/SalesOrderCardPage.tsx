@@ -21,14 +21,10 @@ import type {
   SalesOrderRow,
   StockLocation,
 } from "../../lib/types";
-import shellStyles from "../AppShell.module.css";
-import Link from "next/link";
-import buttonStyles from "../ui/Button.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { documentLanguageOf } from "../../lib/documentLanguage";
-import { SectionHeading } from "../ui/SectionHeading";
 import { DeviationsSection } from "../quality/DeviationsSection";
-import { formatStockholmDateTime } from "../../lib/date";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { round2 } from "../../lib/format";
 
 // Ångra utleverans: a följesedel whose rows are all undone.
@@ -52,6 +48,7 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   const quoteNumber = order.quoteNumber ?? null;
   const fromQuote = kind === "order" && quoteNumber !== null && quoteNumber !== order.orderNumber ? quoteNumber : null;
   const docLabel = kind === "quote" ? "Offert" : "Kundorder";
+  const number = kind === "quote" ? (quoteNumber ?? order.orderNumber) : order.orderNumber;
 
   const [rows, locations, emails, customer, deliveryAddresses, deliveries, freightStatus] = await Promise.all([
     apiGet<SalesOrderRow[]>(`/api/v1/sales-orders/${params.id}/rows`, cookieHeader),
@@ -139,28 +136,6 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
       <SplitView list={route === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} selectedId={params.id}>
-        <div className={shellStyles.topbar}>
-          <div>
-            <div className={shellStyles.title}>
-              {docLabel} {kind === "quote" ? (quoteNumber ?? order.orderNumber) : order.orderNumber}
-            </div>
-            <div className={shellStyles.meta}>
-              {order.customerName}
-              {fromQuote && ` · Från offert ${fromQuote}`}
-            </div>
-          </div>
-          <div className={shellStyles.topbarActions}>
-            <Link href={kind === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-              {kind === "quote" ? "Offerter" : "Kundorder"}
-            </Link>
-            <HelpLink
-              chapter="forsaljning"
-              anchor={kind === "quote" ? "offerter" : "kundorder"}
-              label={kind === "quote" ? "Hjälp om offerter" : "Hjälp om kundorder"}
-            />
-          </div>
-        </div>
-
         <SalesOrderDetail
           order={order}
           rows={rows}
@@ -168,11 +143,31 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
           deliveryAddresses={deliveryAddresses}
           registers={{ deliveryTerms, paymentTerms, carriers }}
           freightEnabled={freightStatus.enabled}
-        />
-
-        {deliveries.length > 0 && (
-          <div style={{ marginTop: 28 }}>
-            <SectionHeading>Följesedlar</SectionHeading>
+          pageTitle={`${docLabel} ${number}`}
+          number={number}
+          note={
+            <>
+              {fromQuote && `Skapad från offert ${fromQuote} · `}Rev {order.revision} · {order.currency}
+              {order.invoiceNumber &&
+                ` · Faktura ${order.invoiceNumber}${order.invoicedAt ? ` (${formatStockholmDate(order.invoicedAt)})` : ""}`}
+            </>
+          }
+          help={
+            <HelpLink
+              chapter="forsaljning"
+              anchor={kind === "quote" ? "offerter" : "kundorder"}
+              label={kind === "quote" ? "Hjälp om offerter" : "Hjälp om kundorder"}
+            />
+          }
+          tabs={[
+            ...(kind === "order"
+              ? [
+                  {
+                    key: "leverans",
+                    label: "Leverans",
+                    count: deliveries.length || null,
+                    node:
+                      deliveries.length > 0 ? (
             <Table<SalesDelivery>
               columns={[
                 { key: "deliveryNumber", label: "Följesedel", width: "160px" },
@@ -226,17 +221,16 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
                 }
               }}
             />
-          </div>
-        )}
-
-        {kind === "order" && (
-          <DeviationsSection
-            filter={{ salesOrderId: order.id }}
-            newDeviation={{ type: "customer", customerId: order.customerId, salesOrderId: order.id }}
-            buttonLabel="Ny reklamation"
-          />
-        )}
-
+                      ) : (
+                        <p>Inga följesedlar än.</p>
+                      ),
+                  },
+                ]
+              : []),
+            {
+              key: "dokument",
+              label: "Dokument",
+              node: (
         <MailSection
           emails={emails}
           defaultTo={defaultTo}
@@ -271,11 +265,35 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
           showDocumentColumn
           drawingCount={drawingCount}
         />
-
+              ),
+            },
+            ...(kind === "order"
+              ? [
+                  {
+                    key: "avvikelser",
+                    label: "Avvikelser",
+                    node: (
+                      <DeviationsSection
+            filter={{ salesOrderId: order.id }}
+            newDeviation={{ type: "customer", customerId: order.customerId, salesOrderId: order.id }}
+            buttonLabel="Ny reklamation"
+          />
+                    ),
+                  },
+                ]
+              : []),
+            {
+              key: "historik",
+              label: "Historik",
+              node: (
         <AuditTrailSection
           entityType="sales_order"
           entityId={order.orderNumber}
           alsoEntityId={quoteNumber && quoteNumber !== order.orderNumber ? quoteNumber : undefined}
+        />
+              ),
+            },
+          ]}
         />
       </SplitView>
     </AppShell>

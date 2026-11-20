@@ -1,7 +1,6 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
-import { SplitView } from "../../../components/split/SplitView";
 import { ArticleTabs } from "../../../components/articles/ArticleTabs";
 import { ArticleCardHeader } from "../../../components/articles/ArticleCardHeader";
 import { apiGet } from "../../../lib/api";
@@ -36,22 +35,22 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
 
   return (
     <AppShell>
-      {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list="/artiklar/register" selectedId={params.id}>
-        <ArticleCardHeader article={article} totalOnHand={totalOnHand} blockedOnHand={blockedOnHand} />
+      {/* The whole card, without the list (Programramen steg 3): the register's
+          list stands beside the summary (/artiklar/register/:id), and the
+          card's tabs — Struktur, Beredning — need the width. */}
+      <ArticleCardHeader article={article} totalOnHand={totalOnHand} blockedOnHand={blockedOnHand} />
 
-        <ArticleTabs
-          article={article}
-          bom={bom}
-          bomTree={bomTree}
-          balances={balances}
-          calculations={calculations}
-          routing={routing}
-          workCenters={workCenters}
-          groups={groups}
-          articleLocations={articleLocations}
-        />
-      </SplitView>
+      <ArticleTabs
+        article={article}
+        bom={bom}
+        bomTree={bomTree}
+        balances={balances}
+        calculations={calculations}
+        routing={routing}
+        workCenters={workCenters}
+        groups={groups}
+        articleLocations={articleLocations}
+      />
     </AppShell>
   );
 }

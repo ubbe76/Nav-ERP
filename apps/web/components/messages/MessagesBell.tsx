@@ -14,6 +14,7 @@ import { NewMessageDialog } from "./NewMessageDialog";
 import { announceUnread, onUnreadAnnounced } from "./unreadEvents";
 import shellStyles from "../AppShell.module.css";
 import styles from "./Messages.module.css";
+import { readPageTitle } from "../../lib/pageTitle";
 
 // Meddelanden in the toolbar, beside the bell: the number of unread messages,
 // read after the page has rendered and once a minute while the tab is
@@ -121,7 +122,7 @@ export function MessagesBell() {
   function compose() {
     setOpen(false);
     // The page as it is now: its address with filters, under its own title.
-    const title = document.querySelector(`.${shellStyles.title}`)?.textContent ?? "";
+    const title = readPageTitle(shellStyles.title);
     setComposing(pageLinkOffer(window.location.pathname, window.location.search, title));
   }
 

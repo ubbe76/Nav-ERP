@@ -19,7 +19,6 @@ import type {
   RegisterEntry,
   StockLocation,
 } from "../../../../lib/types";
-import shellStyles from "../../../../components/AppShell.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 
 export default async function PurchaseOrderDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -49,31 +48,45 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
       <SplitView list="/inkop/ordrar" selectedId={params.id}>
-        <div className={shellStyles.topbar}>
-          <div>
-            <div className={shellStyles.title}>{order.orderNumber}</div>
-            <div className={shellStyles.meta}>{order.supplierName}</div>
-          </div>
-          <HelpLink chapter="inkop" anchor="inkopsorder" label="Hjälp om inköpsorder" />
-        </div>
-
         <PurchaseOrderDetail
           order={order}
           rows={rows}
           locations={locations}
           registers={{ deliveryTerms, paymentTerms, carriers }}
-        />
-
-        <ReceiptsSection orderId={order.id} orderStatus={order.status} receipts={receipts} rows={rows} />
-
-        <DispatchesSection orderId={order.id} dispatches={dispatches} hideWhenEmpty />
-
-        <DeviationsSection
-          filter={{ purchaseOrderId: order.id }}
-          newDeviation={{ type: "supplier", supplierId: order.supplierId, purchaseOrderId: order.id }}
-          buttonLabel="Ny avvikelse"
-        />
-
+          pageTitle={`Inköpsorder ${order.orderNumber}`}
+          help={<HelpLink chapter="inkop" anchor="inkopsorder" label="Hjälp om inköpsorder" />}
+          tabs={[
+            {
+              key: "mottagning",
+              label: "Mottagning",
+              count: receipts.length || null,
+              node:
+                receipts.length > 0 ? (
+                  <ReceiptsSection orderId={order.id} orderStatus={order.status} receipts={receipts} rows={rows} />
+                ) : (
+                  <p>Inga inleveranser än.</p>
+                ),
+            },
+            // Avsändning lego: only on an order that has sent something or buys a lego operation.
+            ...(dispatches.length > 0 || rows.some((r) => r.moOperationId !== null)
+              ? [
+                  {
+                    key: "avsandning",
+                    label: "Avsändning",
+                    count: dispatches.length || null,
+                    node:
+                      dispatches.length > 0 ? (
+                        <DispatchesSection orderId={order.id} dispatches={dispatches} />
+                      ) : (
+                        <p>Inget avsänt än.</p>
+                      ),
+                  },
+                ]
+              : []),
+            {
+              key: "dokument",
+              label: "Dokument",
+              node: (
         <MailSection
           documentLanguage={documentLanguageOf(order.supplierLanguage)}
           emails={emails}
@@ -103,8 +116,26 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
           pdfLinks={[{ label: "Ladda ner PDF", href: `/api/v1/purchase-orders/${order.id}/pdf` }]}
           drawingCount={drawingCount}
         />
-
-        <AuditTrailSection entityType="purchase_order" entityId={order.orderNumber} />
+              ),
+            },
+            {
+              key: "avvikelser",
+              label: "Avvikelser",
+              node: (
+        <DeviationsSection
+          filter={{ purchaseOrderId: order.id }}
+          newDeviation={{ type: "supplier", supplierId: order.supplierId, purchaseOrderId: order.id }}
+          buttonLabel="Ny avvikelse"
+        />
+              ),
+            },
+            {
+              key: "historik",
+              label: "Historik",
+              node: <AuditTrailSection entityType="purchase_order" entityId={order.orderNumber} />,
+            },
+          ]}
+        />
       </SplitView>
     </AppShell>
   );

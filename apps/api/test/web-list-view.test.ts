@@ -51,6 +51,9 @@ describe("SPLIT_LISTS", () => {
     expect(functionOf(order.href)).toBe("/forsaljning/ordrar");
     const article = SPLIT_LISTS["/artiklar/register"]!.row({ id: "a1", articleNumber: "1001", name: "Plåt", type: "purchased", active: true });
     expect(functionOf(`/artiklar/3f2a1b4c-1d2e-4f5a-8b9c-0d1e2f3a4b5c`)).toBe("/artiklar/register");
-    expect(article).toMatchObject({ href: "/artiklar/a1", secondary: "1001 · Köpt", status: null });
+    // Programramen steg 3: the list's row opens the summary beside the list;
+    // the summary and the whole card are the same function (one tab).
+    expect(article).toMatchObject({ href: "/artiklar/register/a1", secondary: "1001 · Köpt", status: null });
+    expect(functionOf(`/artiklar/register/3f2a1b4c-1d2e-4f5a-8b9c-0d1e2f3a4b5c`)).toBe("/artiklar/register");
   });
 });

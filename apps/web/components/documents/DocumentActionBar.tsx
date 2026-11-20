@@ -13,6 +13,9 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { ChevronRight } from "lucide-react";
+import { crumbsFor } from "../../lib/navFunctions";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { PrintButton } from "./PrintButton";
@@ -104,6 +107,9 @@ export function DocumentActionBar({
 }) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
+  // Programramen steg 3: the breadcrumb — module › function › the document —
+  // at the left, the buttons at the right (the user's sketch).
+  const crumbs = crumbsFor(usePathname());
   const actionsRef = useRef<HTMLDivElement>(null);
   const [overflowed, setOverflowed] = useState<Overflowed[]>([]);
 
@@ -200,21 +206,33 @@ export function DocumentActionBar({
     <>
       <div ref={sentinel} className={styles.sentinel} aria-hidden="true" />
       <div className={styles.bar} data-stuck={stuck}>
-        {label && (
-          <span className={styles.ident} aria-hidden={!stuck}>
-            <span className={styles.number}>{label}</span>
-            {pill && <StatusPill status={pill.status} label={pill.label} compact />}
-          </span>
-        )}
+        <nav className={styles.crumbs} aria-label="Du är här">
+          {crumbs.map((c) => (
+            <span key={c.href} className={styles.crumb}>
+              <Link href={c.href} data-nav-title={c.label}>
+                {c.label}
+              </Link>
+              <ChevronRight size={14} strokeWidth={1.8} aria-hidden="true" />
+            </span>
+          ))}
+          {label && <span className={styles.number}>{label}</span>}
+          {label && pill && (
+            <span className={styles.ident} aria-hidden={!stuck}>
+              <StatusPill status={pill.status} label={pill.label} compact />
+            </span>
+          )}
+        </nav>
         <div ref={actionsRef} className={styles.actions}>
           {decorate(children)}
           {/* Always rendered (hidden when nothing overflows) so its width is
               known before it is needed. */}
+          {/* The rare escape hatch (Ändra status manuellt) last among the
+              buttons, so it is the first to move into ⋯. */}
+          {trailing}
           <span className={styles.more} data-bar-more="" hidden={moreItems.length === 0}>
             <RowMenu items={moreItems} label="Fler åtgärder" />
           </span>
         </div>
-        {trailing && <div className={styles.trailing}>{trailing}</div>}
       </div>
       <FormError margin="below">{error}</FormError>
     </>

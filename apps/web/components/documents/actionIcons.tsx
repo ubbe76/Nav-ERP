@@ -28,6 +28,7 @@ import {
   ThumbsDown,
   Truck,
   type LucideIcon,
+  SquareArrowOutUpRight,
 } from "lucide-react";
 
 // Programramen (the user's sketch): the document toolbar's buttons carry an
@@ -35,6 +36,7 @@ import {
 // their plain labelled buttons; DocumentActionBar looks the label up here.
 const EXACT: Record<string, LucideIcon> = {
   "Lägg till rad": Plus,
+  "Öppna artikelkort": SquareArrowOutUpRight,
   "Kontrollera fraktpris": Calculator,
   Leveranstidskontroll: CalendarClock,
   "Skapa kundorder": FilePlus2,
