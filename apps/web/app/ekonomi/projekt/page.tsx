@@ -11,7 +11,7 @@ export default async function ProjektPage() {
 
   if (!user || !canOpen(user, "/ekonomi/projekt")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function ProjektPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <ProjektPageClient projects={projects.rows} customers={customers.rows.map((c) => ({ id: c.id, name: c.name }))} />
     </AppShell>
   );

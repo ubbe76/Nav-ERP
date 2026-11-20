@@ -16,7 +16,7 @@ export default async function VerifikatPage(props: { searchParams: Promise<PageS
 
   if (!user || !canOpen(user, "/ekonomi/verifikat")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -35,7 +35,7 @@ export default async function VerifikatPage(props: { searchParams: Promise<PageS
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <VerifikatPageClient verifications={verifications} fiscalYears={fiscalYears} series={series} pageSize={pageSize} />
     </AppShell>
   );

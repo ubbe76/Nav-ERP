@@ -51,7 +51,7 @@ Administratörer ser allt. Sidan kräver minst en meny. Även ett konto med **En
 
 ## Sidan Aviseringar
 
-Sidan är grupperad per område, i samma ordning som sidomenyn: **Inköp**, **Försäljning**, **Tillverkning**, **Lager**, **Kvalitet**, **Ekonomi** och **System**. Varje område har en rubrik med det sammanlagda antalet och en röd prick om någon av dess typer har en röd rad, annars en gul. Under rubriken står en ruta per typ som har något att visa, med rubrik, antal och raderna. Typer och områden utan aviseringar visas inte, och finns ingenting alls står det "Inget att bevaka just nu." Har mer än ett område något att visa finns en rad med områdena överst, och ett klick på ett område hoppar till dess rubrik.
+Sidan är grupperad per område, i samma ordning som menyn: **Inköp**, **Försäljning**, **Tillverkning**, **Lager**, **Kvalitet**, **Ekonomi** och **System**. Varje område har en rubrik med det sammanlagda antalet och en röd prick om någon av dess typer har en röd rad, annars en gul. Under rubriken står en ruta per typ som har något att visa, med rubrik, antal och raderna. Typer och områden utan aviseringar visas inte, och finns ingenting alls står det "Inget att bevaka just nu." Har mer än ett område något att visa finns en rad med områdena överst, och ett klick på ett område hoppar till dess rubrik.
 
 Typerna hör till området där saken åtgärdas, alltså menyn som ger rätt att se dem (se [Vem ser vad](#vem-ser-vad)). Typerna som bara administratörer ser står under **System**.
 

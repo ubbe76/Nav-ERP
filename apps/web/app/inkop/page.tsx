@@ -17,7 +17,7 @@ export default async function PurchasePage() {
   const sections = await withPluginPages(sectionsForUser(INKOP_SECTIONS, user ?? { role: "user", permissions: [] }), "inkop", cookieHeader);
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Inköp</div>

@@ -21,7 +21,7 @@ export default async function GrunddataPage() {
   ]);
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <GrunddataPageClient
         deliveryTerms={deliveryTerms}
         paymentTerms={paymentTerms}

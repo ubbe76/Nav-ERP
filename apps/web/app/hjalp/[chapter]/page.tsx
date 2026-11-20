@@ -17,7 +17,7 @@ export default async function ManualChapterPage(props: { params: Promise<{ chapt
   const next = MANUAL_CHAPTERS[index + 1];
 
   return (
-    <AppShell active="Hjälp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{chapter.title}</div>

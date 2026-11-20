@@ -21,7 +21,7 @@ export default async function ResultatrakningPage(props: { searchParams: Promise
 
   if (!user || !canOpen(user, "/ekonomi/resultatrakning")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -30,7 +30,7 @@ export default async function ResultatrakningPage(props: { searchParams: Promise
   const fiscalYears = await apiGet<FiscalYear[]>("/api/v1/fiscal-years", cookieHeader);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Resultaträkning</div>

@@ -23,7 +23,7 @@ export default async function ShipmentPage(props: { params: Promise<{ id: string
   const carriers = manual ? await apiGet<RegisterEntry[]>("/api/v1/carriers", cookieHeader).catch(() => []) : [];
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Försändelse {shipment.shipmentNumber}</div>

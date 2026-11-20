@@ -15,7 +15,7 @@ export default async function EmailLogPage(props: { searchParams: Promise<PageSe
   // show their own history), but the admin page gate matches the rest of System.
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -28,7 +28,7 @@ export default async function EmailLogPage(props: { searchParams: Promise<PageSe
   );
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <EmailLogPageClient log={log} pageSize={pageSize} />
     </AppShell>
   );

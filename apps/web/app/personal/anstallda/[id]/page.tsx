@@ -52,7 +52,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
 
   if (!user || !["admin", "supervisor"].includes(user.role)) {
     return (
-      <AppShell active="Personal & lön">
+      <AppShell>
         <p>Endast arbetsledare och administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -86,7 +86,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
     ]);
 
   return (
-    <AppShell active="Personal & lön">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{employee.name}</div>

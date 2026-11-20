@@ -142,9 +142,12 @@ export const userSettingsSchema = z.object({
   density: tableDensitySchema,
   // Kolumner per list page; {} = every list as built.
   listColumns: listColumnsSchema,
-  // Flikar (Nav som program, punkt 5): documents open as tabs on a wide
+  // Flikar (Programramen): pages open in a tab per function on a wide
   // screen. Default true.
   documentTabs: z.boolean(),
+  // Programramen: the module panel beside the icon rail folded away (only
+  // the icons show). Default false.
+  navPanelCollapsed: z.boolean(),
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

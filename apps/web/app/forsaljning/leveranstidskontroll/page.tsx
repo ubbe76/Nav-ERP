@@ -3,7 +3,7 @@ import { DeliveryTimeCheckPageClient } from "../../../components/sales/DeliveryT
 
 export default function LeveranstidskontrollPage() {
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <DeliveryTimeCheckPageClient />
     </AppShell>
   );

@@ -10,14 +10,14 @@ export default async function ApiClientsPage() {
 
   if (clients === null) {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <ApiClientsPageClient clients={clients} />
     </AppShell>
   );

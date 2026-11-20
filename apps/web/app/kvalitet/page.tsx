@@ -15,7 +15,7 @@ export default async function QualityPage() {
   const sections = sectionsForUser(KVALITET_SECTIONS, user ?? { role: "user", permissions: [] });
 
   return (
-    <AppShell active="Kvalitet">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Kvalitet</div>

@@ -16,7 +16,7 @@ export default async function SiePage() {
 
   if (!user || !canOpen(user, "/ekonomi/sie")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -26,7 +26,7 @@ export default async function SiePage() {
   const fiscalYears = await apiGet<FiscalYear[]>("/api/v1/fiscal-years", cookieHeader);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>SIE-filer</div>

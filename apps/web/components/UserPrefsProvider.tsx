@@ -14,9 +14,12 @@ interface UserPrefsValue {
   listColumns: ListColumns;
   // null (or an empty entry) = Återställ: the list as built.
   setListColumns: (key: string, entry: ListColumnsEntry | null) => void;
-  // Dokument i flikar (punkt 5).
+  // Flikar (Programramen).
   documentTabs: boolean;
   setDocumentTabs: (on: boolean) => void;
+  // Programramen: the module panel folded away.
+  navPanelCollapsed: boolean;
+  setNavPanelCollapsed: (collapsed: boolean) => void;
 }
 
 const UserPrefsContext = createContext<UserPrefsValue>({
@@ -26,6 +29,8 @@ const UserPrefsContext = createContext<UserPrefsValue>({
   setListColumns: () => {},
   documentTabs: true,
   setDocumentTabs: () => {},
+  navPanelCollapsed: false,
+  setNavPanelCollapsed: () => {},
 });
 
 // The state is this tab's from the first render on: later server renders
@@ -37,18 +42,21 @@ export function UserPrefsProvider({
   initialDensity,
   initialListColumns,
   initialDocumentTabs = true,
+  initialNavPanelCollapsed = false,
   className,
   children,
 }: {
   initialDensity: TableDensity;
   initialListColumns: ListColumns;
   initialDocumentTabs?: boolean;
+  initialNavPanelCollapsed?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   const [density, setDensityState] = useState(initialDensity);
   const [listColumns, setListColumnsState] = useState(initialListColumns);
   const [documentTabs, setDocumentTabsState] = useState(initialDocumentTabs);
+  const [navPanelCollapsed, setNavPanelCollapsedState] = useState(initialNavPanelCollapsed);
   // The tabs live in the root layout (they outlive this frame); they follow
   // the user's setting.
   const tabsControl = useDocumentTabs();
@@ -92,14 +100,23 @@ export function UserPrefsProvider({
     [save]
   );
 
+  const setNavPanelCollapsed = useCallback(
+    (collapsed: boolean) => {
+      setNavPanelCollapsedState(collapsed);
+      save({ navPanelCollapsed: collapsed });
+    },
+    [save]
+  );
+
   const value = useMemo(
-    () => ({ density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs }),
-    [density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs]
+    () => ({ density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs, navPanelCollapsed, setNavPanelCollapsed }),
+    [density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs, navPanelCollapsed, setNavPanelCollapsed]
   );
   return (
     <UserPrefsContext.Provider value={value}>
-      {/* data-app-frame: one column inside a tab (punkt 5, globals.css). */}
-      <div className={className} data-density={density} data-app-frame="">
+      {/* data-app-frame: one column inside a tab (globals.css); data-tabs-pref:
+          the frame's own page is hidden on a wide screen while the tabs come on. */}
+      <div className={className} data-density={density} data-app-frame="" data-tabs-pref={documentTabs ? "" : undefined}>
         {children}
       </div>
     </UserPrefsContext.Provider>

@@ -14,7 +14,7 @@ export default async function PurchaseBankFilePage(props: { params: Promise<{ id
   if (!file) notFound();
   const entries = await apiGet<OutgoingEntryView[]>(`/api/v1/bank-files/${id}/outgoing`, cookieHeader);
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{file.filename}</div>

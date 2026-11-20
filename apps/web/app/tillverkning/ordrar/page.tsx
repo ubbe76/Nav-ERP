@@ -16,7 +16,7 @@ export default async function ManufacturingOrdersPage(props: { searchParams: Pro
   );
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <ManufacturingOrdersPageClient orders={orders} pageSize={pageSize} />
     </AppShell>
   );

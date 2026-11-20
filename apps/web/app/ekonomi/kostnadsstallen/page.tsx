@@ -11,7 +11,7 @@ export default async function KostnadsstallenPage() {
 
   if (!user || !canOpen(user, "/ekonomi/kostnadsstallen")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function KostnadsstallenPage() {
   );
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <KostnadsstallenPageClient costCenters={costCenters.rows} />
     </AppShell>
   );

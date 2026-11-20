@@ -11,7 +11,7 @@ export default async function NewAdjustmentPage() {
   const locations = await apiGet<StockLocation[]>("/api/v1/stock/locations", cookieHeader);
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Justering</div>

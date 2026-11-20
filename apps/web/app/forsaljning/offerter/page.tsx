@@ -16,7 +16,7 @@ export default async function QuotesPage(props: { searchParams: Promise<PageSear
   );
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <SalesOrdersPageClient orders={orders} pageSize={pageSize} kind="quote" />
     </AppShell>
   );

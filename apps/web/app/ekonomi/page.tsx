@@ -19,7 +19,7 @@ export default async function EconomyPage() {
 
   if (!user || !canOpen(user, "/ekonomi")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -28,7 +28,7 @@ export default async function EconomyPage() {
   const sections = await withPluginPages(sectionsForUser(EKONOMI_SECTIONS, user), "ekonomi", cookieHeader);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Ekonomi</div>

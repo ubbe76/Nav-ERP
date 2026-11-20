@@ -23,7 +23,7 @@ export default async function AbcPage(props: {
   );
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>ABC-analys</div>

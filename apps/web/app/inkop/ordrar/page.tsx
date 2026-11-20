@@ -16,7 +16,7 @@ export default async function PurchaseOrdersPage(props: { searchParams: Promise<
   );
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <PurchaseOrdersPageClient orders={orders} pageSize={pageSize} />
     </AppShell>
   );

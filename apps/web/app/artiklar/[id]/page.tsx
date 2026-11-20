@@ -34,7 +34,7 @@ export default async function ArticleDetailPage(props: { params: Promise<{ id: s
   const blockedOnHand = balances.reduce((sum, b) => sum + (b.locationBlocked && Number(b.quantityOnHand) > 0 ? Number(b.quantityOnHand) : 0), 0);
 
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <ArticleCardHeader article={article} totalOnHand={totalOnHand} blockedOnHand={blockedOnHand} />
 
       <ArticleTabs

@@ -13,7 +13,7 @@ export default async function QualityReasonsPage() {
   const reasons = await apiGet<RegisterEntry[]>("/api/v1/deviation-reasons", cookieHeader);
 
   return (
-    <AppShell active="Kvalitet">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Kvalitetsorsaker</div>

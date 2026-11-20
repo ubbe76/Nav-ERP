@@ -6,7 +6,7 @@ import shellStyles from "../../../../components/AppShell.module.css";
 export default async function NewThemePage({ searchParams }: { searchParams: Promise<{ kopia?: string }> }) {
   const { kopia } = await searchParams;
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Nytt tema</div>

@@ -27,7 +27,7 @@ export default async function PaymentsPage(props: { searchParams: Promise<PageSe
   const invoiceId = typeof searchParams.invoice === "string" ? searchParams.invoice : undefined;
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <PaymentsPageClient
         payments={payments}
         customers={customers.rows}

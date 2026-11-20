@@ -23,7 +23,7 @@ export default async function InvoiceScanPage(props: {
   const supplierId = typeof supplierParam === "string" && supplierParam !== "" ? supplierParam : null;
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{scan.scanNumber}</div>

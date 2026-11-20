@@ -135,7 +135,7 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   }
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>

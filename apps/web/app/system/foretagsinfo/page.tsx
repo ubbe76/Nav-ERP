@@ -14,7 +14,7 @@ export default async function CompanyInfoPage() {
 
   if (info === null) {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -27,7 +27,7 @@ export default async function CompanyInfoPage() {
   ]);
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Företagsinformation</div>

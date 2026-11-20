@@ -16,7 +16,7 @@ export default async function KonteringsreglerPage() {
 
   if (!user || !canOpen(user, "/ekonomi/konteringsregler")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -36,7 +36,7 @@ export default async function KonteringsreglerPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <KonteringsreglerPageClient
         settings={settings}
         postingRules={postingRules}

@@ -16,7 +16,7 @@ export default async function LonPaxmlPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Personal & lön">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -25,7 +25,7 @@ export default async function LonPaxmlPage() {
   const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader);
 
   return (
-    <AppShell active="Personal & lön">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lön, PAXml &amp; schema</div>

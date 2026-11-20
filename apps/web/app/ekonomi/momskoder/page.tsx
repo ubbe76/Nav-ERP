@@ -15,7 +15,7 @@ export default async function MomskoderPage() {
 
   if (!user || !canOpen(user, "/ekonomi/momskoder")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -28,7 +28,7 @@ export default async function MomskoderPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <MomskoderPageClient codes={codes} accounts={accounts.rows} />
     </AppShell>
   );

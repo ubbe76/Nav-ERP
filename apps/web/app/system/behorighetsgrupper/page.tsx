@@ -9,7 +9,7 @@ export default async function PermissionGroupsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const groups = await apiGet<PermissionGroup[]>("/api/v1/permission-groups", cookieHeader);
   return (
-    <AppShell active="System">
+    <AppShell>
       <PermissionGroupsPageClient groups={groups} />
     </AppShell>
   );

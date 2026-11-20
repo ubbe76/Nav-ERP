@@ -19,7 +19,7 @@ export default async function InvoicesPage(props: { searchParams: Promise<PageSe
   const orderId = typeof searchParams.orderId === "string" ? searchParams.orderId : undefined;
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <InvoicesPageClient invoices={invoices} initialOrderId={orderId} pageSize={pageSize} />
     </AppShell>
   );

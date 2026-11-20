@@ -20,7 +20,7 @@ export default async function ManufacturingPage() {
   const sections = await withPluginPages(sectionsForUser(TILLVERKNING_SECTIONS, user ?? { role: "user", permissions: [] }), "tillverkning", cookieHeader);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Tillverkning</div>

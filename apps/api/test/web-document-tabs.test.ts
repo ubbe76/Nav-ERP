@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  appHref,
   closeTab,
   documentHref,
   embeddedBootScript,
   isEmbedded,
-  MAX_DOCUMENT_TABS,
+  MAX_TABS,
   moveTab,
   openTab,
   provisionalTitle,
@@ -12,28 +13,78 @@ import {
   restoreTabs,
   sameDocument,
   tabForDigit,
-  type DocumentTab,
+  tabMoved,
+  type AppTab,
+  type OpenOptions,
 } from "../../web/lib/documentTabs";
+import { functionOf, functionTitle } from "../../web/lib/navFunctions";
 
-// Flikar och delad vy (Nav som program, punkt 5): which links open as a tab,
-// opening, closing, the cap and what a reload gives back.
+// Flikar per funktion (Programramen, 2026-11-20): which pages go in a tab,
+// which function a page belongs to, opening, closing, the cap and what a
+// reload gives back.
 const ORIGIN = "https://nav.example";
 const ID = "3f2a1b4c-1d2e-4f5a-8b9c-0d1e2f3a4b5c";
 const ID2 = "9a8b7c6d-1d2e-4f5a-8b9c-0d1e2f3a4b5c";
 
-describe("documentHref", () => {
-  it("is a page with an id inside Nav, path and query", () => {
+describe("appHref / documentHref", () => {
+  it("is any page inside Nav, path and query", () => {
+    expect(appHref("/forsaljning/ordrar?status=open#x", ORIGIN)).toBe("/forsaljning/ordrar?status=open");
+    expect(appHref("/", ORIGIN)).toBe("/");
+    expect(appHref(`${ORIGIN}/artiklar/${ID}`, ORIGIN)).toBe(`/artiklar/${ID}`);
+  });
+
+  it("leaves the API, the login, the full-screen pages and other sites alone", () => {
+    expect(appHref(`/api/v1/invoices/${ID}/pdf`, ORIGIN)).toBeNull();
+    expect(appHref("/login", ORIGIN)).toBeNull();
+    expect(appHref("/register", ORIGIN)).toBeNull();
+    expect(appHref("/tillverkning/terminal", ORIGIN)).toBeNull();
+    expect(appHref(`/tillverkning/terminal/${ID}`, ORIGIN)).toBeNull();
+    expect(appHref("/lager/inventera", ORIGIN)).toBeNull();
+    expect(appHref(`https://annan.example/artiklar/${ID}`, ORIGIN)).toBeNull();
+    // A page that only begins like one of them is an ordinary page.
+    expect(appHref("/loginhjalp", ORIGIN)).toBe("/loginhjalp");
+  });
+
+  it("a document is a page with an id", () => {
     expect(documentHref(`/forsaljning/ordrar/${ID}`, ORIGIN)).toBe(`/forsaljning/ordrar/${ID}`);
     expect(documentHref(`${ORIGIN}/artiklar/${ID}?flik=lager#x`, ORIGIN)).toBe(`/artiklar/${ID}?flik=lager`);
     expect(documentHref(`/ekonomi/budget/${ID}/rader`, ORIGIN)).toBe(`/ekonomi/budget/${ID}/rader`);
+    expect(documentHref("/forsaljning/ordrar", ORIGIN)).toBeNull();
+    expect(documentHref(`/tillverkning/terminal/${ID}`, ORIGIN)).toBeNull();
+    expect(documentHref(`/artiklar/${ID}x`, ORIGIN)).toBeNull();
+  });
+});
+
+describe("functionOf", () => {
+  it("a list page and its documents are one function", () => {
+    expect(functionOf("/forsaljning/ordrar")).toBe("/forsaljning/ordrar");
+    expect(functionOf(`/forsaljning/ordrar/${ID}?flik=rader`)).toBe("/forsaljning/ordrar");
+    expect(functionOf(`/inkop/ordrar/${ID}`)).toBe("/inkop/ordrar");
+    expect(functionOf(`/kunder/${ID}`)).toBe("/kunder");
+    expect(functionOf(`/tillverkning/ordrar/${ID}`)).toBe("/tillverkning/ordrar");
   });
 
-  it("leaves lists, the API, the terminal and other sites to ordinary navigation", () => {
-    expect(documentHref("/forsaljning/ordrar", ORIGIN)).toBeNull();
-    expect(documentHref(`/api/v1/invoices/${ID}/pdf`, ORIGIN)).toBeNull();
-    expect(documentHref(`/tillverkning/terminal/${ID}`, ORIGIN)).toBeNull();
-    expect(documentHref(`https://annan.example/artiklar/${ID}`, ORIGIN)).toBeNull();
-    expect(documentHref(`/artiklar/${ID}x`, ORIGIN)).toBeNull();
+  it("an article card belongs to Artikelregister, not to the Artiklar module page", () => {
+    expect(functionOf(`/artiklar/${ID}`)).toBe("/artiklar/register");
+    expect(functionOf("/artiklar")).toBe("/artiklar");
+    expect(functionOf("/artiklar/oversikt")).toBe("/artiklar/oversikt");
+  });
+
+  it("module pages, the top pages, plugin pages and the rest", () => {
+    expect(functionOf("/")).toBe("/");
+    expect(functionOf("/inkop")).toBe("/inkop");
+    expect(functionOf("/hjalp/forsaljning")).toBe("/hjalp");
+    expect(functionOf(`/meddelanden/${ID}`)).toBe("/meddelanden");
+    expect(functionOf("/grunddata?flik=enheter")).toBe("/grunddata");
+    expect(functionOf("/tillagg/lagerkoll/oversikt")).toBe("/tillagg/lagerkoll/oversikt");
+    expect(functionOf("/okand/sida")).toBe("/okand");
+  });
+
+  it("names a function as the menu does", () => {
+    expect(functionTitle("/forsaljning/ordrar")).toBe("Kundorder");
+    expect(functionTitle("/")).toBe("Översikt");
+    expect(functionTitle("/inkop")).toBe("Inköp");
+    expect(functionTitle("/okand")).toBeNull();
   });
 });
 
@@ -49,50 +100,95 @@ describe("sameDocument / provisionalTitle", () => {
   });
 });
 
-function tab(n: number, lastUsed = n): DocumentTab {
-  return { id: `t${n}`, href: `/artiklar/${ID.slice(0, -2)}${String(n).padStart(2, "0")}`, title: `T${n}`, lastUsed };
+// One tab per function: t1 Kundorder, t2 Artikelregister … — numbered paths
+// of their own beyond the first few.
+const PAGES = ["/forsaljning/ordrar", "/artiklar/register", "/inkop/ordrar", "/kunder", "/leverantorer", "/lager/saldon", "/tillverkning/ordrar", "/ekonomi/verifikat", "/rapporter/marginal"];
+function tab(n: number, lastUsed = n, over: Partial<AppTab> = {}): AppTab {
+  const href = PAGES[n - 1]!;
+  return { id: `t${n}`, href, title: `T${n}`, fn: functionOf(href), own: false, lastUsed, ...over };
+}
+
+function options(over: Partial<OpenOptions> = {}): OpenOptions {
+  let n = 100;
+  return { title: "x", mode: "link", activeId: null, now: 50, newId: () => `t${++n}`, hasDrafts: () => false, ...over };
 }
 
 describe("openTab", () => {
-  const ids = () => {
-    let n = 100;
-    return () => `t${++n}`;
-  };
-
-  it("re-activates a document that is already open", () => {
-    const result = openTab([tab(1), tab(2)], `${tab(1).href}?flik=x`, "x", 50, ids(), () => false);
-    expect(result).toMatchObject({ kind: "opened", activeId: "t1", closed: [] });
-    if (result.kind === "opened") expect(result.tabs.find((t) => t.id === "t1")!.lastUsed).toBe(50);
+  it("shows the function's tab and sends it to a document of that function", () => {
+    const result = openTab([tab(1), tab(2)], `/forsaljning/ordrar/${ID}`, options());
+    expect(result).toMatchObject({ kind: "opened", activeId: "t1", closed: [], navigate: `/forsaljning/ordrar/${ID}` });
+    if (result.kind === "opened") expect(result.tabs.find((t) => t.id === "t1")).toMatchObject({ href: `/forsaljning/ordrar/${ID}`, lastUsed: 50 });
   });
 
-  it("adds a tab last and shows it", () => {
-    const result = openTab([tab(1)], `/kunder/${ID2}`, "Kund", 50, ids(), () => false);
-    expect(result).toMatchObject({ kind: "opened", activeId: "t101", closed: [] });
-    if (result.kind === "opened") expect(result.tabs.map((t) => t.id)).toEqual(["t1", "t101"]);
+  it("a link to the address the tab already shows only shows it", () => {
+    expect(openTab([tab(1), tab(2)], "/forsaljning/ordrar", options())).toMatchObject({ activeId: "t1", navigate: null });
+  });
+
+  it("a menu choice shows a hidden tab as it is, and takes the shown one back to the function's page", () => {
+    const onCard = tab(1, 1, { href: `/forsaljning/ordrar/${ID}` });
+    expect(openTab([onCard, tab(2)], "/forsaljning/ordrar", options({ mode: "menu", activeId: "t2" }))).toMatchObject({
+      activeId: "t1",
+      navigate: null,
+    });
+    expect(openTab([onCard, tab(2)], "/forsaljning/ordrar", options({ mode: "menu", activeId: "t1" }))).toMatchObject({
+      activeId: "t1",
+      navigate: "/forsaljning/ordrar",
+    });
+  });
+
+  it("adds a tab last for a function that has none", () => {
+    const result = openTab([tab(1)], `/kunder/${ID2}`, options({ title: "Kund" }));
+    expect(result).toMatchObject({ kind: "opened", activeId: "t101", closed: [], navigate: null });
+    if (result.kind === "opened") {
+      expect(result.tabs.map((t) => t.id)).toEqual(["t1", "t101"]);
+      expect(result.tabs[1]).toMatchObject({ href: `/kunder/${ID2}`, fn: "/kunder", own: false, title: "Kund" });
+    }
+  });
+
+  it("a document of its own (Ctrl-click) gets its own tab, and is never taken as the function's", () => {
+    const own = openTab([tab(1)], `/forsaljning/ordrar/${ID}`, options({ own: true }));
+    expect(own).toMatchObject({ activeId: "t101", navigate: null });
+    if (own.kind !== "opened") return;
+    expect(own.tabs[1]).toMatchObject({ own: true, fn: "/forsaljning/ordrar" });
+    // The same document again: its own tab; the list still goes to t1.
+    expect(openTab(own.tabs, `/forsaljning/ordrar/${ID}?flik=rader`, options({ own: true }))).toMatchObject({ activeId: "t101" });
+    expect(openTab(own.tabs, `/forsaljning/ordrar/${ID2}`, options())).toMatchObject({ activeId: "t1", navigate: `/forsaljning/ordrar/${ID2}` });
+  });
+
+  it("of two tabs with one function, the one used last", () => {
+    const twin = tab(1, 9, { id: "t9", href: `/forsaljning/ordrar/${ID2}` });
+    expect(openTab([tab(1, 3), twin], "/forsaljning/ordrar", options({ mode: "menu" }))).toMatchObject({ activeId: "t9" });
   });
 
   it("past the cap closes the tab used longest ago, never one with unsaved changes", () => {
-    const full = Array.from({ length: MAX_DOCUMENT_TABS }, (_, i) => tab(i + 1, [5, 1, 3, 4, 6, 7, 8, 9][i]!));
+    const full = Array.from({ length: MAX_TABS }, (_, i) => tab(i + 1, [5, 1, 3, 4, 6, 7, 8, 9][i]!));
     // t2 is the oldest but has drafts: t3 goes.
-    const result = openTab(full, `/kunder/${ID2}`, "Kund", 50, ids(), (id) => id === "t2");
+    const result = openTab(full, "/rapporter/marginal", options({ hasDrafts: (id) => id === "t2" }));
     expect(result).toMatchObject({ kind: "opened", closed: ["t3"], activeId: "t101" });
-    if (result.kind === "opened") expect(result.tabs).toHaveLength(MAX_DOCUMENT_TABS);
+    if (result.kind === "opened") expect(result.tabs).toHaveLength(MAX_TABS);
   });
 
   it("refuses when every tab has unsaved changes", () => {
-    const full = Array.from({ length: MAX_DOCUMENT_TABS }, (_, i) => tab(i + 1));
-    expect(openTab(full, `/kunder/${ID2}`, "Kund", 50, ids(), () => true)).toEqual({ kind: "refused" });
+    const full = Array.from({ length: MAX_TABS }, (_, i) => tab(i + 1));
+    expect(openTab(full, "/rapporter/marginal", options({ hasDrafts: () => true }))).toEqual({ kind: "refused" });
+  });
+});
+
+describe("tabMoved", () => {
+  it("follows the tab's own navigation: address, name and function", () => {
+    const moved = tabMoved([tab(1), tab(2)], "t1", `/forsaljning/ordrar/${ID}`, "Kundorder KO-5001");
+    expect(moved[0]).toMatchObject({ href: `/forsaljning/ordrar/${ID}`, title: "Kundorder KO-5001", fn: "/forsaljning/ordrar" });
+    expect(tabMoved([tab(1)], "t1", "/kunder", "")[0]).toMatchObject({ title: "T1", fn: "/kunder" });
   });
 });
 
 describe("closeTab", () => {
-  it("shows the right-hand neighbour, else the left one, else the page", () => {
+  it("shows the right-hand neighbour, else the left one, else nothing", () => {
     const three = [tab(1), tab(2), tab(3)];
     expect(closeTab(three, "t2", "t2")).toMatchObject({ activeId: "t3" });
     expect(closeTab(three, "t3", "t3")).toMatchObject({ activeId: "t2" });
     expect(closeTab([tab(1)], "t1", "t1")).toEqual({ tabs: [], activeId: null });
     expect(closeTab(three, "t1", "t3")).toMatchObject({ activeId: "t3" });
-    expect(closeTab(three, "t1", null).tabs.map((t) => t.id)).toEqual(["t2", "t3"]);
   });
 });
 
@@ -105,24 +201,31 @@ describe("moveTab / tabForDigit", () => {
     expect(moveTab(four, "nope", 0)).toEqual(four);
   });
 
-  it("maps 1 to the page and 2–9 to the documents in order", () => {
+  it("maps 1–9 to the tabs in the strip's order", () => {
     const two = [tab(1), tab(2)];
-    expect(tabForDigit(two, 1)).toBeNull();
-    expect(tabForDigit(two, 2)).toBe("t1");
-    expect(tabForDigit(two, 3)).toBe("t2");
-    expect(tabForDigit(two, 4)).toBeUndefined();
+    expect(tabForDigit(two, 1)).toBe("t1");
+    expect(tabForDigit(two, 2)).toBe("t2");
+    expect(tabForDigit(two, 3)).toBeUndefined();
     expect(tabForDigit(two, 0)).toBeUndefined();
   });
 });
 
 describe("restoreTabs", () => {
-  it("gives back the valid tabs and drops the rest", () => {
+  it("gives back the valid tabs, with their function, and drops the rest", () => {
     const raw = JSON.stringify({
-      tabs: [tab(1), { id: "x", href: "/forsaljning/ordrar", title: "Lista" }, tab(1), { id: "y" }, tab(2)],
+      tabs: [
+        tab(1),
+        { id: "x", href: "/api/v1/sales-orders", title: "API" },
+        tab(1),
+        { id: "y" },
+        { id: "own", href: `/forsaljning/ordrar/${ID}`, title: "KO", own: true, lastUsed: 3 },
+        tab(2),
+      ],
       activeId: "t2",
     });
     const restored = restoreTabs(raw, ORIGIN);
-    expect(restored.tabs.map((t) => t.id)).toEqual(["t1", "t2"]);
+    expect(restored.tabs.map((t) => t.id)).toEqual(["t1", "own", "t2"]);
+    expect(restored.tabs[1]).toMatchObject({ own: true, fn: "/forsaljning/ordrar" });
     expect(restored.activeId).toBe("t2");
     expect(restoreTabs(JSON.stringify({ tabs: [tab(1)], activeId: "gone" }), ORIGIN).activeId).toBeNull();
     expect(restoreTabs("{inte json", ORIGIN)).toEqual({ tabs: [], activeId: null });

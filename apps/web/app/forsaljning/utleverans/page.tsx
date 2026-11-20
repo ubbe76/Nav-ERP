@@ -32,7 +32,7 @@ export default async function DeliveryPage(props: { searchParams: Promise<{ orde
   const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null);
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <DeliveryPageClient
         locations={locations}
         selected={selected}

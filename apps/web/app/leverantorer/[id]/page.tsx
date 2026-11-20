@@ -30,7 +30,7 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
   ]);
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{supplier.name}</div>

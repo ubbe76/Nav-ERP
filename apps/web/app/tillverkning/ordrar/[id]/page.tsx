@@ -59,7 +59,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{order.orderNumber}</div>

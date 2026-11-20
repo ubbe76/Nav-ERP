@@ -17,7 +17,7 @@ export default async function TimeReportsPage(props: { searchParams: Promise<Pag
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <TimeReportsPageClient reports={reports} employees={employees} pageSize={pageSize} timeKindSplit={timeSettings.timeKindSplit === true} />
     </AppShell>
   );

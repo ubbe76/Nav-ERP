@@ -17,7 +17,7 @@ export default async function WorkCentersPage() {
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <WorkCentersPageClient
         workCenters={workCenters}
         allWorkCenters={allWorkCenters}

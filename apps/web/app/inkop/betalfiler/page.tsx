@@ -12,7 +12,7 @@ export default async function PaymentBatchesPage(props: { searchParams: Promise<
   const pageSize = await getListPageSize();
   const batches = await apiGet<Paged<PaymentBatchListRow>>(`/api/v1/payment-batches${listApiQuery(searchParams, ["status"], pageSize)}`, cookieHeader);
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <PaymentBatchesPageClient batches={batches} pageSize={pageSize} />
     </AppShell>
   );

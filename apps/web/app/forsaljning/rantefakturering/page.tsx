@@ -20,7 +20,7 @@ export default async function RantefaktureringPage(props: {
 
   if (!settings.lateInterestEnabled) {
     return (
-      <AppShell active="Försäljning">
+      <AppShell>
         <LateInterestPageClient enabled={false} />
       </AppShell>
     );
@@ -40,7 +40,7 @@ export default async function RantefaktureringPage(props: {
   ]);
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <LateInterestPageClient
         // Remount on a new urval so the selection and results start over.
         key={`${asOf}|${customerId}|${includeUnpaid}`}

@@ -9,7 +9,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 export default async function ArticleOverviewPage(props: { searchParams: Promise<{ article?: string }> }) {
   const { article } = await props.searchParams;
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Artikelöversikt</div>

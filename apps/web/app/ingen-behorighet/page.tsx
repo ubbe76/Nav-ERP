@@ -6,7 +6,7 @@ import shellStyles from "../../components/AppShell.module.css";
 // doesn't cover (or who has no group at all).
 export default function NoAccessPage() {
   return (
-    <AppShell active="Översikt">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Ingen behörighet</div>

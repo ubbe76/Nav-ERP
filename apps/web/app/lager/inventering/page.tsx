@@ -20,7 +20,7 @@ export default async function StockCountListPage(props: { searchParams: Promise<
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Lager">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -33,7 +33,7 @@ export default async function StockCountListPage(props: { searchParams: Promise<
   );
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Inventering</div>

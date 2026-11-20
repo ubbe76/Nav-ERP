@@ -18,7 +18,7 @@ export default async function BankavstamningPage(props: {
 
   if (!user || !canOpen(user, "/ekonomi/bankavstamning")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -49,7 +49,7 @@ export default async function BankavstamningPage(props: {
   }
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <BankavstamningPageClient
         bankAccounts={bankAccounts.rows}
         selectedId={selected?.id ?? null}

@@ -16,7 +16,7 @@ export default async function SamlingsfaktureringPage(props: {
   const preselectCustomerId = typeof searchParams.customerId === "string" ? searchParams.customerId : undefined;
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <CollectiveInvoicingClient initialCandidates={candidates} preselectCustomerId={preselectCustomerId} />
     </AppShell>
   );

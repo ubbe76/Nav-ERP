@@ -19,7 +19,7 @@ export default async function OffertuppfoljningPage(props: { searchParams: Promi
 
   if (!user || !canOpen(user, "/rapporter/offertuppfoljning")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -29,7 +29,7 @@ export default async function OffertuppfoljningPage(props: { searchParams: Promi
   const year = stockholmToday().slice(0, 4);
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Offertuppföljning</div>

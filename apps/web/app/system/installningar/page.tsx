@@ -17,7 +17,7 @@ export default async function SettingsPage() {
   // so the admin gate lives here in the page, matching the rest of System.
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -32,7 +32,7 @@ export default async function SettingsPage() {
     : null;
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Inställningar</div>

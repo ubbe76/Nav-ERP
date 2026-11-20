@@ -46,8 +46,10 @@ export interface FavoritesState {
 export interface ShellSettings extends FavoritesState {
   density: TableDensity;
   listColumns: ListColumns;
-  // Flikar (punkt 5): documents as tabs on a wide screen; default on.
+  // Flikar (Programramen): a tab per function on a wide screen; default on.
   documentTabs: boolean;
+  // Programramen: the module panel folded away; default off.
+  navPanelCollapsed: boolean;
 }
 
 export async function loadShellSettings(cookieHeader: string | undefined): Promise<ShellSettings> {
@@ -59,6 +61,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
     density: "normal",
     listColumns: {},
     documentTabs: true,
+    navPanelCollapsed: false,
   };
   if (!cookieHeader) return fallback;
   try {
@@ -70,6 +73,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
       density?: string;
       listColumns?: ListColumns;
       documentTabs?: boolean;
+      navPanelCollapsed?: boolean;
     }>("/api/v1/me/settings", cookieHeader);
     return {
       favorites: settings.favorites ?? null,
@@ -79,6 +83,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
       density: settings.density === "compact" ? "compact" : "normal",
       listColumns: settings.listColumns ?? {},
       documentTabs: settings.documentTabs !== false,
+      navPanelCollapsed: settings.navPanelCollapsed === true,
     };
   } catch {
     return fallback;

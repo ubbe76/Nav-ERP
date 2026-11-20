@@ -11,7 +11,7 @@ export default async function BankkontonPage() {
 
   if (!user || !canOpen(user, "/ekonomi/bankkonton")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function BankkontonPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <BankkontonPageClient bankAccounts={bankAccounts.rows} accounts={accounts.rows} />
     </AppShell>
   );

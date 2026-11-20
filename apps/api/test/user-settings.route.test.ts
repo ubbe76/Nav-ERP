@@ -90,7 +90,7 @@ describe("GET /me/settings", () => {
 
     const res = await app.inject({ url: "/me/settings", headers: { cookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true });
+    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true, navPanelCollapsed: false });
     await app.close();
   });
 });
@@ -114,10 +114,10 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 100 },
     });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true });
+    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true, navPanelCollapsed: false });
 
     const getRes = await app.inject({ url: "/me/settings", headers: { cookie } });
-    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true });
+    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true, navPanelCollapsed: false });
 
     // Upsert, not insert-only: a second PATCH overwrites the first value
     // rather than erroring on the composite PK.
@@ -128,7 +128,7 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 25 },
     });
     expect(secondPatch.statusCode).toBe(200);
-    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true });
+    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true, navPanelCollapsed: false });
     await app.close();
   });
 
@@ -166,7 +166,7 @@ describe("PATCH /me/settings", () => {
     const cookieB = await registerAndLogin(app);
 
     const patch = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie: cookieA }, payload: { hideOnboarding: true } });
-    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true });
+    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true, navPanelCollapsed: false });
     const other = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
     expect(other.json().hideOnboarding).toBe(false);
     await app.close();
@@ -405,6 +405,19 @@ describe("PATCH /me/settings", () => {
     await app.close();
   });
 
+  it("navPanelCollapsed (Programramen): false until the user folds the module panel away", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    const patch = (navPanelCollapsed: unknown) =>
+      app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { navPanelCollapsed } });
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().navPanelCollapsed).toBe(false);
+    expect((await patch(true)).json().navPanelCollapsed).toBe(true);
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().navPanelCollapsed).toBe(true);
+    expect((await patch("ja")).statusCode).toBe(400);
+    expect((await patch(false)).json().navPanelCollapsed).toBe(false);
+    await app.close();
+  });
+
   it("lands two concurrent Kolumner changes to different lists", async () => {
     const app = buildApp();
     const cookie = await registerAndLogin(app);
@@ -436,7 +449,7 @@ describe("PATCH /me/settings", () => {
     });
 
     const resB = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
-    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true });
+    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [], favoritesFromGroup: true, groupFavoritesCount: 0, favoritesInSidebar: true, overviewCards: null, density: "normal", listColumns: {}, documentTabs: true, navPanelCollapsed: false });
     await app.close();
   });
 });

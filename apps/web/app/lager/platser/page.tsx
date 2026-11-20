@@ -26,7 +26,7 @@ export default async function StockPlacesPage(props: { searchParams: Promise<Pag
   ]);
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lagerplatser</div>

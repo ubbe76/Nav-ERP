@@ -17,7 +17,7 @@ export default async function ArticlesPage(props: { searchParams: Promise<PageSe
   ]);
 
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <ArticlesPageClient articles={articles} groups={groups} articleCodes={articleCodes} pageSize={pageSize} />
     </AppShell>
   );

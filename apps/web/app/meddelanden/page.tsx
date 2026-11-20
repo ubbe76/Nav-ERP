@@ -18,7 +18,7 @@ export default async function MessagesPage(props: { searchParams: Promise<PageSe
 
   if (!user || !canOpen(user, "/meddelanden")) {
     return (
-      <AppShell active="Översikt">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -31,7 +31,7 @@ export default async function MessagesPage(props: { searchParams: Promise<PageSe
   );
 
   return (
-    <AppShell active="Översikt">
+    <AppShell>
       <MessagesPageClient conversations={conversations} pageSize={pageSize} userId={user.id} today={stockholmToday()} />
     </AppShell>
   );

@@ -96,7 +96,7 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
     : [];
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{invoice.invoiceNumber ?? "Utkast"}</div>

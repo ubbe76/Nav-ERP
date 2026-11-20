@@ -16,7 +16,7 @@ export default async function SupplierInvoicesPage(props: { searchParams: Promis
   );
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <SupplierInvoicesPageClient invoices={invoices} pageSize={pageSize} />
     </AppShell>
   );

@@ -14,7 +14,7 @@ export default async function CostingSettingsPage() {
   // here in the page, matching the rest of System.
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function CostingSettingsPage() {
   const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader);
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Kalkyler</div>

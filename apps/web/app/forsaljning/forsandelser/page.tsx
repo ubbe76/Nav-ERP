@@ -15,7 +15,7 @@ export default async function ShipmentsPage(props: { searchParams: Promise<PageS
     apiGet<Paged<Customer>>("/api/v1/customers?limit=1000", cookieHeader),
   ]);
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <ShipmentsPageClient shipments={shipments} customers={customers.rows} pageSize={pageSize} />
     </AppShell>
   );

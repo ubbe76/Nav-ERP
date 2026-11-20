@@ -7,7 +7,7 @@ import { CopiedArticlesPageClient } from "../../../components/articles/CopiedArt
 // it changes with every action.
 export default function CopiedArticlesPage() {
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <CopiedArticlesPageClient />
     </AppShell>
   );

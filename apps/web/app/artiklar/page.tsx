@@ -21,7 +21,7 @@ export default async function ArticlesPage() {
   const sections = await withPluginPages(sectionsForUser(ARTIKLAR_SECTIONS, user ?? { role: "user", permissions: [] }), "artiklar", cookieHeader);
 
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Artiklar</div>

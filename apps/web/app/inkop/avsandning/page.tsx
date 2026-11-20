@@ -43,7 +43,7 @@ export default async function DispatchPage(props: {
     : [[], []];
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <DispatchPageClient
         selected={selected}
         rows={rows}

@@ -16,7 +16,7 @@ export default async function SchedulesPage() {
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <SchedulesPageClient
         daySchedules={daySchedules}
         weekSchedules={weekSchedules}

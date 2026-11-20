@@ -44,7 +44,7 @@ export default async function TraceabilityPage(props: { searchParams: Promise<Pa
     : `${(list?.total ?? 0).toLocaleString("sv-SE")} träffar`;
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{title}</div>

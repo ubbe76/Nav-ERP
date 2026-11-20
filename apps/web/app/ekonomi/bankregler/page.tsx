@@ -11,7 +11,7 @@ export default async function BankreglerPage() {
 
   if (!user || !canOpen(user, "/ekonomi/bankregler")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -23,7 +23,7 @@ export default async function BankreglerPage() {
   ]);
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <BankreglerPageClient rules={rules.rows} accounts={accounts.rows} />
     </AppShell>
   );

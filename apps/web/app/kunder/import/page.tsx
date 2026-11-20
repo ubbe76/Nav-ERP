@@ -13,14 +13,14 @@ export default async function CustomerImportPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Försäljning">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <CustomerImportTabs />
     </AppShell>
   );

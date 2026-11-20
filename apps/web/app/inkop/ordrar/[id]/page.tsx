@@ -45,7 +45,7 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   const mailable = order.status !== "cancelled" && order.status !== "closed";
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{order.orderNumber}</div>

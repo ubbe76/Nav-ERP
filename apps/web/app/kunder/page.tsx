@@ -16,7 +16,7 @@ export default async function CustomersPage(props: { searchParams: Promise<PageS
   );
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <CustomersPageClient customers={customers} pageSize={pageSize} />
     </AppShell>
   );

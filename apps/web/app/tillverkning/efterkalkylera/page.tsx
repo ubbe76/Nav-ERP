@@ -7,7 +7,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 // once, review actual against calculated and save the marked ones.
 export default function PostCalculationBatchPage() {
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Efterkalkylera flera</div>

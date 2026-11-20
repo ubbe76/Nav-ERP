@@ -13,7 +13,7 @@ export default async function SalesBankFilesPage(props: { searchParams: Promise<
   const query = listApiQuery(searchParams, [], pageSize);
   const files = await apiGet<Paged<BankFileListRow>>(`/api/v1/bank-files${query}${query ? "&" : "?"}direction=credit`, cookieHeader);
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <BankFilesPageClient direction="credit" files={files} pageSize={pageSize} />
     </AppShell>
   );

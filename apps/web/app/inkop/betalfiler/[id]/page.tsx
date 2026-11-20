@@ -18,7 +18,7 @@ export default async function PaymentBatchPage(props: { params: Promise<{ id: st
   const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null);
   const profile = bank?.profiles.find((p) => p.id === (batch.bankProfile ?? bank.profile)) ?? null;
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Betalfil {batch.batchNumber}</div>

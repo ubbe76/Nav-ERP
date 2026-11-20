@@ -10,7 +10,7 @@ export default async function BankSettingsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const settings = await apiGet<BankSettingsView>("/api/v1/bank-settings", cookieHeader);
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Bank</div>

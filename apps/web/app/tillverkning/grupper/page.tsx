@@ -13,7 +13,7 @@ export default async function ProductionGroupsPage() {
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <ProductionGroupsPageClient groups={groups} workCenters={workCenters} />
     </AppShell>
   );

@@ -46,7 +46,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
     ]);
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{customer.name}</div>

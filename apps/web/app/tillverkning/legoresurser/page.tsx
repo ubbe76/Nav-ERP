@@ -16,7 +16,7 @@ export default async function LegoWorkCentersPage() {
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <LegoWorkCentersPageClient workCenters={workCenters} allWorkCenters={allWorkCenters} suppliers={suppliers.rows} />
     </AppShell>
   );

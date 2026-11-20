@@ -28,7 +28,7 @@ export default async function SupplierInvoiceDetailPage(props: { params: Promise
   const vatCodes = await apiGet<VatCodeView[]>("/api/v1/vat-codes", cookieHeader).catch(() => [] as VatCodeView[]);
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{invoice.registrationNumber}</div>

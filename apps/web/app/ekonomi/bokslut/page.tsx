@@ -16,7 +16,7 @@ export default async function BokslutPage(props: { searchParams: Promise<PageSea
 
   if (!user || !canOpen(user, "/ekonomi/bokslut")) {
     return (
-      <AppShell active="Ekonomi">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -50,7 +50,7 @@ export default async function BokslutPage(props: { searchParams: Promise<PageSea
   }
 
   return (
-    <AppShell active="Ekonomi">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Bokslut</div>

@@ -20,14 +20,14 @@ export default async function MarginalPage(props: { searchParams: Promise<PageSe
 
   if (!user || !canOpen(user, "/rapporter/marginal")) {
     return (
-      <AppShell active="Rapporter">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Rapporter">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Marginal</div>

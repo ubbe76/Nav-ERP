@@ -12,7 +12,7 @@ export default async function SystemPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -21,7 +21,7 @@ export default async function SystemPage() {
   const sections = sectionsForUser(SYSTEM_SECTIONS, user);
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>System</div>

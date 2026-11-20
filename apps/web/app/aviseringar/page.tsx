@@ -18,7 +18,7 @@ export default async function AlertsPage() {
 
   if (!user || !canOpen(user, "/aviseringar")) {
     return (
-      <AppShell active="Aviseringar">
+      <AppShell>
         <p>Du saknar behörighet till den här sidan.</p>
       </AppShell>
     );
@@ -34,7 +34,7 @@ export default async function AlertsPage() {
   ]);
 
   return (
-    <AppShell active="Aviseringar">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Aviseringar</div>

@@ -4,6 +4,7 @@ import { isEmbedded } from "../lib/documentTabs";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { API_URL } from "../lib/api";
+import { useDocumentTabs } from "./tabs/DocumentTabs";
 import styles from "./StatusBar.module.css";
 
 type State = "online" | "expired" | "offline";
@@ -19,9 +20,11 @@ const LABELS: Record<State, string> = {
 const CHECK_MS = 60 * 1000;
 
 // The status bar at the bottom (Nav som program, punkt 1): whether the server
-// answers and the session is valid, who is logged in, and the version.
+// answers and the session is valid, who is logged in, how many tabs are open
+// and the version.
 export function StatusBar({ userName, userRole }: { userName: string; userRole: string }) {
   const [state, setState] = useState<State>("online");
+  const { available, tabs } = useDocumentTabs();
 
   useEffect(() => {
     // Inside a document tab (punkt 5) the bar is hidden: the frame checks.
@@ -67,9 +70,12 @@ export function StatusBar({ userName, userRole }: { userName: string; userRole: 
       <span>
         {userName} · {userRole}
       </span>
-      <a className={styles.version} href="https://naverp.se/versioner/" target="_blank" rel="noopener noreferrer">
-        Version {process.env.NEXT_PUBLIC_APP_VERSION}
-      </a>
+      <span className={styles.end}>
+        {available && tabs.length > 0 && <span>{tabs.length === 1 ? "1 öppen flik" : `${tabs.length} öppna flikar`}</span>}
+        <a className={styles.version} href="https://naverp.se/versioner/" target="_blank" rel="noopener noreferrer">
+          Version {process.env.NEXT_PUBLIC_APP_VERSION}
+        </a>
+      </span>
     </footer>
   );
 }

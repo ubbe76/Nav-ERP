@@ -11,7 +11,7 @@ export default async function StockCountDetailPage(props: { params: Promise<{ id
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Lager">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -20,7 +20,7 @@ export default async function StockCountDetailPage(props: { params: Promise<{ id
   const session = await apiGet<StockCountDetail>(`/api/v1/stock-counts/${id}`, cookieHeader);
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <StockCountDetailClient session={session} />
     </AppShell>
   );

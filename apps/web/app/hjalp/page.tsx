@@ -19,7 +19,7 @@ export default async function ManualHubPage(props: { searchParams: Promise<{ q?:
   })).filter((section) => section.items.length > 0);
 
   return (
-    <AppShell active="Hjälp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Hjälp</div>

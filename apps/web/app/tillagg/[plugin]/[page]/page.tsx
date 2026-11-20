@@ -4,7 +4,7 @@ import { AppShell } from "../../../../components/AppShell";
 import { PluginFrame } from "../../../../components/plugins/PluginFrame";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { satisfiesRule } from "../../../../lib/permissions";
-import { PLUGIN_MODULE_NAV, type PluginUi } from "../../../../lib/plugins";
+import type { PluginUi } from "../../../../lib/plugins";
 import shellStyles from "../../../../components/AppShell.module.css";
 
 // A plugin's page, embedded. The route is open to every office user
@@ -22,7 +22,7 @@ export default async function PluginPage({ params }: { params: Promise<{ plugin:
   if (entry && !satisfiesRule(user, [entry.module])) redirect("/ingen-behorighet");
 
   return (
-    <AppShell active={entry ? (PLUGIN_MODULE_NAV[entry.module] as Parameters<typeof AppShell>[0]["active"]) : "Översikt"}>
+    <AppShell>
       {entry ? (
         <>
           <div className={shellStyles.topbar}>

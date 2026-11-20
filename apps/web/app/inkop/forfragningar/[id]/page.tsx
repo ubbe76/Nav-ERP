@@ -30,7 +30,7 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
   const mailable = inquiry.status !== "ordered" && inquiry.status !== "cancelled";
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{inquiry.inquiryNumber}</div>

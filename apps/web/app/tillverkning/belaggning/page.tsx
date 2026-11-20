@@ -10,7 +10,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 // admin-gated — any user who can plan production.
 export default function BelaggningPage() {
   return (
-    <AppShell active="Tillverkning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Beläggning</div>

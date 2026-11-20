@@ -34,7 +34,7 @@ export default async function GoodsReceiptPage(props: { searchParams: Promise<{ 
   const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null);
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <GoodsReceiptPageClient
         locations={locations}
         selected={selected}

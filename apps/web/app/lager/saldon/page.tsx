@@ -32,7 +32,7 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
   const locationLabel = shown ? placeName(shown.warehouseName, shown.locationName ?? "—", multipleWarehouses) : "vald lagerplats";
 
   return (
-    <AppShell active="Lager">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lager</div>

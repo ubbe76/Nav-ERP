@@ -14,14 +14,14 @@ export default async function SupplierImportPage() {
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Inköp">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
   }
 
   return (
-    <AppShell active="Inköp">
+    <AppShell>
       <SupplierImportTabs />
     </AppShell>
   );

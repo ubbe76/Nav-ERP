@@ -116,7 +116,7 @@ export function FavoritesEditor({ onDone }: { onDone: () => void }) {
       />
       <label className={styles.placement}>
         <Checkbox checked={showInSidebar} onChange={(e) => setShowInSidebar(e.target.checked)} />
-        Visa favoriterna i sidomenyn
+        Visa favoriterna i menyn
       </label>
       <FormHint>
         Utan bocken visas favoriterna bara på Översikten, om kortet Favoriter är valt. Båda valen finns också under

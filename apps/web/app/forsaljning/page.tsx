@@ -18,7 +18,7 @@ export default async function SalesPage() {
   const sections = await withPluginPages(sectionsForUser(FORSALJNING_SECTIONS, user ?? { role: "user", permissions: [] }), "forsaljning", cookieHeader);
 
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Försäljning</div>

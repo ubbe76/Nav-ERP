@@ -9,7 +9,7 @@ import shellStyles from "../../../components/AppShell.module.css";
 export default async function PreCalculationBatchPage(props: { searchParams: Promise<{ urval?: string }> }) {
   const { urval } = await props.searchParams;
   return (
-    <AppShell active="Artiklar">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Förkalkylera flera</div>

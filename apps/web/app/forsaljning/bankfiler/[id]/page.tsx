@@ -19,7 +19,7 @@ export default async function SalesBankFilePage(props: { params: Promise<{ id: s
     apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
   ]);
   return (
-    <AppShell active="Försäljning">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{file.filename}</div>

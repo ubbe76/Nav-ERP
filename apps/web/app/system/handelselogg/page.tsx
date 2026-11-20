@@ -16,7 +16,7 @@ export default async function AuditLogPage(props: { searchParams: Promise<PageSe
   // the API's own requireRole("admin") ever runs.
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="System">
+      <AppShell>
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -29,7 +29,7 @@ export default async function AuditLogPage(props: { searchParams: Promise<PageSe
   );
 
   return (
-    <AppShell active="System">
+    <AppShell>
       <AuditLogPageClient log={log} pageSize={pageSize} />
     </AppShell>
   );

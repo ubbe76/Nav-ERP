@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { Columns2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useDocumentTabs } from "./DocumentTabs";
+import { favoriteIcon } from "../ui/Nav";
 import styles from "./TabStrip.module.css";
 
-// The strip under the toolbar (Nav som program, punkt 5): the page first,
-// then the open documents, and Delad vy at the right end. Shown only with
-// at least one document open. Mounting it also tells the provider that an
-// app frame is on screen. A document tab can be dragged to a new place
-// (drop on a tab: before it, or after it in its right half).
+// The tab strip (Programramen, flikar per funktion): one tab per open
+// function — and per document opened in a tab of its own — above the
+// content, right of the menu. Every tab closes (✕ or a middle click) and
+// can be dragged to a new place (drop on a tab: before it, or after it in
+// its right half). Mounting it also tells the provider that an app frame is
+// on screen.
 export function TabStrip() {
-  const { available, tabs, activeId, split, pageTitle, activate, move, close, setSplit, registerShell } = useDocumentTabs();
+  const { available, tabs, activeId, activate, move, close, registerShell } = useDocumentTabs();
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
 
@@ -21,17 +23,17 @@ export function TabStrip() {
 
   function onTabKey(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const ids: (string | null)[] = [null, ...tabs.map((t) => t.id)];
-    const index = ids.indexOf(activeId);
-    const next = ids[(index + (e.key === "ArrowRight" ? 1 : ids.length - 1)) % ids.length] ?? null;
+    const ids = tabs.map((t) => t.id);
+    const index = activeId ? ids.indexOf(activeId) : 0;
+    const next = ids[(index + (e.key === "ArrowRight" ? 1 : ids.length - 1)) % ids.length];
+    if (!next) return;
     e.preventDefault();
     activate(next);
-    const key = next ?? "page";
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-tab-key="${key}"]`)?.focus());
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-tab-key="${next}"]`)?.focus());
   }
 
-  // The index among the documents a drop on tab `index` lands on: before it
-  // in its left half, after it in its right half.
+  // The index a drop on tab `index` lands on: before it in its left half,
+  // after it in its right half.
   function dropIndex(e: DragEvent<HTMLDivElement>, index: number): number {
     const box = e.currentTarget.getBoundingClientRect();
     return e.clientX > box.left + box.width / 2 ? index + 1 : index;
@@ -64,19 +66,8 @@ export function TabStrip() {
   }
 
   return (
-    <div className={styles.strip}>
-      <div className={styles.tabs} role="tablist" aria-label="Öppna dokument" onKeyDown={onTabKey}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeId === null}
-          tabIndex={activeId === null ? 0 : -1}
-          data-tab-key="page"
-          className={`${styles.tab} ${styles.pageTab}`}
-          onClick={() => activate(null)}
-        >
-          <span className={styles.title}>{pageTitle || "Sidan"}</span>
-        </button>
+    <div className={styles.strip} data-app-chrome="">
+      <div className={styles.tabs} role="tablist" aria-label="Öppna flikar" onKeyDown={onTabKey}>
         {tabs.map((tab, index) => (
           <div
             key={tab.id}
@@ -108,6 +99,9 @@ export function TabStrip() {
               onClick={() => activate(tab.id)}
               onAuxClick={(e) => onAuxClick(e, tab.id)}
             >
+              <span className={styles.icon} aria-hidden="true">
+                {favoriteIcon(tab.fn)}
+              </span>
               <span className={styles.title}>{tab.title}</span>
             </button>
             <button
@@ -122,16 +116,6 @@ export function TabStrip() {
           </div>
         ))}
       </div>
-      <button
-        type="button"
-        className={styles.split}
-        aria-pressed={split}
-        title="Delad vy: sidan till vänster, dokumentet till höger"
-        onClick={() => setSplit(!split)}
-      >
-        <Columns2 size={15} strokeWidth={1.8} aria-hidden="true" />
-        Delad vy
-      </button>
     </div>
   );
 }

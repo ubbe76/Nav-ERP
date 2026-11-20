@@ -1,23 +1,219 @@
+/* Programramen: the icon rail and the module panel beside it, under the
+   toolbar and above the status bar. Sticky, so it stays while the page
+   scrolls; each part scrolls on its own when it is taller than the window.
+   ≤ 1024 px both are the drawer behind the hamburger. */
 .sidebar {
-  width: 236px;
+  position: sticky;
+  top: var(--app-toolbar-base);
+  align-self: flex-start;
+  display: flex;
+  flex-shrink: 0;
+  height: calc(100vh - var(--app-toolbar-base) - var(--app-statusbar-height));
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
+  z-index: 20;
+}
+
+.rail {
+  list-style: none;
+  margin: 0;
+  padding: 10px 8px;
+  width: 60px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px 16px;
-  /* Sticky full-viewport column: the nav (and its user footer, pinned by
-     margin-top: auto) stays put while the content column scrolls. The
-     ≤1024px media query below overrides this into an off-canvas drawer. */
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  gap: 4px;
   overflow-y: auto;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+.railItem {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 150ms ease, color 150ms ease;
+}
+.railItem:hover {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+/* The panel shows this module (picked in the rail). */
+.railItem[data-shown] {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+/* The page belongs to this module. */
+.railItem[data-active] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.railItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.railItem :global(svg) {
+  width: 20px;
+  height: 20px;
+}
+/* The name is for the drawer; on the rail the tooltip (title) carries it. */
+.railLabel {
+  display: none;
+}
+
+.panel {
+  width: 236px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 14px 10px 24px;
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 10px;
+}
+.panelTitle {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapseButton {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.collapseButton:hover {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+.collapseButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.groupAction {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  border-radius: var(--radius-control-sm);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+.groupAction:hover {
+  text-decoration: underline;
+}
+
+.section {
+  margin-top: 12px;
+}
+.sectionTitle {
+  padding: 0 8px 4px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control-sm);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+  /* A menu entry, not a link in running text. */
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.item:hover {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+.item[aria-current="page"] {
+  background: var(--color-divider);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.itemIcon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.itemIcon :global(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+/* A long name ends in an ellipsis instead of widening the panel. */
+.label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint {
+  margin: 0;
+  padding: 0 8px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
 }
 
 .menuButton {
   display: none;
 }
-
 .menuBar {
   display: block;
   width: 16px;
@@ -25,52 +221,13 @@
   background: var(--color-text-primary);
   border-radius: 1px;
 }
-
 .backdrop {
   display: none;
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 8px;
-  margin-bottom: 24px;
-}
-
-.wordmarkFull {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.wordmarkCompact {
-  display: none;
-}
-
-.collapseButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border: none;
-  border-radius: var(--radius-control-sm);
-  background: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-}
-.collapseButton:hover {
-  background: var(--color-divider);
-  color: var(--color-text-primary);
-}
-
-/* Below tablet width the sidebar becomes an off-canvas drawer, toggled by
-   the hamburger button, instead of a permanent grid column (see
-   AppShell.module.css / page.module.css for the matching .frame collapse). */
+/* Below tablet width rail and panel are an off-canvas drawer, toggled by the
+   hamburger; the panel always shows there (no folding), and the rail shows
+   the names. */
 @media (max-width: 1024px) {
   .menuButton {
     display: flex;
@@ -83,7 +240,7 @@
     position: fixed;
     /* Centred in the toolbar band (AppToolbar.module.css keeps its left
        side clear). */
-    top: calc((var(--app-toolbar-height) - 38px) / 2);
+    top: calc((var(--app-toolbar-base) - 38px) / 2);
     left: 16px;
     z-index: 50;
     border-radius: var(--radius-control-sm);
@@ -91,9 +248,6 @@
     background: var(--color-surface);
     cursor: pointer;
   }
-
-  /* Hidden while the drawer is open — it would cover the drawer's logo; a
-     tap outside the drawer closes it. */
   .menuButton[data-open="true"] {
     display: none;
   }
@@ -110,8 +264,8 @@
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 48;
-    width: 260px;
-    min-height: 100vh;
+    height: 100vh;
+    max-width: 100vw;
     transform: translateX(-100%);
     transition: transform 200ms ease;
     box-shadow: var(--shadow-frame);
@@ -120,164 +274,11 @@
     transform: translateX(0);
   }
 
-  /* The drawer already collapses to nothing off-canvas — the desktop
-     icons-only mode has no meaning here, so its toggle is hidden. */
+  .panel {
+    width: min(236px, calc(100vw - 76px));
+  }
+
   .collapseButton {
     display: none;
   }
-}
-
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-control-sm);
-  font-family: var(--font-body);
-  font-size: 13.5px;
-  color: var(--color-text-secondary);
-  /* A menu entry, not a link in running text (Nav som program, punkt 1). */
-  text-decoration: none;
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
-}
-.item:hover {
-  background: var(--color-divider);
-}
-.icon {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-/* A long favourite name ends in an ellipsis instead of widening the menu. */
-.label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.item[data-active="true"] {
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 600;
-}
-
-/* Favoriter, above the modules: a quiet uppercase header (with Ändra) and a
-   rule underneath that separates the user's own list from the module list. */
-.favorites {
-  margin-bottom: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.groupHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 12px 6px;
-  font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-
-.groupAction {
-  border: none;
-  background: none;
-  padding: 2px 4px;
-  margin-right: -4px;
-  border-radius: var(--radius-control-sm);
-  font-family: var(--font-body);
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--accent-fg);
-  cursor: pointer;
-}
-.groupAction:hover {
-  text-decoration: underline;
-}
-
-.favoritesHint {
-  margin: 0;
-  padding: 0 12px;
-  font-family: var(--font-body);
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--color-text-muted);
-}
-
-/* The open page among the favourites: emphasised without the accent fill,
-   which stays the module's. */
-.item[aria-current="page"] {
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
-.item[data-disabled="true"] {
-  cursor: default;
-  opacity: 0.45;
-}
-.item[data-disabled="true"]:hover {
-  background: none;
-}
-
-/* Icons-only collapsed mode, desktop only: the drawer breakpoint above
-   ignores data-collapsed entirely. The parent grids use `auto 1fr`, so the
-   sidebar's own width is what collapses the column. */
-@media (min-width: 1025px) {
-  .sidebar[data-animated="true"] {
-    transition: width 180ms ease;
-  }
-
-  .sidebar[data-collapsed="true"] {
-    width: 64px;
-    padding-left: 10px;
-    padding-right: 10px;
-  }
-
-  .sidebar[data-collapsed="true"] .header {
-    flex-direction: column;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 0;
-  }
-  .sidebar[data-collapsed="true"] .wordmarkFull {
-    display: none;
-  }
-  .sidebar[data-collapsed="true"] .wordmarkCompact {
-    display: flex;
-  }
-
-  .sidebar[data-collapsed="true"] .item {
-    justify-content: center;
-    padding: 10px 0;
-  }
-  .sidebar[data-collapsed="true"] .label {
-    display: none;
-  }
-
-  /* Icons only: the favourites keep their icons, the header and hint go. */
-  .sidebar[data-collapsed="true"] .groupHeader,
-  .sidebar[data-collapsed="true"] .favoritesHint {
-    display: none;
-  }
-  .sidebar[data-collapsed="true"] .favorites:not(:has(.list)) {
-    display: none;
-  }
-
 }

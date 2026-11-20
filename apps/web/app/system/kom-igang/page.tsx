@@ -13,7 +13,7 @@ export default async function KomIgangPage() {
     apiGet<{ hideOnboarding?: boolean }>("/api/v1/me/settings", cookieHeader),
   ]);
   return (
-    <AppShell active="System">
+    <AppShell>
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Kom igång</div>
