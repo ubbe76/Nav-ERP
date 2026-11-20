@@ -60,7 +60,8 @@ export function CustomizeOverview({ shown, available }: { shown: OverviewCard[];
       <Button type="button" variant="secondary" onClick={openDialog}>
         Anpassa
       </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Anpassa Översikten" compact>
+      {/* Not compact: a list of every card — a full-screen sheet on a phone. */}
+      <Modal open={open} onClose={() => setOpen(false)} title="Anpassa Översikten">
         <p className={styles.hint}>Välj vilka kort Översikten visar och i vilken ordning. Valet gäller bara dig.</p>
         <ol className={styles.list}>
           {entries.map((entry, i) => {

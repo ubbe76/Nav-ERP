@@ -73,8 +73,13 @@
   padding: var(--space-card-padding);
   overflow-y: auto;
   /* Fill a full-height phone sheet so a tap below a short form hits the body,
-     not the <dialog> backdrop area. */
-  flex: 1;
+     not the <dialog> backdrop area. The basis is the content (auto), not 0:
+     a compact dialog's height is fit-content, and with flex: 1 (basis 0)
+     Safari on iPhone sized it without the body — "Anpassa Översikten"
+     showed its title and one line (2026-11-20). min-height 0 lets the body
+     scroll once the dialog reaches its max-height. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 @media (max-width: 640px) {
