@@ -523,7 +523,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.20 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.21 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -586,7 +586,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   restantal; **önskat** och **bekräftat leveransdatum** på ordern med
   möjlighet till eget datum per rad (planeringen räknar med det bekräftade
   före det önskade; önskat datum skrivs ut på inköpsorderns och förfrågans
-  PDF); ny förfrågan/inköpsorder kan skapas
+  PDF; leverantörens bekräftelse — **Bekräftad av leverantör** Ja/Delvis/Nej —
+  syns i inköpsorderlistan, och raderna bekräftas var för sig med
+  **Bekräfta rader…**); ny förfrågan/inköpsorder kan skapas
   direkt från leverantörskortet; **leverantörsfakturor** (leverantörs-
   reskontra med egen LF-nummerserie och statusflöde utkast → godkänd →
   betald, där fakturarader kan IO-matchas mot inköpsorderrader med pris-
@@ -616,7 +618,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   rader; kund- och leverantörsdokumenten skrivs på **svenska eller
   engelska** efter motpartens **Språk**;
   **utleveransrutin** som rapporterar leverans av hela ordern på en
-  gång (med **rest** per rad) och skapar följesedel, med utskrivbar **plocklista** (PDF med restantal och
+  gång (med **rest** per rad, saldot **I lager** och radens
+  tillverkningsorder, och en varning innan något levereras som inte är
+  tillverkat) och skapar följesedel, med utskrivbar **plocklista** (PDF med restantal och
   lagerplatssaldon per artikel), **pallkort** per följesedel (streck- eller
   QR-kod, eget antal per kolli), **tillåten överleverans** (systemets förval
   eller per kund) och möjlighet att **ångra en utleverans**
