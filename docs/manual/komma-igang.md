@@ -212,6 +212,17 @@ Kundorder, Offerter, Inköpsorder, Förfrågningar, Tillverkningsordrar, Fakturo
 - **+** överst i listan skapar ett nytt dokument, som **+ Ny kundorder**.
 - **Visa som tabell** (knappen med rutnätet överst i listan) visar i stället den breda tabellen med alla kolumner, **Kolumner** och **Exportera**. **Visa som lista** i tabellens verktygsrad går tillbaka. Valet gäller den listan och sparas i webbläsaren. Öppnar du listan med ett filter, en sökning eller en genväg som **+ Ny kundorder**, till exempel från en favorit, visas tabellen.
 - På **mobilen** och i smala fönster visas listan eller dokumentet, inte båda.
+- I **Artikelregistret** visar högersidan en **sammanfattning** av artikeln: **I lager**, **Disponibelt** (i lager minus de öppna behoven), **Inkommande**, **Standardpris** med lagervärdet till standardpris, saldot per lagerplats (med **Flytta** till [Lagerflytt](/hjalp/lager#lagerflytt)) och de närmaste behoven och inleveranserna. **Öppna artikelkort** visar hela kortet med alla flikar, utan listan.
+
+### Dokumentkorten
+
+Kundorder, offert, inköpsorder och förfrågan har samma uppbyggnad:
+
+- **Överst** står var du är (till exempel **Försäljning › Kundorder › KO-5008**, med länkar tillbaka) och knapparna för det som går att göra i dokumentets status, med huvudåtgärden sist.
+- **Under den** står numret med status, kundens eller leverantörens namn som rubrik och dokumentets steg, där steget dokumentet står i är markerat.
+- **Huvudet** ändras direkt på kortet. När du har ändrat något visas *Osparade ändringar i huvudet* med **Ångra ändringar** och **Spara** (eller **Ctrl+S**). Sällan använda fält ligger under **Fler uppgifter**.
+- **Flikarna** delar upp resten av kortet: **Rader** först, sedan till exempel **Leverans**, **Dokument** och **Historik**. Fliken du väljer står i adressen.
+- **+ Ny rad** sist i radlistan lägger till rader utan dialog: sök artikel, skriv antal (och pris), **Enter** lägger till och raden står tom för nästa. Ikonen **Fler fält…** öppnar dialogen **Lägg till rad** för det som inte ryms på raden.
 
 ## Listor: sök, filter och bläddring
 

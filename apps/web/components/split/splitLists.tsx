@@ -262,7 +262,8 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
       const a = raw as Article;
       return {
         id: a.id,
-        href: `/artiklar/${a.id}`,
+        // Programramen steg 3: the summary beside the list; Öppna artikelkort there.
+        href: `/artiklar/register/${a.id}`,
         primary: a.name,
         secondary: join(a.articleNumber, ARTICLE_TYPE_LABELS[a.type]),
         status: a.active ? null : { label: "Inaktiv", tone: "draft" },

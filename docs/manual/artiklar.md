@@ -11,6 +11,8 @@ Sökfältet går att använda helt från tangentbordet:
 - Listan filtreras medan du skriver. **Enter** söker direkt utan att vänta, och träffarna ligger kvar i listan.
 - **Pil ned** markerar första träffen, och fler tryck flyttar markeringen nedåt. **Pil upp** flyttar uppåt och tar bort markeringen från första raden. Den markerade raden får en grön ram.
 - **Enter** på en markerad rad öppnar artikelkortet.
+
+I listläget (se [Lista och kort](/hjalp/komma-igang#lista-och-kort)) visar ett klick på en artikel en **sammanfattning** bredvid listan: **I lager** (utan spärrade lagerplatser, som står för sig), **Disponibelt** (i lager minus de öppna behoven), **Inkommande** (med första datumet), **Standardpris** och lagervärdet till standardpris, **Saldo per lagerplats** med **Flytta** (öppnar [Lagerflytt](/hjalp/lager#lagerflytt) med platsen och artikeln valda), **Behov och inkommande** — de åtta närmaste raderna ur [Artikelöversikten](#artikeloversikt) — och huvudleverantören, beställningspunkten och orderkvantiteten. Priserna visas för den som får se priser. **Öppna artikelkort** visar hela artikelkortet, utan listan.
 - **Esc** tar bort markeringen, och skriver du något nytt börjar du om.
 - I läget **Redigera** gäller inte piltangenterna i sökfältet — där styr Enter och Esc cellerna.
 
