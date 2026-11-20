@@ -16,6 +16,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, formatUnitPrice } from "../../lib/format";
 import {
   PURCHASE_ORDER_STATUS_PILL,
+  SALES_ORDER_REGISTER_STATUSES,
   SALES_ORDER_STATUS_PILL,
   type ArticleGroup,
   type Customer,
@@ -80,6 +81,8 @@ const SIDES = {
     doneLabel: "Levererat",
     orderHref: (id: string) => `/forsaljning/ordrar/${id}`,
     pills: SALES_ORDER_STATUS_PILL as Record<string, Pill>,
+    // Orders only — the register never lists quotes.
+    statuses: SALES_ORDER_REGISTER_STATUSES as readonly string[],
   },
   purchase: {
     endpoint: "/api/v1/reports/purchase-order-register",
@@ -88,6 +91,7 @@ const SIDES = {
     doneLabel: "Mottaget",
     orderHref: (id: string) => `/inkop/ordrar/${id}`,
     pills: PURCHASE_ORDER_STATUS_PILL as Record<string, Pill>,
+    statuses: Object.keys(PURCHASE_ORDER_STATUS_PILL) as readonly string[],
   },
 } as const;
 
@@ -257,9 +261,9 @@ export function OrderRegisterPageClient({
               <Select id="registerStatus" value={status} onChange={(e) => setStatus(e.target.value)}>
                 <option value="open">Öppna ordrar</option>
                 <option value="">Alla statusar</option>
-                {Object.entries(side.pills).map(([value, pill]) => (
+                {side.statuses.map((value) => (
                   <option key={value} value={value}>
-                    {pill.label}
+                    {side.pills[value]?.label ?? value}
                   </option>
                 ))}
               </Select>

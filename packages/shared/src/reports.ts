@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { businessDateSchema } from "./business-date.js";
 import { purchaseOrderStatusSchema } from "./purchase.js";
-import { salesOrderStatusSchema } from "./sales.js";
+import type { SalesOrderStatus } from "./sales.js";
 
 // F1 Rapporter — query schemas. All reports take an optional month range
 // (YYYY-MM strings, lexicographically comparable); the service defaults a
@@ -144,10 +144,23 @@ function orderRegisterQuerySchema<T extends readonly [string, ...string[]]>(stat
     .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
 }
 
-export const SALES_ORDER_OPEN_STATUSES = ["quote", "confirmed", "in_production"] as const;
+// Orderförteckning kundorder lists customer ORDERS only (documentKindSql =
+// order, like the project report): a quote — open, Förlorad, or one that
+// gave an order (Order) — is not an order, and a quote that gave an order
+// was counted next to the order made from it, so the register summed the
+// value twice. Quotes have Offerter and Offertuppföljning. Its status filter
+// takes the order statuses (a whitelist; the web mirrors it).
+export const SALES_ORDER_REGISTER_STATUSES = [
+  "confirmed",
+  "in_production",
+  "delivered",
+  "invoiced",
+  "cancelled",
+] as const satisfies readonly SalesOrderStatus[];
+export const SALES_ORDER_OPEN_STATUSES = ["confirmed", "in_production"] as const satisfies readonly SalesOrderStatus[];
 export const PURCHASE_ORDER_OPEN_STATUSES = ["draft", "confirmed", "partially_received"] as const;
 
-export const salesOrderRegisterQuerySchema = orderRegisterQuerySchema(salesOrderStatusSchema.options);
+export const salesOrderRegisterQuerySchema = orderRegisterQuerySchema(SALES_ORDER_REGISTER_STATUSES);
 export type SalesOrderRegisterQuery = z.infer<typeof salesOrderRegisterQuerySchema>;
 
 export const purchaseOrderRegisterQuerySchema = orderRegisterQuerySchema(purchaseOrderStatusSchema.options);

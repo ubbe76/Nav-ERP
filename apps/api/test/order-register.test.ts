@@ -12,7 +12,9 @@ import {
   suppliers,
   units,
 } from "@navet/db";
-import { purchaseOrderRegisterQuerySchema, salesOrderRegisterQuerySchema } from "@navet/shared";
+import { purchaseOrderRegisterQuerySchema, SALES_ORDER_REGISTER_STATUSES, salesOrderRegisterQuerySchema } from "@navet/shared";
+// The web's status filter (the web can't import @navet/shared).
+import { SALES_ORDER_REGISTER_STATUSES as WEB_SALES_ORDER_REGISTER_STATUSES } from "../../web/lib/types.js";
 import { createOrderRegisterRepository } from "../src/modules/reports/repository/order-register.repository.js";
 import {
   createOrderRegisterService,
@@ -159,6 +161,49 @@ describe("orderförteckning kundorder", () => {
     await fixture();
     const result = await service.get("sales", sales());
     expect(result.orders[0]!.rows).toBeUndefined();
+  });
+
+  it("orders only — never a quote, so a quote that gave an order is not counted twice", async () => {
+    const f = await fixture();
+    const quote = (orderNumber: string, status: "quote" | "lost" | "ordered" | "cancelled") => ({
+      orderNumber,
+      quoteNumber: orderNumber,
+      quoted: true,
+      customerId: f.anna.id,
+      status,
+      createdAt: new Date("2026-01-15T09:00:00Z"),
+    });
+    const [of1, of2, of3, of4] = await db
+      .insert(salesOrders)
+      .values([quote("OF-1", "ordered"), quote("OF-2", "quote"), quote("OF-3", "lost"), quote("OF-4", "cancelled")])
+      .returning();
+    const [ko4, ko5] = await db
+      .insert(salesOrders)
+      .values([
+        // Skapa kundorder made KO-4 from OF-1 — the same row, the same value.
+        { orderNumber: "KO-4", customerId: f.anna.id, status: "confirmed", sourceQuoteId: of1!.id, createdAt: new Date("2026-01-16T09:00:00Z") },
+        // A quote confirmed into an order (KO number) and then cancelled is an order.
+        { orderNumber: "KO-5", quoteNumber: "OF-5", quoted: true, customerId: f.anna.id, status: "cancelled", createdAt: new Date("2026-01-17T09:00:00Z") },
+      ])
+      .returning();
+    await db.insert(salesOrderRows).values(
+      [of1, of2, of3, of4, ko4].map((o) => ({ salesOrderId: o!.id, articleId: f.sink.id, quantityOrdered: "1", unitPrice: "1000" }))
+    );
+    await db.insert(salesOrderRows).values({ salesOrderId: ko5!.id, articleId: f.sink.id, quantityOrdered: "1", unitPrice: "200" });
+
+    const all = await service.get("sales", sales());
+    expect(all.orders.map((o) => o.orderNumber)).toEqual(["KO-1", "KO-2", "KO-3", "KO-4", "KO-5"]);
+    // The fixture's 1 575 + KO-4 1 000 (once) + KO-5 200.
+    expect(all.totals).toMatchObject({ orderCount: 5, orderValueSek: 2775 });
+    expect((await service.get("sales", sales({ status: "open" }))).orders.map((o) => o.orderNumber)).toEqual(["KO-1", "KO-4"]);
+    expect((await service.get("sales", sales({ status: "cancelled" }))).orders.map((o) => o.orderNumber)).toEqual(["KO-3", "KO-5"]);
+    expect((await service.getCsv("sales", sales())).content).not.toContain("OF-");
+
+    // The filter takes order statuses only, and the web offers the same ones.
+    for (const status of ["quote", "lost", "ordered", "open,quote"]) {
+      expect(salesOrderRegisterQuerySchema.safeParse({ status }).success).toBe(false);
+    }
+    expect([...WEB_SALES_ORDER_REGISTER_STATUSES]).toEqual([...SALES_ORDER_REGISTER_STATUSES]);
   });
 
   it("filters on status, open rows, customer, article and article group", async () => {

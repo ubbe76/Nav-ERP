@@ -1976,6 +1976,11 @@ export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "runnin
   ordered: { status: "done", label: "Order" },
 };
 
+// Orderförteckning kundorder: the order statuses its filter offers — the
+// register lists orders only, never quotes (mirror of shared reports.ts,
+// order-register.test.ts compares them).
+export const SALES_ORDER_REGISTER_STATUSES = ["confirmed", "in_production", "delivered", "invoiced", "cancelled"] as const satisfies readonly SalesOrderStatus[];
+
 export interface SalesOrder extends DocumentTermsFields {
   id: string;
   // Customer's document language (GET :id only).

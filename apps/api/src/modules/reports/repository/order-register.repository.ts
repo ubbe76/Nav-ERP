@@ -17,6 +17,7 @@ import {
   type SalesOrderRegisterQuery,
 } from "@navet/shared";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "../../planning/repository/effective-dates.js";
+import { documentKindSql } from "../../sales/repository/document-kind.js";
 
 // Orderförteckning — one flat row per matching ORDER ROW, ordered by order
 // number then row creation (the cards' row order). The pure builder in
@@ -69,7 +70,9 @@ export function createOrderRegisterRepository(db: Db) {
     // limit = ORDER_REGISTER_MAX_ROWS + 1 so the caller can tell "exactly at
     // the ceiling" from "over it" without a second count query.
     async loadSalesRows(query: SalesOrderRegisterQuery, limit: number): Promise<OrderRegisterSourceRow[]> {
-      const conditions: SQL[] = dateConditions(query, salesOrderDate, salesRowDeliveryDate);
+      // Orders only — never a quote (open, Förlorad, or Order: one that gave
+      // an order, whose value the order made from it already carries).
+      const conditions: SQL[] = [sql`${documentKindSql} = 'order'`, ...dateConditions(query, salesOrderDate, salesRowDeliveryDate)];
       if (query.partnerId) conditions.push(eq(salesOrders.customerId, query.partnerId));
       if (query.status === "open") conditions.push(inArray(salesOrders.status, [...SALES_ORDER_OPEN_STATUSES]));
       else if (query.status) conditions.push(inArray(salesOrders.status, query.status));
