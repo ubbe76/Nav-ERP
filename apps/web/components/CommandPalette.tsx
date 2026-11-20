@@ -22,6 +22,7 @@ import { confirmLeave } from "../lib/unsavedGuard";
 import { useAccessUser } from "./PermissionsProvider";
 import shellStyles from "./AppShell.module.css";
 import styles from "./CommandPalette.module.css";
+import { readPageTitle } from "../lib/pageTitle";
 
 interface Entry {
   key: string;
@@ -90,7 +91,7 @@ export function CommandPalette() {
   useEffect(() => {
     const href = `${pathname}${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`;
     const timer = window.setTimeout(() => {
-      const title = pathname === "/" ? "Översikt" : document.querySelector(`.${shellStyles.title}`)?.textContent?.trim();
+      const title = pathname === "/" ? "Översikt" : readPageTitle(shellStyles.title);
       if (!title) return;
       writeRecent(addRecent(readRecent(), { href, title: title.slice(0, 80) }));
     }, 800);

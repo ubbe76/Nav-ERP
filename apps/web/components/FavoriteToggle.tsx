@@ -12,12 +12,13 @@ import { FAVORITE_TITLE_MAX, favoriteHref } from "../lib/favorites";
 import shellStyles from "./AppShell.module.css";
 import styles from "./FavoriteToggle.module.css";
 import { useDocumentTabs } from "./tabs/DocumentTabs";
+import { readPageTitle } from "../lib/pageTitle";
 
 // The page's own name as its topbar shows it (a card shows its number or
 // name there), offered as the favourite's name — the shown tab's name when
 // the page is in a tab.
 function pageTitle(tabTitle: string | null): string {
-  const text = tabTitle ?? document.querySelector(`.${shellStyles.title}`)?.textContent?.trim() ?? "";
+  const text = tabTitle ?? readPageTitle(shellStyles.title);
   return text.slice(0, FAVORITE_TITLE_MAX);
 }
 

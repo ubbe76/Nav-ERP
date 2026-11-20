@@ -66,3 +66,19 @@ export function functionTitle(fn: string): string | null {
   }
   return null;
 }
+
+// The breadcrumb above a card (Programramen steg 3): the module and the
+// function the page belongs to — Försäljning › Kundorder — each a link; the
+// card adds its own number last. A module's own page gives just the module.
+export function crumbsFor(href: string): { label: string; href: string }[] {
+  const fn = functionOf(href);
+  for (const m of NAV_MODULES) {
+    if (m.href === fn) return [{ label: m.title, href: m.href }];
+    for (const s of m.sections) {
+      const item = s.items.find((i) => pathOf(i.href) === fn);
+      if (item) return [{ label: m.title, href: m.href }, { label: item.title, href: pathOf(item.href) }];
+    }
+  }
+  const title = functionTitle(fn);
+  return title ? [{ label: title, href: fn }] : [];
+}

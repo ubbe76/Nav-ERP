@@ -27,29 +27,57 @@
   box-shadow: 0 6px 12px -10px var(--color-overlay);
 }
 
+/* The breadcrumb (Programramen steg 3): module › function › number at the
+   left; the status pill joins it once the bar is stuck. */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-text-muted);
+}
+.crumb a {
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  padding: 2px 4px;
+  border-radius: var(--radius-control-sm);
+}
+.crumb a:hover {
+  color: var(--color-text-primary);
+  background: var(--color-divider);
+}
 .ident {
   display: none;
   align-items: center;
-  gap: 8px;
-  margin-right: var(--space-2);
+  margin-left: 8px;
 }
 .bar[data-stuck="true"] .ident {
   display: inline-flex;
 }
 .number {
-  font-family: var(--font-display);
-  font-size: 15px;
+  padding: 2px 4px;
   font-weight: 600;
   color: var(--color-text-primary);
-  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* One line: what does not fit goes into the ⋯ menu (DocumentActionBar). */
 .actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: nowrap;
-  gap: var(--space-3);
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -83,18 +111,10 @@
   display: none;
 }
 
-/* The escape hatch (manuell statusändring) sits apart from the flow actions. */
-.trailing {
-  margin-left: auto;
-}
 
 @media (max-width: 640px) {
   /* A wrapping row of buttons would cover the phone's screen if it stuck. */
   .bar {
     position: static;
-  }
-  .trailing {
-    margin-left: 0;
-    width: 100%;
   }
 }

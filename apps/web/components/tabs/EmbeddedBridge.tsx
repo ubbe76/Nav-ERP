@@ -7,6 +7,7 @@ import { functionOf } from "../../lib/navFunctions";
 import { postToFrame } from "../../lib/tabNavigation";
 import { confirmLeave } from "../../lib/unsavedGuard";
 import shellStyles from "../AppShell.module.css";
+import { readPageTitle } from "../../lib/pageTitle";
 
 // The page's side of a tab (Programramen, flikar per funktion) — does
 // nothing on an ordinary page. It tells the frame around where the tab is
@@ -25,7 +26,7 @@ export function EmbeddedBridge() {
   useEffect(() => {
     if (!isEmbedded()) return;
     const timer = setTimeout(() => {
-      const title = document.querySelector(`.${shellStyles.title}`)?.textContent?.trim() ?? "";
+      const title = readPageTitle(shellStyles.title);
       const query = searchParams.toString();
       postToFrame({ type: "nav-tab-state", href: query ? `${pathname}?${query}` : pathname, title });
     }, 300);

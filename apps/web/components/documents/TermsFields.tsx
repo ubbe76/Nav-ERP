@@ -3,6 +3,7 @@
 import { Field, Select } from "../ui/Field";
 import type { DocumentTermsFields, RegisterEntry } from "../../lib/types";
 import { FormRow } from "../ui/Form";
+import { HeaderCell } from "./HeaderEditor";
 
 export interface TermsRegisters {
   deliveryTerms: RegisterEntry[];
@@ -24,60 +25,48 @@ export function TermsFields({
   registers,
   value,
   onChange,
+  cells = false,
 }: {
   registers: TermsRegisters;
   value: TermsValue;
   onChange: (next: TermsValue) => void;
+  // In the header edited on the card (HeaderEditor): one grid cell each.
+  cells?: boolean;
 }) {
-  // The header form lives in a modal (~496px body): two terms per row is as
-  // narrow as names like "Kostnad, försäkring och frakt" tolerate, so the
-  // carrier gets a row of its own rather than a squeezed third column.
+  const select = (key: keyof TermsValue, label: string, id: string, entries: RegisterEntry[]) => (
+    <Field label={label} htmlFor={id}>
+      <Select id={id} value={value[key]} onChange={(e) => onChange({ ...value, [key]: e.target.value })}>
+        <option value="">— Inget —</option>
+        {entries.map((entry) => (
+          <option key={entry.id} value={entry.id}>
+            {entry.name}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+  const delivery = select("deliveryTermId", "Leveransvillkor", "termsDeliveryTermId", registers.deliveryTerms);
+  const payment = select("paymentTermId", "Betalningsvillkor", "termsPaymentTermId", registers.paymentTerms);
+  const carrier = select("carrierId", "Speditör", "termsCarrierId", registers.carriers);
+  if (cells) {
+    return (
+      <>
+        <HeaderCell>{delivery}</HeaderCell>
+        <HeaderCell>{payment}</HeaderCell>
+        <HeaderCell>{carrier}</HeaderCell>
+      </>
+    );
+  }
+  // In a modal (~496px body): two terms per row is as narrow as names like
+  // "Kostnad, försäkring och frakt" tolerate, so the carrier gets a row of
+  // its own rather than a squeezed third column.
   return (
     <>
       <FormRow>
-        <Field label="Leveransvillkor" htmlFor="termsDeliveryTermId">
-          <Select
-            id="termsDeliveryTermId"
-            value={value.deliveryTermId}
-            onChange={(e) => onChange({ ...value, deliveryTermId: e.target.value })}
-          >
-            <option value="">— Inget —</option>
-            {registers.deliveryTerms.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Betalningsvillkor" htmlFor="termsPaymentTermId">
-          <Select
-            id="termsPaymentTermId"
-            value={value.paymentTermId}
-            onChange={(e) => onChange({ ...value, paymentTermId: e.target.value })}
-          >
-            <option value="">— Inget —</option>
-            {registers.paymentTerms.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {delivery}
+        {payment}
       </FormRow>
-      <Field label="Speditör" htmlFor="termsCarrierId">
-        <Select
-          id="termsCarrierId"
-          value={value.carrierId}
-          onChange={(e) => onChange({ ...value, carrierId: e.target.value })}
-        >
-          <option value="">— Inget —</option>
-          {registers.carriers.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
+      {carrier}
     </>
   );
 }

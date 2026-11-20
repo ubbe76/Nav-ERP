@@ -5,7 +5,7 @@ import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { openDocument } from "../../lib/tabNavigation";
 import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
 import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
 import { formatSek } from "../../lib/shipping";
@@ -83,20 +83,28 @@ import {
   type PriceQuote,
   type MarkupRepricingPlan,
   type SalesOrder,
+  type SalesOrderStatus,
   type SalesOrderRow,
   type StockLocation,
 } from "../../lib/types";
 import {
   DeliveryAddressChoice,
+  NEW_DELIVERY_ADDRESS,
   deliveryAddressPayload,
   emptyDeliveryAddressDraft,
   type DeliveryAddressDraft,
 } from "./DeliveryAddressChoice";
 import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
+import { useSalesRowEntry } from "./SalesRowEntry";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { SuggestedDueDateField } from "../manufacturing/SuggestedDueDateField";
 import { configuredEvaluationKey } from "../../lib/configuredEvaluationKey";
 import { usePlaceLabels } from "../stock/WarehouseMode";
+import { DocumentIdentity } from "../documents/DocumentIdentity";
+import { StatusStepper } from "../documents/StatusStepper";
+import { CardTabs, type CardTab } from "../documents/CardTabs";
+import { HeaderCell, HeaderEditor, HeaderValue } from "../documents/HeaderEditor";
+import { DocumentTotals } from "../documents/DocumentTotals";
 
 // Order is reached only through Skapa kundorder (the API refuses set-status
 // to it), so the manual status change never offers it.
@@ -111,13 +119,44 @@ interface SalesOrderDetailProps {
   deliveryAddresses: CustomerDeliveryAddress[];
   registers: TermsRegisters;
   freightEnabled: boolean;
+  // Programramen steg 3: the card's head and its other tabs, from the page.
+  pageTitle: string;
+  number: string;
+  note?: ReactNode;
+  help?: ReactNode;
+  tabs?: CardTab[];
+}
+
+// The status steps (Programramen steg 3): an order's flow, a quote's; Förlorad
+// and Avbruten stand outside it.
+const ORDER_STEPS: SalesOrderStatus[] = ["confirmed", "in_production", "delivered", "invoiced"];
+const QUOTE_STEPS: SalesOrderStatus[] = ["quote", "ordered"];
+
+function salesSteps(order: SalesOrder) {
+  const pill = SALES_ORDER_STATUS_PILL[order.status];
+  const quote = salesDocumentKind(order) === "quote";
+  const keys = quote ? QUOTE_STEPS : ORDER_STEPS;
+  if (!keys.includes(order.status)) return { steps: [], current: null, outside: { status: pill.status, label: pill.label } };
+  return { steps: keys.map((key) => ({ key, label: SALES_ORDER_STATUS_PILL[key].label })), current: order.status, outside: null };
 }
 
 // Confirm / cancel / start-production — no body, just an action call.
 // Fakturera is now a Link into the invoice module (Task 9), not an action call.
 type SalesAction = "confirm" | "cancel" | "start-production" | "reopen" | "create-order";
 
-export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, registers, freightEnabled }: SalesOrderDetailProps) {
+export function SalesOrderDetail({
+  order,
+  rows,
+  locations,
+  deliveryAddresses,
+  registers,
+  freightEnabled,
+  pageTitle,
+  number,
+  note,
+  help,
+  tabs = [],
+}: SalesOrderDetailProps) {
   const router = useRouter();
   const canSell = useCan()(["forsaljning"]);
   const canSeePrices = useCan()(["office"]);
@@ -148,7 +187,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // enforced by the API and mirrored in the UI below.
   const rowsEditable = order.status === "quote" || order.status === "ordered" || order.status === "confirmed" || order.status === "in_production";
 
-  const [modal, setModal] = useState<"header" | "addRow" | "deliver" | "createMo" | "lose" | "changeCustomer" | null>(null);
+  // Ångra ändringar in the header: mounts the editor afresh from the order.
+  const [headerReset, setHeaderReset] = useState(0);
+  const [modal, setModal] = useState<"addRow" | "deliver" | "createMo" | "lose" | "changeCustomer" | null>(null);
   // Byt kund: what the last change did — the reminder to send the new
   // customer its document and the rows to look over, until it is closed.
   const [customerChange, setCustomerChange] = useState<CustomerChangePreview | null>(null);
@@ -192,6 +233,24 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // stranded without Spara/Avbryt (webbgranskningen 2026-11-11).
   const rowEditOpen = editingRowId !== null;
   const rowEditTitle = rowEditOpen ? "Spara eller avbryt raden du ändrar först" : undefined;
+  // + Ny rad straight in the rows table (Programramen steg 3); a configurable
+  // article and Fler fält… open Lägg till rad with the article chosen.
+  const [addRowInitial, setAddRowInitial] = useState<{ article: Article | null; quantity: string }>({ article: null, quantity: "1" });
+  const entryEnabled = rowsEditable && canSell;
+  const entry = useSalesRowEntry({
+    orderId: order.id,
+    customerId: order.customerId,
+    revision: order.revision,
+    disabled: rowEditOpen,
+    onDialog: (article, quantity) => {
+      setAddRowInitial({ article, quantity });
+      setModal("addRow");
+    },
+  });
+  const entryAlready = alreadyOnDocumentText(rows, entry.article?.id, salesDocumentKind(order) === "quote" ? "offerten" : "ordern");
+  // The tracks that hold inputs widen while a row is edited (the entry row's
+  // inputs are compact and fit the normal tracks).
+  const inputsOpen = editingRowId !== null;
   // The order left the editable statuses (delivered, cancelled …) — close an
   // open edit so its fields and the unsaved-changes guard go with it.
   useEffect(() => {
@@ -615,12 +674,6 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           )
         }
       >
-        {rowsEditable && (
-          <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("addRow")}>
-            Lägg till rad
-          </Button>
-        )}
-
         {freightEnabled && canSell && rowsEditable && (
           <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setFreightOpen(true)}>
             Kontrollera fraktpris
@@ -721,6 +774,17 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         )}
       </DocumentActionBar>
 
+      <DocumentIdentity
+        pageTitle={pageTitle}
+        number={number}
+        pill={pill}
+        note={note}
+        help={help}
+        title={order.customerName}
+        titleHref={`/kunder/${order.customerId}`}
+        steps={<StatusStepper {...salesSteps(order)} />}
+      />
+
       {customerChange && (
         <FormNotice style={{ marginBottom: 12 }}>
           Kunden är bytt till {customerChange.to.customerName}.{" "}
@@ -738,89 +802,103 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         </FormNotice>
       )}
 
-      <DocumentHeaderCard
-        pill={pill}
-        meta={
-          <>
-            Rev {order.revision} · {order.currency}
-            {order.invoiceNumber &&
-              ` · Faktura ${order.invoiceNumber}${order.invoicedAt ? ` (${formatStockholmDate(order.invoicedAt)})` : ""}`}
-          </>
-        }
-        fields={[
-          { label: "Kund", value: order.customerName, href: `/kunder/${order.customerId}` },
-          ...(order.sourceQuote
-            ? [
-                {
-                  label: "Offertnummer",
-                  value: <GatedLink href={`/forsaljning/offerter/${order.sourceQuote.id}`}>{order.sourceQuote.quoteNumber}</GatedLink>,
-                },
-              ]
-            : []),
-          ...customerNumberFields(order),
-          { label: "Referens", value: order.customerReference },
-          ...headerDimensionFields(order, dims),
-          ...(foreign
-            ? [{ label: "Kurs", value: `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr` }]
-            : []),
-          { label: "Leveransdatum", value: order.expectedDeliveryDate },
-          ...(order.generalMarkupPercent != null
-            ? [{ label: "Generellt påslag", value: `${Number(order.generalMarkupPercent).toLocaleString("sv-SE")} %` }]
-            : []),
-          ...(order.materialMarkupPercent != null
-            ? [{ label: "Materialpåslag", value: `${Number(order.materialMarkupPercent).toLocaleString("sv-SE")} %` }]
-            : []),
-          ...((order.status === "quote" || order.status === "ordered")
-            ? [
-                {
-                  label: "Giltig t.o.m.",
-                  value: order.quoteValidUntil ? (
-                    <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      {order.quoteValidUntil}
-                      {isQuoteExpired(order.status, order.quoteValidUntil) && <QuoteExpiredBadge />}
-                    </span>
-                  ) : null,
-                },
-              ]
-            : []),
-          ...(order.status === "lost"
-            ? [
-                {
-                  label: "Förlustorsak",
-                  value: order.lostReasonName
-                    ? `${order.lostReasonCode ? `${order.lostReasonCode} · ` : ""}${order.lostReasonName}`
-                    : "Ingen orsak angiven",
-                },
-                {
-                  label: "Markerad förlorad",
-                  value: order.lostAt
-                    ? `${formatStockholmDateTime(order.lostAt)}${order.lostByName ? ` av ${order.lostByName}` : ""}`
-                    : null,
-                },
-                { label: "Kommentar", value: order.lostNote, wide: true },
-              ]
-            : []),
-          { label: "Leveransvillkor", value: termsLabel(order.deliveryTermCode, order.deliveryTermName) },
-          { label: "Betalningsvillkor", value: termsLabel(order.paymentTermCode, order.paymentTermName) },
-          ...(order.invoiceCustomer
-            ? [
-                {
-                  label: "Fakturakund",
-                  value: (
-                    <GatedLink href={`/kunder/${order.invoiceCustomer.id}`}>
-                      {order.invoiceCustomer.customerNumber} {order.invoiceCustomer.name}
-                    </GatedLink>
-                  ),
-                },
-              ]
-            : []),
-          { label: "Speditör", value: termsLabel(order.carrierCode, order.carrierName) },
-          { label: "Leveransadress", value: deliveryText, wide: true },
-        ]}
-        note={order.note}
-        onEdit={rowsEditable ? () => setModal("header") : undefined}
-      />
+      {rowsEditable && canSell ? (
+        <SalesHeaderEditor
+          key={`${headerSignature(order)}|${headerReset}`}
+          order={order}
+          rowCount={rows.length}
+          rows={rows}
+          deliveryAddresses={deliveryAddresses}
+          registers={registers}
+          onDone={() => router.refresh()}
+          onReload={() => router.refresh()}
+          onReset={() => setHeaderReset((n) => n + 1)}
+        />
+      ) : (
+        <DocumentHeaderCard
+          fields={[
+            { label: "Kund", value: order.customerName, href: `/kunder/${order.customerId}` },
+            ...(order.sourceQuote
+              ? [
+                  {
+                    label: "Offertnummer",
+                    value: <GatedLink href={`/forsaljning/offerter/${order.sourceQuote.id}`}>{order.sourceQuote.quoteNumber}</GatedLink>,
+                  },
+                ]
+              : []),
+            ...customerNumberFields(order),
+            { label: "Referens", value: order.customerReference },
+            ...headerDimensionFields(order, dims),
+            ...(foreign
+              ? [{ label: "Kurs", value: `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr` }]
+              : []),
+            { label: "Leveransdatum", value: order.expectedDeliveryDate },
+            ...(order.generalMarkupPercent != null
+              ? [{ label: "Generellt påslag", value: `${Number(order.generalMarkupPercent).toLocaleString("sv-SE")} %` }]
+              : []),
+            ...(order.materialMarkupPercent != null
+              ? [{ label: "Materialpåslag", value: `${Number(order.materialMarkupPercent).toLocaleString("sv-SE")} %` }]
+              : []),
+            ...((order.status === "quote" || order.status === "ordered")
+              ? [
+                  {
+                    label: "Giltig t.o.m.",
+                    value: order.quoteValidUntil ? (
+                      <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        {order.quoteValidUntil}
+                        {isQuoteExpired(order.status, order.quoteValidUntil) && <QuoteExpiredBadge />}
+                      </span>
+                    ) : null,
+                  },
+                ]
+              : []),
+            ...(order.status === "lost"
+              ? [
+                  {
+                    label: "Förlustorsak",
+                    value: order.lostReasonName
+                      ? `${order.lostReasonCode ? `${order.lostReasonCode} · ` : ""}${order.lostReasonName}`
+                      : "Ingen orsak angiven",
+                  },
+                  {
+                    label: "Markerad förlorad",
+                    value: order.lostAt
+                      ? `${formatStockholmDateTime(order.lostAt)}${order.lostByName ? ` av ${order.lostByName}` : ""}`
+                      : null,
+                  },
+                  { label: "Kommentar", value: order.lostNote, wide: true },
+                ]
+              : []),
+            { label: "Leveransvillkor", value: termsLabel(order.deliveryTermCode, order.deliveryTermName) },
+            { label: "Betalningsvillkor", value: termsLabel(order.paymentTermCode, order.paymentTermName) },
+            ...(order.invoiceCustomer
+              ? [
+                  {
+                    label: "Fakturakund",
+                    value: (
+                      <GatedLink href={`/kunder/${order.invoiceCustomer.id}`}>
+                        {order.invoiceCustomer.customerNumber} {order.invoiceCustomer.name}
+                      </GatedLink>
+                    ),
+                  },
+                ]
+              : []),
+            { label: "Speditör", value: termsLabel(order.carrierCode, order.carrierName) },
+            { label: "Leveransadress", value: deliveryText, wide: true },
+          ]}
+          note={order.note}
+        />
+      )}
 
+      <CardTabs
+        label={salesDocumentKind(order) === "quote" ? "Offertens delar" : "Orderns delar"}
+        tabs={[
+          {
+            key: "rader",
+            label: "Rader",
+            count: rows.length,
+            node: (
+              <>
       {order.ordersFromQuote && order.ordersFromQuote.length > 0 && (
         <section>
           <SectionHeading spaced>Ordrar från offerten</SectionHeading>
@@ -850,7 +928,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         <FormNotice>{calculatedUnavailableText(editQuote)}</FormNotice>
       )}
 
-      {rows.length > 0 ? (
+      {rows.length > 0 || entryEnabled ? (
         <Table<SalesOrderRow>
           columns={[
             // The floors are what decide whether the table outgrows the
@@ -868,9 +946,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // line, Spara above Avbryt while editing (side by side they
             // outgrew the card at 1400 px and clipped Ändra on the other rows).
             { key: "articleNumber", label: "Artikelnummer", width: "110px" },
-            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(110px, 3fr)" : "minmax(90px, 3fr)" },
-            { key: "quantityOrdered", label: "Beställt", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
-            { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
+            { key: "articleName", label: "Benämning", width: inputsOpen ? "minmax(110px, 3fr)" : "minmax(90px, 3fr)" },
+            { key: "quantityOrdered", label: "Beställt", width: shareTrack(inputsOpen ? 90 : 66), align: "right" },
+            { key: "unitCode", label: "Enhet", width: inputsOpen ? "84px" : "52px" },
             { key: "quantityDelivered", label: "Levererat", width: shareTrack(66), align: "right" },
             // E3: quantity already in production (non-cancelled linked TOs)
             // plus one line per TO — order number linking to the TO card and
@@ -879,8 +957,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // its pill fit on one line on a wide screen; the floor fits the
             // heading.
             { key: "quantityInProduction", label: "I tillverkning", width: shareTrack(100, 1.5) },
-            { key: "unitPrice", label: "Á-pris", width: shareTrack(editingRowId ? 100 : 84), align: "right" },
-            { key: "discountPercent", label: "Rabatt", width: editingRowId ? "70px" : "52px", align: "right" },
+            { key: "unitPrice", label: "Á-pris", width: shareTrack(inputsOpen ? 100 : 84), align: "right" },
+            { key: "discountPercent", label: "Rabatt", width: inputsOpen ? "70px" : "52px", align: "right" },
             // Wide enough for the footer's "69 600,00 SEK" on one line.
             { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
             ...(rowsEditable || canReclaim
@@ -888,7 +966,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               : []),
           ]}
           rows={rows}
-          footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(vatSummary?.totalExclVat ?? total)} ${order.currency}` }}
+          entryRow={entryEnabled ? { cells: entry.cells, span: entry.span } : undefined}
+          // The totals box under the table carries Netto/Moms/Totalt; the
+          // table's own sum only when there is no VAT summary.
+          footer={vatSummary ? undefined : { unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
           renderCell={(row, key) => {
             switch (key) {
               case "articleNumber":
@@ -1097,36 +1178,39 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       {/* Under the table, next to the rows' Spara and ⋯ → Ta bort — above it
           the error sat 40 rows away (webbgranskningen 2026-11-11). */}
       <FormError>{rowError}</FormError>
+      <FormError>{entry.error}</FormError>
+      {entryAlready && <FormNotice>{entryAlready}</FormNotice>}
+      {entry.article && !entry.priceTouched && entry.quote && calculatedPriceText(entry.quote, formatStockholmDate) && (
+        <FormHint>{calculatedPriceText(entry.quote, formatStockholmDate)}</FormHint>
+      )}
+      {entry.article && !entry.priceTouched && calculatedUnavailableText(entry.quote) && (
+        <FormNotice>{calculatedUnavailableText(entry.quote)}</FormNotice>
+      )}
 
       {/* Moms på offert och kundorder: the summary the quote/order
           confirmation prints and the invoice will carry — per rate + momskod,
           in the order's currency. A code without Swedish VAT (EU, export,
           omvänd betalningsskyldighet, momsfritt) says why there is none. */}
       {rows.length > 0 && vatSummary && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", gap: "4px 24px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <span>
-              Summa exkl. moms: {formatMoney(vatSummary.totalExclVat)} {order.currency}
-            </span>
-            {vatSummary.lines.map((line) => (
-              <span key={`${line.rate}|${line.code}`}>
-                Moms {line.rate.toLocaleString("sv-SE")} %: {formatMoney(line.vatAmount)} {order.currency}
-              </span>
-            ))}
-            <span>
-              <strong>
-                Summa inkl. moms: {formatMoney(vatSummary.totalInclVat)} {order.currency}
-              </strong>
-            </span>
-          </div>
-          {vatSummary.lines
+        <DocumentTotals
+          currency={order.currency}
+          lines={[
+            { key: "net", label: "Netto", amount: vatSummary.totalExclVat },
+            ...vatSummary.lines.map((line) => ({
+              key: `${line.rate}|${line.code}`,
+              label: `Moms ${line.rate.toLocaleString("sv-SE")} %`,
+              amount: line.vatAmount,
+            })),
+            { key: "total", label: "Totalt", amount: vatSummary.totalInclVat, total: true },
+          ]}
+          notes={vatSummary.lines
             .filter((line) => line.rate === 0)
             .map((line) => (
-              <FormHint key={line.code} style={{ textAlign: "right" }}>
+              <FormHint key={line.code}>
                 Momskod {line.code} · {line.name} — ingen svensk moms debiteras.
               </FormHint>
             ))}
-        </div>
+        />
       )}
 
       {rows.length > 0 && foreign && (
@@ -1188,6 +1272,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           {freight.carrierPrice !== null ? ` (offererat ${formatSek(freight.carrierPrice)})` : ""}
         </FormHint>
       )}
+              </>
+            ),
+          },
+          ...tabs,
+        ]}
+      />
 
       <DeliveryTimeCheckDialog
         open={dtcOpen}
@@ -1214,19 +1304,6 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         }}
       />
 
-      <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra orderhuvud">
-        <EditHeaderForm
-          order={order}
-          rowCount={rows.length}
-          rows={rows}
-          deliveryAddresses={deliveryAddresses}
-          registers={registers}
-          onDone={refresh}
-          onReload={() => router.refresh()}
-          onCancel={() => setModal(null)}
-        />
-      </Modal>
-
       <Modal open={modal === "changeCustomer"} onClose={() => setModal(null)} title="Byt kund">
         {modal === "changeCustomer" && (
           <ChangeCustomerDialog
@@ -1246,6 +1323,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
 
       <Modal open={modal === "addRow"} onClose={() => setModal(null)} title="Lägg till rad">
         <AddRowForm
+          initialArticle={addRowInitial.article}
+          initialQuantity={addRowInitial.quantity}
           orderId={order.id}
           customerId={order.customerId}
           currency={order.currency}
@@ -1381,7 +1460,7 @@ function confirmRepricing(plan: MarkupRepricingPlan, rows: SalesOrderRow[]): Pro
   );
 }
 
-function EditHeaderForm({
+function SalesHeaderEditor({
   order,
   rowCount,
   rows,
@@ -1389,7 +1468,7 @@ function EditHeaderForm({
   registers,
   onDone,
   onReload,
-  onCancel,
+  onReset,
 }: {
   order: SalesOrder;
   rowCount: number;
@@ -1398,7 +1477,7 @@ function EditHeaderForm({
   deliveryAddresses: CustomerDeliveryAddress[];
   registers: TermsRegisters;
   onDone: () => void;
-  onCancel: () => void;
+  onReset: () => void;
 }) {
   const [customerOrderNumber, setCustomerOrderNumber] = useState(order.customerOrderNumber ?? "");
   const [customerInquiryNumber, setCustomerInquiryNumber] = useState(order.customerInquiryNumber ?? "");
@@ -1447,8 +1526,34 @@ function EditHeaderForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // What the header holds now, compared with what it held when the editor
+  // was mounted (or last saved) — the dirty marking and the guard.
+  const snapshot = JSON.stringify({
+    customerOrderNumber,
+    customerInquiryNumber,
+    invoiceCustomerId: invoiceCustomer?.id ?? null,
+    customerReference,
+    costCenterId,
+    projectId,
+    deliveryAddressId,
+    newDeliveryAddress: deliveryAddressId === NEW_DELIVERY_ADDRESS ? newDeliveryAddress : null,
+    terms,
+    quoteValidUntil,
+    currency: headerCurrency,
+    rate: headerForeign ? headerRate.rate : "",
+    generalMarkup,
+    materialMarkup,
+  });
+  const [baseline, setBaseline] = useState(snapshot);
+  const dirty = snapshot !== baseline;
+  const markupsChanged =
+    generalMarkup !== (order.generalMarkupPercent ? String(Number(order.generalMarkupPercent)) : "") ||
+    materialMarkup !== (order.materialMarkupPercent ? String(Number(order.materialMarkupPercent)) : "");
+
   async function save(e: FormEvent) {
     e.preventDefault();
+    // Ctrl+S or Enter on an unchanged header: nothing to save.
+    if (!dirty || pending) return;
     // Valuta/Kurs: only what changed is sent — a new currency (the API takes
     // today's rate unless one is sent; the shown one is sent) and/or another
     // rate on the same currency.
@@ -1544,6 +1649,9 @@ function EditHeaderForm({
           throw err;
         }
       }
+      // Saved: the fields are the header now (the card is read again, and
+      // the editor is mounted afresh once the new values arrive).
+      setBaseline(snapshot);
       onDone();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte spara"));
@@ -1560,36 +1668,153 @@ function EditHeaderForm({
   }
 
   const inquiryField = (
-    <Field label="Kundens förfrågan" htmlFor="headerCustomerInquiryNumber">
-      <Input
-        id="headerCustomerInquiryNumber"
-        size="md"
-        maxLength={50}
-        value={customerInquiryNumber}
-        onChange={(e) => setCustomerInquiryNumber(e.target.value)}
-      />
-    </Field>
+    <HeaderCell>
+      <Field label="Kundens förfrågan" htmlFor="headerCustomerInquiryNumber">
+        <Input
+          id="headerCustomerInquiryNumber"
+          maxLength={50}
+          value={customerInquiryNumber}
+          onChange={(e) => setCustomerInquiryNumber(e.target.value)}
+        />
+      </Field>
+    </HeaderCell>
   );
+  const kind = isQuote ? "offerten" : "ordern";
+  // Fler uppgifter opens by itself when one of its fields holds something.
+  const moreOpen =
+    order.currency !== SEK ||
+    order.generalMarkupPercent != null ||
+    order.materialMarkupPercent != null ||
+    Boolean(order.invoiceCustomerId) ||
+    Boolean(order.costCenterId ?? order.costCenter?.id) ||
+    Boolean(order.projectId ?? order.project?.id);
 
   return (
-    <Form onSubmit={save}>
-      <FormError>{error}</FormError>
-
-      {/* Two or three fields: the grid wraps the third onto a new line (one column on phones). */}
-      <FormRow>
-        {isQuote && inquiryField}
-        {showOrderNumber && (
+    <HeaderEditor
+      label={isQuote ? "Offertens huvud" : "Orderhuvud"}
+      dirty={dirty}
+      pending={pending}
+      error={error}
+      onSubmit={save}
+      onReset={onReset}
+      moreOpen={moreOpen}
+      more={
+        <>
+          {canChangeCurrency ? (
+            <>
+              <HeaderCell
+                title={
+                  rowCount > 0
+                    ? `Valutan kan inte ändras när ${kind} har rader — ta bort raderna först. Kursen kan ändras; raderna behåller sina priser.`
+                    : undefined
+                }
+              >
+                <Field label="Valuta" htmlFor="headerCurrency">
+                  <CurrencyInput id="headerCurrency" required disabled={rowCount > 0} value={currency} onValueChange={setCurrency} />
+                </Field>
+              </HeaderCell>
+              {headerForeign && (
+                <HeaderCell>
+                  <OrderRateField
+                    id="headerExchangeRate"
+                    currency={headerCurrency}
+                    orderRate={headerRate}
+                    quote={order.status === "quote" || order.status === "ordered"}
+                  />
+                </HeaderCell>
+              )}
+            </>
+          ) : (
+            <HeaderValue
+              label={order.currency === SEK ? "Valuta" : "Valuta och kurs"}
+              value={order.currency === SEK ? SEK : `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr`}
+            />
+          )}
+          {canSetMarkups && (
+            <>
+              <HeaderCell title={MARKUP_HINT}>
+                <Field label="Generellt påslag (%)" htmlFor="headerGeneralMarkup">
+                  <Input
+                    id="headerGeneralMarkup"
+                    type="number"
+                    min="0"
+                    max="1000"
+                    step="0.01"
+                    placeholder={markupPlaceholder(order.customerMarkups?.generalMarkupPercent)}
+                    value={generalMarkup}
+                    onChange={(e) => setGeneralMarkup(e.target.value)}
+                  />
+                </Field>
+              </HeaderCell>
+              <HeaderCell title={MARKUP_HINT}>
+                <Field label="Materialpåslag (%)" htmlFor="headerMaterialMarkup">
+                  <Input
+                    id="headerMaterialMarkup"
+                    type="number"
+                    min="0"
+                    max="1000"
+                    step="0.01"
+                    placeholder={markupPlaceholder(order.customerMarkups?.materialMarkupPercent)}
+                    value={materialMarkup}
+                    onChange={(e) => setMaterialMarkup(e.target.value)}
+                  />
+                </Field>
+              </HeaderCell>
+              {markupsChanged && <HeaderCell wide hint={MARKUP_HINT}>{null}</HeaderCell>}
+            </>
+          )}
+          <DimensionFields
+            idPrefix="header"
+            lists={dims}
+            costCenterId={costCenterId}
+            projectId={projectId}
+            onCostCenterChange={setCostCenterId}
+            onProjectChange={setProjectId}
+            cells
+          />
+          <HeaderCell
+            span
+            hint={
+              (invoiceCustomer?.id ?? null) !== (order.invoiceCustomerId ?? null)
+                ? "Fakturan går till den här kunden i stället för beställaren. Gäller fakturor som skapas från nu; betalningsvillkoret följer fakturakunden om du inte själv ändrar det här."
+                : undefined
+            }
+          >
+            <Field label="Fakturakund" htmlFor="headerInvoiceCustomer">
+              <SearchPicker<CustomerRef>
+                id="headerInvoiceCustomer"
+                endpoint="/api/v1/customers"
+                value={invoiceCustomer}
+                onChange={setInvoiceCustomer}
+                excludeId={order.customerId}
+                formatLabel={(c) => `${c.customerNumber} — ${c.name}`}
+                placeholder="Beställaren — sök kundnummer eller namn…"
+                emptyText="Inga kunder matchar sökningen"
+              />
+            </Field>
+          </HeaderCell>
+        </>
+      }
+    >
+      <HeaderValue label="Kund" value={order.customerName} href={`/kunder/${order.customerId}`} />
+      {order.sourceQuote && (
+        <HeaderValue label="Offertnummer" value={order.sourceQuote.quoteNumber} href={`/forsaljning/offerter/${order.sourceQuote.id}`} />
+      )}
+      {isQuote && inquiryField}
+      {showOrderNumber && (
+        <HeaderCell>
           <Field label="Kundens ordernummer" htmlFor="headerCustomerOrderNumber">
             <Input
               id="headerCustomerOrderNumber"
-              size="md"
               maxLength={50}
               value={customerOrderNumber}
               onChange={(e) => setCustomerOrderNumber(e.target.value)}
             />
           </Field>
-        )}
-        {!isQuote && inquiryField}
+        </HeaderCell>
+      )}
+      {!isQuote && inquiryField}
+      <HeaderCell>
         <Field label="Referens" htmlFor="headerCustomerReference">
           <Input
             id="headerCustomerReference"
@@ -1598,141 +1823,81 @@ function EditHeaderForm({
             onChange={(e) => setCustomerReference(e.target.value)}
           />
         </Field>
-      </FormRow>
-
-      <DimensionFields
-        idPrefix="header"
-        lists={dims}
-        costCenterId={costCenterId}
-        projectId={projectId}
-        onCostCenterChange={setCostCenterId}
-        onProjectChange={setProjectId}
-      />
-
-      {canChangeCurrency && (
-        <>
-          <FormRow>
-            <Field label="Valuta" htmlFor="headerCurrency">
-              <CurrencyInput
-                id="headerCurrency"
-                required
-                disabled={rowCount > 0}
-                value={currency}
-                onValueChange={setCurrency}
-              />
-            </Field>
-            {headerForeign && (
-              <OrderRateField
-                id="headerExchangeRate"
-                currency={headerCurrency}
-                orderRate={headerRate}
-                quote={(order.status === "quote" || order.status === "ordered")}
-              />
-            )}
-          </FormRow>
-          {rowCount > 0 && (
-            <FormHint attached>
-              Valutan kan inte ändras när {order.status === "quote" ? "offerten" : "ordern"} har rader — ta bort raderna
-              först. Kursen kan ändras; raderna behåller sina priser.
-            </FormHint>
-          )}
-        </>
-      )}
-
-      {canSetMarkups && (
-        <>
-          <FormRow>
-            <Field label="Generellt påslag (%)" htmlFor="headerGeneralMarkup">
-              <Input
-                id="headerGeneralMarkup"
-                type="number"
-                min="0"
-                max="1000"
-                step="0.01"
-                size="xs"
-                placeholder={markupPlaceholder(order.customerMarkups?.generalMarkupPercent)}
-                value={generalMarkup}
-                onChange={(e) => setGeneralMarkup(e.target.value)}
-              />
-            </Field>
-            <Field label="Materialpåslag (%)" htmlFor="headerMaterialMarkup">
-              <Input
-                id="headerMaterialMarkup"
-                type="number"
-                min="0"
-                max="1000"
-                step="0.01"
-                size="xs"
-                placeholder={markupPlaceholder(order.customerMarkups?.materialMarkupPercent)}
-                value={materialMarkup}
-                onChange={(e) => setMaterialMarkup(e.target.value)}
-              />
-            </Field>
-          </FormRow>
-          <FormHint attached>
-            Tomt = kundens påslag, annars varugruppens eller företagets. Ett ändrat påslag räknar om à-priset på rader som
-            prissatts av priskedjan, även rader med artikelns försäljningspris; handskrivna priser och levererade eller
-            fakturerade rader ändras inte.
-          </FormHint>
-        </>
-      )}
-
+      </HeaderCell>
+      <HeaderValue label="Leveransdatum" value={order.expectedDeliveryDate} />
       {(order.status === "quote" || order.status === "ordered") && (
-        <Field label="Giltig t.o.m." htmlFor="headerQuoteValidUntil">
-          <Input
-            id="headerQuoteValidUntil"
-            type="date"
-            size="sm"
-            value={quoteValidUntil}
-            onChange={(e) => setQuoteValidUntil(e.target.value)}
-          />
-        </Field>
+        <HeaderCell hint={isQuoteExpired(order.status, quoteValidUntil || null) ? <QuoteExpiredBadge /> : undefined}>
+          <Field label="Giltig t.o.m." htmlFor="headerQuoteValidUntil">
+            <Input
+              id="headerQuoteValidUntil"
+              type="date"
+              value={quoteValidUntil}
+              onChange={(e) => setQuoteValidUntil(e.target.value)}
+            />
+          </Field>
+        </HeaderCell>
       )}
 
-      <TermsFields registers={registers} value={terms} onChange={setTerms} />
+      <TermsFields registers={registers} value={terms} onChange={setTerms} cells />
 
-      <Field label="Fakturakund" htmlFor="headerInvoiceCustomer">
-        <SearchPicker<CustomerRef>
-          id="headerInvoiceCustomer"
-          endpoint="/api/v1/customers"
-          value={invoiceCustomer}
-          onChange={setInvoiceCustomer}
-          excludeId={order.customerId}
-          formatLabel={(c) => `${c.customerNumber} — ${c.name}`}
-          placeholder="Beställaren — sök kundnummer eller namn…"
-          emptyText="Inga kunder matchar sökningen"
+
+
+
+
+
+
+
+
+      <HeaderCell wide>
+        <DeliveryAddressChoice
+          idPrefix="header"
+          addresses={deliveryAddresses}
+          oneOff={oneOff}
+          value={deliveryAddressId}
+          onChange={setDeliveryAddressId}
+          draft={newDeliveryAddress}
+          onDraftChange={setNewDeliveryAddress}
         />
-      </Field>
-      <FormHint attached>
-        Fakturan går till den här kunden i stället för beställaren (tomt = beställaren). Gäller fakturor som skapas från nu;
-        betalningsvillkoret följer fakturakunden om du inte själv ändrar det här.
-      </FormHint>
+      </HeaderCell>
 
-      <DeliveryAddressChoice
-        idPrefix="header"
-        addresses={deliveryAddresses}
-        oneOff={oneOff}
-        value={deliveryAddressId}
-        onChange={setDeliveryAddressId}
-        draft={newDeliveryAddress}
-        onDraftChange={setNewDeliveryAddress}
-      />
-
-      <FormActions>
-        <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Sparar…" : "Spara"}
-        </Button>
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          Avbryt
-        </Button>
-      </FormActions>
-    </Form>
+      {order.note && <HeaderValue label="Notering" value={order.note} wide />}
+    </HeaderEditor>
   );
+}
+
+const MARKUP_HINT =
+  "Tomt = kundens påslag, annars varugruppens eller företagets. Ett ändrat påslag räknar om à-priset på rader som prissatts av priskedjan, även rader med artikelns försäljningspris; handskrivna priser och levererade eller fakturerade rader ändras inte.";
+
+// The header fields the editor starts from: a save (once the card is read
+// again), Byt kund or another tab's change gives the editor these values
+// afresh; anything else (a new row, a status) leaves typed changes alone.
+function headerSignature(order: SalesOrder): string {
+  return JSON.stringify([
+    order.customerId,
+    order.status,
+    order.customerOrderNumber,
+    order.customerInquiryNumber,
+    order.invoiceCustomerId,
+    order.customerReference,
+    order.costCenterId ?? order.costCenter?.id,
+    order.projectId ?? order.project?.id,
+    order.deliveryAddressId,
+    order.deliveryTermId,
+    order.paymentTermId,
+    order.carrierId,
+    order.quoteValidUntil,
+    order.currency,
+    order.exchangeRate,
+    order.generalMarkupPercent,
+    order.materialMarkupPercent,
+  ]);
 }
 
 // --- Add row ---
 
 function AddRowForm({
+  initialArticle = null,
+  initialQuantity = "1",
   orderId,
   customerId,
   currency,
@@ -1744,6 +1909,10 @@ function AddRowForm({
   onDone,
   onCancel,
 }: {
+  // From + Ny rad in the table: the article (a configurable one opens
+  // Konfigurera at once) and the quantity typed there.
+  initialArticle?: Article | null;
+  initialQuantity?: string;
   orderId: string;
   customerId: string;
   // Valuta: the order's currency and rate — the row is priced in it.
@@ -1759,7 +1928,7 @@ function AddRowForm({
   const router = useRouter();
   const [article, setArticle] = useState<Article | null>(null);
   const alreadyOnDocument = alreadyOnDocumentText(existingRows, article?.id, documentWord);
-  const [quantity, setQuantity] = useState("1");
+  const [quantity, setQuantity] = useState(initialQuantity);
   const [unitPrice, setUnitPrice] = useState("0");
   const [discountPercent, setDiscountPercent] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
@@ -1824,6 +1993,12 @@ function AddRowForm({
     setUnitId(next?.salesUnitId ?? "");
     setPriceTouched(false);
   }
+
+  // The article chosen in the table's + Ny rad, picked as if chosen here.
+  useEffect(() => {
+    if (initialArticle) handleArticleChange(initialArticle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleConfigured(draft: RowConfigurationDraft) {
     // The dialog has just evaluated these choices at this quantity — the

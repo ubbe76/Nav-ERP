@@ -3,6 +3,7 @@
 import type { SelectHTMLAttributes } from "react";
 import { Field, Select } from "../ui/Field";
 import type { CostCenter, Project } from "../../lib/types";
+import { HeaderCell } from "../documents/HeaderEditor";
 
 // Pickers for the two accounting dimensions. A selected value that is no
 // longer offered (a deactivated cost centre, a closed project) stays in the
@@ -89,6 +90,7 @@ export function DimensionFields({
   costCenterEmptyLabel,
   costCenterLabel = "Kostnadsställe",
   projectLabel = "Projekt",
+  cells = false,
 }: {
   idPrefix: string;
   lists: { allCostCenters: CostCenter[]; allProjects: Project[] };
@@ -100,6 +102,8 @@ export function DimensionFields({
   costCenterEmptyLabel?: string;
   costCenterLabel?: string;
   projectLabel?: string;
+  // In the header edited on the card (HeaderEditor): one grid cell each.
+  cells?: boolean;
 }) {
   const visible =
     (withCostCenter && (lists.allCostCenters.length > 0 || costCenterId !== "")) ||
@@ -108,22 +112,34 @@ export function DimensionFields({
   if (!visible) return null;
   // Stacked, not a FormRow: "100 · Verkstaden" style options are long and a
   // half-width select truncates them.
+  const costCenter = withCostCenter && (
+    <Field label={costCenterLabel} htmlFor={`${idPrefix}CostCenter`}>
+      <CostCenterSelect
+        id={`${idPrefix}CostCenter`}
+        all={lists.allCostCenters}
+        value={costCenterId}
+        onChange={onCostCenterChange}
+        emptyLabel={costCenterEmptyLabel}
+      />
+    </Field>
+  );
+  const project = (
+    <Field label={projectLabel} htmlFor={`${idPrefix}Project`}>
+      <ProjectSelect id={`${idPrefix}Project`} all={lists.allProjects} value={projectId} onChange={onProjectChange} />
+    </Field>
+  );
+  if (cells) {
+    return (
+      <>
+        {costCenter && <HeaderCell span>{costCenter}</HeaderCell>}
+        <HeaderCell span>{project}</HeaderCell>
+      </>
+    );
+  }
   return (
     <>
-      {withCostCenter && (
-        <Field label={costCenterLabel} htmlFor={`${idPrefix}CostCenter`}>
-          <CostCenterSelect
-            id={`${idPrefix}CostCenter`}
-            all={lists.allCostCenters}
-            value={costCenterId}
-            onChange={onCostCenterChange}
-            emptyLabel={costCenterEmptyLabel}
-          />
-        </Field>
-      )}
-      <Field label={projectLabel} htmlFor={`${idPrefix}Project`}>
-        <ProjectSelect id={`${idPrefix}Project`} all={lists.allProjects} value={projectId} onChange={onProjectChange} />
-      </Field>
+      {costCenter}
+      {project}
     </>
   );
 }
