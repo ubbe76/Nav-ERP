@@ -49,6 +49,14 @@ import {
 import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { stockholmToday } from "../../lib/date";
+import {
+  confirmableRows,
+  fillWithWantedDates,
+  initialConfirmationEntries,
+  rowConfirmationCell,
+  rowConfirmationPatches,
+  rowWantedDate,
+} from "../../lib/purchaseRowConfirmation";
 
 interface PurchaseOrderDetailProps {
   order: PurchaseOrder;
@@ -85,7 +93,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     articleId: row.articleId,
   });
 
-  const [modal, setModal] = useState<"header" | "deliveryAddress" | "addRow" | "receive" | "changeSupplier" | null>(null);
+  const [modal, setModal] = useState<"header" | "deliveryAddress" | "addRow" | "receive" | "changeSupplier" | "confirmRows" | null>(null);
   // Byt leverantör: what the last change did — the reminder to tell the old
   // supplier and the rows whose price needs a look. Shown until dismissed;
   // not stored (the händelselogg has the change).
@@ -381,6 +389,14 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
 
         {(order.status === "confirmed" || order.status === "partially_received") && (
           <>
+            {/* The supplier's Bekräftat leveransdatum row by row — only once
+                the order is placed (an Utkast has its own Bekräfta, the
+                status). */}
+            {receivable.length > 0 && (
+              <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("confirmRows")}>
+                Bekräfta rader…
+              </Button>
+            )}
             {receivable.length > 0 && (
               <Button type="button" variant="primary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("receive")}>
                 Ta emot leverans
@@ -476,6 +492,9 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
             { key: "quantityOrdered", label: "Beställt", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
             { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
             { key: "quantityReceived", label: "Mottaget", width: shareTrack(70), align: "right" },
+            // The supplier's confirmation per row (its own date, else the
+            // order's) — Nej marked while the row still has a rest to come.
+            { key: "confirmedDeliveryDate", label: "Bekräftat", width: shareTrack(84) },
             { key: "unitPrice", label: "Á-pris", width: shareTrack(editingRowId ? 100 : 84), align: "right" },
             // Wide enough for the footer's "69 600,00 SEK" on one line.
             { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
@@ -595,13 +614,6 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                           Önskat leveransdatum {row.expectedDeliveryDate}
                         </div>
                       )}
-                    {editingRowId !== row.id &&
-                      row.confirmedDeliveryDate &&
-                      row.confirmedDeliveryDate !== order.confirmedDeliveryDate && (
-                        <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
-                          Bekräftat leveransdatum {row.confirmedDeliveryDate}
-                        </div>
-                      )}
                     {editingRowId === row.id && (
                       <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <label htmlFor={`deliveryDate-${row.id}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
@@ -637,6 +649,13 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                     )}
                   </>
                 );
+              }
+              case "confirmedDeliveryDate": {
+                const cell = rowConfirmationCell(row, order);
+                if (cell.kind === "date") return cell.date;
+                if (cell.kind === "missing")
+                  return <span style={{ fontWeight: 600, color: "var(--status-delayed-text)" }}>Nej</span>;
+                return "–";
               }
               case "lineAmount":
                 return formatMoney(rowAmount(row));
@@ -740,6 +759,10 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           onDone={refresh}
           onCancel={() => setModal(null)}
         />
+      </Modal>
+
+      <Modal open={modal === "confirmRows"} onClose={() => setModal(null)} title="Bekräfta rader">
+        {modal === "confirmRows" && <ConfirmRowsForm order={order} rows={rows} onDone={refresh} onCancel={() => setModal(null)} />}
       </Modal>
 
       <Modal open={modal === "receive"} onClose={() => setModal(null)} title="Ta emot leverans">
@@ -885,6 +908,136 @@ function EditHeaderForm({
         <Input id="headerNote" value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
 
+      <FormActions>
+        <Button type="submit" variant="primary" disabled={pending}>
+          {pending ? "Sparar…" : "Spara"}
+        </Button>
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Avbryt
+        </Button>
+      </FormActions>
+    </Form>
+  );
+}
+
+// --- Bekräfta rader: the supplier's Bekräftat leveransdatum per row ---
+// One PATCH per changed row (as the inleverans routine loops its rows) and
+// never a new revision: the confirmed date is the supplier's answer and is
+// not printed on the IO PDF. The entries start at each row's own date, so
+// "" means the row follows the order's date (as in Ändra) and an untouched
+// row is never written (lib/purchaseRowConfirmation.ts).
+
+function ConfirmRowsForm({
+  order,
+  rows,
+  onDone,
+  onCancel,
+}: {
+  order: PurchaseOrder;
+  rows: PurchaseOrderRow[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const router = useRouter();
+  const listed = useMemo(() => confirmableRows(rows), [rows]);
+  const [entries, setEntries] = useState<Record<string, string>>(() => initialConfirmationEntries(listed));
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const anyWanted = listed.some((r) => rowWantedDate(r, order) !== null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    const patches = rowConfirmationPatches(listed, entries);
+    if (patches.length === 0) {
+      onCancel();
+      return;
+    }
+    setError(null);
+    setPending(true);
+    let saved = 0;
+    try {
+      for (const patch of patches) {
+        await apiFetch(`/api/v1/purchase-orders/${order.id}/rows/${patch.rowId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ confirmedDeliveryDate: patch.confirmedDeliveryDate, bumpRevision: false }),
+        });
+        saved++;
+      }
+      onDone();
+    } catch (err) {
+      const failed = listed.find((r) => r.id === patches[saved]?.rowId);
+      setError(
+        `${failed ? `${failed.articleNumber}: ` : ""}${apiErrorMessage(err, "Kunde inte spara raden")}` +
+          (saved > 0 ? " Raderna före den är sparade." : "")
+      );
+      // The saved rows now carry their entry, so Spara again only sends the rest.
+      if (saved > 0) router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Form onSubmit={save}>
+      <FormError>{error}</FormError>
+      <FormHint>
+        Fyll i leverantörens bekräftade leveransdatum per rad. Tomt = som ordern
+        {order.confirmedDeliveryDate ? ` (${order.confirmedDeliveryDate})` : ", som inte har något bekräftat datum"}.
+      </FormHint>
+      {anyWanted && (
+        <div>
+          <Button type="button" size="small" variant="secondary" onClick={() => setEntries((e) => fillWithWantedDates(listed, order, e))}>
+            Alla som önskat
+          </Button>
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {listed.map((row) => {
+          const wanted = rowWantedDate(row, order);
+          const rest = toUnitQuantity(Number(row.quantityOrdered) - Number(row.quantityReceived), row.unitFactor);
+          const entry = entries[row.id] ?? "";
+          return (
+            <div
+              key={row.id}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: "10px 0",
+                borderBottom: "1px solid var(--color-divider)",
+              }}
+            >
+              <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                <strong>{row.articleNumber}</strong> {row.articleName}
+                <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                  Rest {formatQuantity(rest)} {row.unitCode} · Önskat {wanted ?? "–"}
+                </div>
+              </div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Input
+                  type="date"
+                  size="sm"
+                  aria-label={`Bekräftat leveransdatum för ${row.articleNumber}`}
+                  value={entry}
+                  onChange={(e) => setEntries((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                />
+                <Button
+                  type="button"
+                  size="small"
+                  variant="ghost"
+                  disabled={!wanted || entry === wanted}
+                  onClick={() => wanted && setEntries((prev) => ({ ...prev, [row.id]: wanted }))}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  Som önskat
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "Sparar…" : "Spara"}

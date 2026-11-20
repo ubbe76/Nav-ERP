@@ -249,9 +249,19 @@ I orderhuvudet finns även kryssrutan **Frakt på vårt konto**. Kryssa i den n�
 
 ### Bekräftat leveransdatum
 
-När leverantören har bekräftat ordern fyller du i **Bekräftat leveransdatum** i **Ändra orderhuvud**. Datumet gäller direkt på alla rader som inte har ett eget bekräftat datum — det är förifyllt på raderna. Kommer en rad ett annat datum ändrar du den raden med **Ändra** (fältet **Bekräftat leveransdatum**, med texten "Tomt = som ordern" under); töm fältet så följer raden orderns bekräftade datum igen. Ändrar du orderns datum senare behåller rader du redan ändrat sitt eget datum. Fältet finns också i **Lägg till rad**.
+När leverantören har bekräftat ordern fyller du i **Bekräftat leveransdatum** i **Ändra orderhuvud**. Datumet gäller direkt på alla rader som inte har ett eget bekräftat datum — det är förifyllt på raderna. Ändrar du orderns datum senare behåller rader du redan har gett ett eget datum det.
 
-En rad med eget bekräftat datum visar **Bekräftat leveransdatum …** under benämningen. Det bekräftade datumet går alltid före det önskade: [artikelöversikten](/hjalp/artiklar#artikeloversikt), [färdigdatumsförslaget](/hjalp/tillverkning#foreslaget-fardigdatum), behovsberäkningen och [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) räknar varorna på radens bekräftade datum, annars orderns bekräftade, annars radens önskade, annars orderns önskade. Det bekräftade datumet skrivs inte ut på inköpsorderns PDF, eftersom det är leverantören som har lämnat det.
+Bekräftar leverantören rad för rad, eller kommer raderna olika dagar, använder du **Bekräfta rader…** i knappraden. Knappen finns när ordern är Bekräftad eller Delvis mottagen och har rader kvar att ta emot. Dialogen listar de raderna med restantal och önskat leveransdatum, och du fyller i leverantörens datum per rad:
+
+- **Som önskat** fyller i radens önskade leveransdatum, och **Alla som önskat** gör det på alla rader.
+- Ett tomt fält betyder att raden följer orderns bekräftade datum. Töm fältet för att ta bort radens eget datum.
+- **Spara** sparar bara raderna du har ändrat. Ordern får ingen ny revision, eftersom datumet är leverantörens svar och inte står på PDF:en.
+
+En enskild rad kan också ändras med **Ändra** (fältet **Bekräftat leveransdatum**, med texten "Tomt = som ordern" under), och fältet finns i **Lägg till rad**.
+
+Kolumnen **Bekräftat** i orderraderna visar radens bekräftade leveransdatum: radens eget, annars orderns. **Nej** (markerat) betyder att leverantören inte har bekräftat en rad som har något kvar att ta emot. En rad som är helt mottagen, och raderna på en mottagen, stängd eller avbruten order, visar – när de saknar datum.
+
+Det bekräftade datumet går alltid före det önskade: [artikelöversikten](/hjalp/artiklar#artikeloversikt), [färdigdatumsförslaget](/hjalp/tillverkning#foreslaget-fardigdatum), behovsberäkningen och [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) räknar varorna på radens bekräftade datum, annars orderns bekräftade, annars radens önskade, annars orderns önskade. Det bekräftade datumet skrivs inte ut på inköpsorderns PDF, eftersom det är leverantören som har lämnat det.
 
 Kolumnen **Leveransdatum** i inköpsorderlistan och bevakningslistan på [Översikten](/hjalp/komma-igang#oversikten) visar **nästa leveransdatum**: det tidigaste datumet bland raderna som inte är fullt mottagna. Ordern visas alltså som sen så fort en rad är sen, även när resten kommer senare. Leveransprecisionsrapporten mäter fortfarande mot orderns **Önskat leveransdatum**.
 
@@ -260,6 +270,8 @@ Kolumnen **Bekräftad av leverantör** i inköpsorderlistan visar om leverantör
 - **Ja**: alla de raderna är bekräftade.
 - **Delvis**: några av raderna är bekräftade. Det kan till exempel vara en rad med eget bekräftat datum när ordern saknar ett.
 - **Nej**: ingen av raderna är bekräftad.
+
+Det är samma regel som kolumnen **Bekräftat** på orderkortet, så **Delvis** betyder att några rader där visar **Nej**.
 
 **Delvis** och **Nej** är markerade, eftersom leverantören fortfarande är skyldig en bekräftelse. Statusen **Bekräftad** säger något annat: att ordern är beställd hos leverantören. En order kan alltså vara Bekräftad och ändå visa **Nej** tills leverantören har lämnat sitt datum. Ett **Utkast** är inte skickat och visar därför normalt **Nej**. Mottagna, stängda och avbrutna ordrar har inget kvar att vänta på och visar –. Exporten till CSV har samma kolumn.
 
