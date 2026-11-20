@@ -1054,7 +1054,6 @@ function PurchaseHeaderEditor({
 function purchaseHeaderSignature(order: PurchaseOrder): string {
   return JSON.stringify([
     order.supplierId,
-    order.status,
     order.expectedDeliveryDate,
     order.confirmedDeliveryDate,
     order.exchangeRate,

@@ -1870,11 +1870,12 @@ const MARKUP_HINT =
 
 // The header fields the editor starts from: a save (once the card is read
 // again), Byt kund or another tab's change gives the editor these values
-// afresh; anything else (a new row, a status) leaves typed changes alone.
+// afresh; anything else leaves typed changes alone — a new row (it bumps the
+// revision) and a status change too (Starta tillverkning, a delivery): the
+// fields follow the status from the props, the typed values stay.
 function headerSignature(order: SalesOrder): string {
   return JSON.stringify([
     order.customerId,
-    order.status,
     order.customerOrderNumber,
     order.customerInquiryNumber,
     order.invoiceCustomerId,

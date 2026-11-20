@@ -609,7 +609,6 @@ function InquiryHeaderEditor({
 function inquiryHeaderSignature(inquiry: Inquiry): string {
   return JSON.stringify([
     inquiry.supplierId,
-    inquiry.status,
     inquiry.freightPaidByUs,
     inquiry.deliveryTermId,
     inquiry.paymentTermId,
