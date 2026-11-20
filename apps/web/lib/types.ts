@@ -1093,6 +1093,9 @@ export type PurchaseOrderStatus =
   | "closed"
   | "cancelled";
 
+// Mirrors SupplierConfirmation in packages/shared/src/purchase.ts.
+export type SupplierConfirmation = "confirmed" | "partial" | "none";
+
 // Maps to StatusPill's fixed status/color set (see components/ui/StatusPill.tsx).
 export const PURCHASE_ORDER_STATUS_PILL: Record<PurchaseOrderStatus, { status: "running" | "delayed" | "stopped" | "done" | "draft"; label: string }> = {
   draft: { status: "draft", label: "Utkast" },
@@ -1124,6 +1127,10 @@ export interface PurchaseOrder extends DocumentTermsFields {
   confirmedDeliveryDate: string | null;
   // List-only: earliest effective delivery date among open rows.
   nextDeliveryDate?: string | null;
+  // List-only: Bekräftad av leverantör — whether the rows still to come have
+  // a Bekräftat leveransdatum (their own or the order's). Null once the
+  // order is Mottagen, Stängd or Avbruten.
+  supplierConfirmation?: SupplierConfirmation | null;
   note: string | null;
   // "Frakt på vårt konto" — prints our carrier customer number on the PO.
   freightPaidByUs: boolean;

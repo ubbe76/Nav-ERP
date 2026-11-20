@@ -211,7 +211,7 @@ När en legorad har fått ett pris visas knappen **Uppdatera beredningens legopr
 
 ## Inköpsorder
 
-**Inköp → Inköpsorder** listar alla ordrar med sök och statusfilter. Statusfiltret har också **Sen**: ordrar som är utkast, bekräftade eller delvis mottagna där en rad med rest har ett ankomstdatum som har passerat (bekräftat leveransdatum före önskat) — samma urval som aviseringen [Försenade inköpsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas. Filtret **Alla ordertyper** kan ställas på **Legoinköp** — ordrar med minst en [lego-rad](#rader-och-statusflode), alltså en rad som köper en operation på en tillverkningsorder — eller **Övriga inköp** (ordrar utan lego-rad). En order som blandar lego-rader och vanliga rader räknas som legoinköp. Exporten till CSV följer filtret.
+**Inköp → Inköpsorder** listar alla ordrar med sök och statusfilter. Statusfiltret har också **Sen**: ordrar som är utkast, bekräftade eller delvis mottagna där en rad med rest har ett ankomstdatum som har passerat (bekräftat leveransdatum före önskat) — samma urval som aviseringen [Försenade inköpsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas. Filtret **Alla ordertyper** kan ställas på **Legoinköp** — ordrar med minst en [lego-rad](#rader-och-statusflode), alltså en rad som köper en operation på en tillverkningsorder — eller **Övriga inköp** (ordrar utan lego-rad). En order som blandar lego-rader och vanliga rader räknas som legoinköp. Kolumnen **Bekräftad av leverantör** visar om leverantören har bekräftat ordern, se [Bekräftat leveransdatum](#bekraftat-leveransdatum). Exporten till CSV följer filtret.
 
 ### Skapa
 
@@ -254,6 +254,16 @@ När leverantören har bekräftat ordern fyller du i **Bekräftat leveransdatum*
 En rad med eget bekräftat datum visar **Bekräftat leveransdatum …** under benämningen. Det bekräftade datumet går alltid före det önskade: [artikelöversikten](/hjalp/artiklar#artikeloversikt), [färdigdatumsförslaget](/hjalp/tillverkning#foreslaget-fardigdatum), behovsberäkningen och [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) räknar varorna på radens bekräftade datum, annars orderns bekräftade, annars radens önskade, annars orderns önskade. Det bekräftade datumet skrivs inte ut på inköpsorderns PDF, eftersom det är leverantören som har lämnat det.
 
 Kolumnen **Leveransdatum** i inköpsorderlistan och bevakningslistan på [Översikten](/hjalp/komma-igang#oversikten) visar **nästa leveransdatum**: det tidigaste datumet bland raderna som inte är fullt mottagna. Ordern visas alltså som sen så fort en rad är sen, även när resten kommer senare. Leveransprecisionsrapporten mäter fortfarande mot orderns **Önskat leveransdatum**.
+
+Kolumnen **Bekräftad av leverantör** i inköpsorderlistan visar om leverantören har bekräftat ordern. Den räknas på raderna som återstår att ta emot, och en rad räknas som bekräftad när den har ett bekräftat leveransdatum, sitt eget eller orderns:
+
+- **Ja**: alla de raderna är bekräftade.
+- **Delvis**: några av raderna är bekräftade. Det kan till exempel vara en rad med eget bekräftat datum när ordern saknar ett.
+- **Nej**: ingen av raderna är bekräftad.
+
+**Delvis** och **Nej** är markerade, eftersom leverantören fortfarande är skyldig en bekräftelse. Statusen **Bekräftad** säger något annat: att ordern är beställd hos leverantören. En order kan alltså vara Bekräftad och ändå visa **Nej** tills leverantören har lämnat sitt datum. Ett **Utkast** är inte skickat och visar därför normalt **Nej**. Mottagna, stängda och avbrutna ordrar har inget kvar att vänta på och visar –. Exporten till CSV har samma kolumn.
+
+På [Översikten](/hjalp/komma-igang#oversikten) visar kortet **Inleveranser denna vecka** båda sakerna under varje order: statusen och leverantörens bekräftelse, till exempel *Utkast · Leverantören har inte bekräftat* eller *Bekräftad · Leverantören har bekräftat delvis*. Aviseringen [Försenade inköpsordrar](/hjalp/aviseringar) inleder varje rad med orderns status, till exempel *Utkast · 3 dagar försenad · leveransdatum …*. Där syns direkt om en sen order aldrig blev skickad.
 
 ### Rader och statusflöde
 

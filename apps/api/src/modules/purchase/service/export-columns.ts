@@ -5,7 +5,7 @@
 // are appended at the end. Status enums are exported as their Swedish label,
 // mirroring the *_STATUS_PILL maps in apps/web/lib/types.ts (there is no
 // server-side equivalent, so the labels are inlined here).
-import type { CsvColumn } from "@navet/shared";
+import type { CsvColumn, SupplierConfirmation } from "@navet/shared";
 import type {
   inquiries,
   inquiryStatusEnum,
@@ -69,7 +69,18 @@ export const PURCHASE_ORDER_STATUS_LABELS: Record<(typeof purchaseOrderStatusEnu
   cancelled: "Avbruten",
 };
 
-type PurchaseOrderRow = typeof purchaseOrders.$inferSelect & { supplierName: string; nextDeliveryDate: string | null };
+// Bekräftad av leverantör — the web list's labels (PurchaseOrdersPageClient).
+export const SUPPLIER_CONFIRMATION_LABELS: Record<SupplierConfirmation, string> = {
+  confirmed: "Ja",
+  partial: "Delvis",
+  none: "Nej",
+};
+
+type PurchaseOrderRow = typeof purchaseOrders.$inferSelect & {
+  supplierName: string;
+  nextDeliveryDate: string | null;
+  supplierConfirmation: SupplierConfirmation | null;
+};
 
 export const PURCHASE_ORDER_CSV_COLUMNS: CsvColumn<PurchaseOrderRow>[] = [
   { label: "Ordernummer", value: (r) => r.orderNumber },
@@ -79,6 +90,7 @@ export const PURCHASE_ORDER_CSV_COLUMNS: CsvColumn<PurchaseOrderRow>[] = [
   { label: "Önskat leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },
   { label: "Bekräftat leveransdatum", value: (r) => r.confirmedDeliveryDate, format: "date" },
   { label: "Nästa leveransdatum", value: (r) => r.nextDeliveryDate, format: "date" },
+  { label: "Bekräftad av leverantör", value: (r) => (r.supplierConfirmation ? SUPPLIER_CONFIRMATION_LABELS[r.supplierConfirmation] : null) },
   { label: "Er referens", value: (r) => r.yourReference },
   { label: "Vår referens", value: (r) => r.ourReference },
   { label: "Notering", value: (r) => r.note },

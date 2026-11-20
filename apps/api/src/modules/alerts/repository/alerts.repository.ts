@@ -32,7 +32,7 @@ import {
   verifications,
   type Db,
 } from "@navet/db";
-import { PLUGIN_TEST_EVENT_TYPE } from "@navet/shared";
+import { PLUGIN_TEST_EVENT_TYPE, type PurchaseOrderStatus } from "@navet/shared";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "../../planning/repository/effective-dates.js";
 import {
   LATE_PURCHASE_ORDER_STATUSES,
@@ -68,6 +68,12 @@ export interface LateOrderRow {
   partnerName: string;
   // The earliest late effective date among the order's open rows.
   earliestDate: string;
+}
+
+// Försenade inköpsordrar also carry the status: an Utkast is late without
+// having been sent.
+export interface LatePurchaseOrderRow extends LateOrderRow {
+  status: PurchaseOrderStatus;
 }
 
 export interface OpenManufacturingOrderRow {
@@ -309,13 +315,14 @@ export function createAlertsRepository(db: Db) {
     // that still has quantity to receive and whose effective arrival date
     // (confirmed before requested, row before order) is before today — the
     // rule in late-orders.ts, shared with the order list's status filter Sen.
-    async latePurchaseOrders(today: string): Promise<LateOrderRow[]> {
+    async latePurchaseOrders(today: string): Promise<LatePurchaseOrderRow[]> {
       const earliest = sql<string>`min(${purchaseRowArrivalDate})`;
       return db
         .select({
           orderId: purchaseOrders.id,
           orderNumber: purchaseOrders.orderNumber,
           partnerName: suppliers.name,
+          status: purchaseOrders.status,
           earliestDate: earliest,
         })
         .from(purchaseOrderRows)
@@ -327,7 +334,7 @@ export function createAlertsRepository(db: Db) {
             purchaseRowLate(today)
           )
         )
-        .groupBy(purchaseOrders.id, purchaseOrders.orderNumber, suppliers.name)
+        .groupBy(purchaseOrders.id, purchaseOrders.orderNumber, purchaseOrders.status, suppliers.name)
         .orderBy(sql`${earliest} asc`, asc(purchaseOrders.orderNumber));
     },
 

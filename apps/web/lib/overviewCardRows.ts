@@ -3,7 +3,7 @@
 // (overview-cards-mirror.test.ts) — the web cannot import @navet/shared and
 // vitest cannot load modules that reach for the Next runtime.
 import type { AlertGroup } from "./alerts";
-import type { CapacityResult } from "./types";
+import type { CapacityResult, SupplierConfirmation } from "./types";
 
 // One row of a ListCard (components/dashboard/ListCard.tsx). Here rather than
 // beside the component so the API suite's typecheck never reaches JSX.
@@ -30,11 +30,28 @@ export function endOfIsoWeek(today: string): string {
   return new Date(Date.UTC(y, m - 1, d + toSunday)).toISOString().slice(0, 10);
 }
 
+// Inleveranser denna vecka: whether the supplier has confirmed the order (the
+// IO list's Bekräftad av leverantör, from the Bekräftat leveransdatum) —
+// worded apart from the status Bekräftad, which only says the order is sent.
+export const SUPPLIER_CONFIRMATION_TEXT: Record<SupplierConfirmation, string> = {
+  confirmed: "Leverantören har bekräftat",
+  partial: "Leverantören har bekräftat delvis",
+  none: "Leverantören har inte bekräftat",
+};
+
 // Leveranser / Inleveranser denna vecka: the list's rows (already filtered to
 // Nästa leveransdatum ≤ Sunday and sorted earliest first). Late = red, today
-// = yellow.
+// = yellow. A purchase order also shows its status (an Utkast is not sent)
+// and whether the supplier has confirmed it.
 export function deliveryRows(
-  orders: { id: string; orderNumber: string; counterpartyName: string | null; nextDeliveryDate: string | null }[],
+  orders: {
+    id: string;
+    orderNumber: string;
+    counterpartyName: string | null;
+    nextDeliveryDate: string | null;
+    statusLabel?: string | null;
+    supplierConfirmation?: SupplierConfirmation | null;
+  }[],
   today: string,
   hrefBase: string
 ): ListCardRow[] {
@@ -42,12 +59,13 @@ export function deliveryRows(
     const date = order.nextDeliveryDate;
     const late = date !== null && date < today;
     const isToday = date === today;
+    const confirmation = order.supplierConfirmation ? SUPPLIER_CONFIRMATION_TEXT[order.supplierConfirmation] : "";
     return {
       key: order.id,
       href: `${hrefBase}/${order.id}`,
       tone: late ? "red" : isToday ? "yellow" : null,
       primary: order.counterpartyName ? `${order.orderNumber} · ${order.counterpartyName}` : order.orderNumber,
-      secondary: late ? "Försenad" : isToday ? "I dag" : "",
+      secondary: [late ? "Försenad" : isToday ? "I dag" : "", order.statusLabel ?? "", confirmation].filter(Boolean).join(" · "),
       aside: date ?? "",
     };
   });

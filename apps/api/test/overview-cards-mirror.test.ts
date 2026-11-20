@@ -92,6 +92,26 @@ describe("Översiktens kort", () => {
       ["KO-3 · Exempel AB", null, "", "2026-11-13", "/forsaljning/ordrar/c"],
     ]);
 
+    // Inleveranser denna vecka: the status and whether the supplier has
+    // confirmed the order.
+    expect(
+      deliveryRows(
+        [
+          { id: "p1", orderNumber: "IO-1", counterpartyName: "Exempel Stål AB", nextDeliveryDate: "2026-11-01", statusLabel: "Utkast", supplierConfirmation: "none" },
+          { id: "p2", orderNumber: "IO-2", counterpartyName: null, nextDeliveryDate: today, statusLabel: "Bekräftad", supplierConfirmation: "partial" },
+          { id: "p3", orderNumber: "IO-3", counterpartyName: null, nextDeliveryDate: "2026-11-13", statusLabel: "Delvis mottagen", supplierConfirmation: "confirmed" },
+          { id: "p4", orderNumber: "IO-4", counterpartyName: null, nextDeliveryDate: "2026-11-13", supplierConfirmation: null },
+        ],
+        today,
+        "/inkop/ordrar"
+      ).map((r) => r.secondary)
+    ).toEqual([
+      "Försenad · Utkast · Leverantören har inte bekräftat",
+      "I dag · Bekräftad · Leverantören har bekräftat delvis",
+      "Delvis mottagen · Leverantören har bekräftat",
+      "",
+    ]);
+
     const cell = (loadHours: number, availableHours: number | null) => ({
       loadHours,
       availableHours,

@@ -6,6 +6,7 @@ import { createArticleRepository } from "../src/modules/article/repository/artic
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
+import { PURCHASE_ORDER_CSV_COLUMNS } from "../src/modules/purchase/service/export-columns.js";
 import {
   createPurchaseService,
   DeliveryAddressNotFoundError,
@@ -1605,6 +1606,53 @@ describe("purchase service — önskat leveransdatum", () => {
     const cleared = await purchaseService.updateRow(order.id, rowB.id, { confirmedDeliveryDate: null });
     expect(cleared.row!.confirmedDeliveryDate).toBeNull();
     expect(await nextOf()).toBe("2030-03-11");
+  });
+
+  it("Bekräftad av leverantör: derived from the open rows' Bekräftat leveransdatum, only on an open order", async () => {
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const location = await makeLocation();
+    const a = await makeArticle(`ART-SC-A-${crypto.randomUUID()}`);
+    const b = await makeArticle(`ART-SC-B-${crypto.randomUUID()}`);
+    const order = await purchaseService.createPurchaseOrder(
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" }),
+      user.id
+    );
+    const rowA = await purchaseService.addRow(order.id, { articleId: a.id, quantity: 1, unitPrice: 1 });
+    const rowB = await purchaseService.addRow(order.id, { articleId: b.id, quantity: 1, unitPrice: 1 });
+
+    const confirmationOf = async () =>
+      (await purchaseService.listPurchaseOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows.find(
+        (o) => o.id === order.id
+      )!.supplierConfirmation;
+    // Utkast: not sent yet, so not confirmed either.
+    expect(await confirmationOf()).toBe("none");
+
+    await purchaseService.confirm(order.id);
+    expect(await confirmationOf()).toBe("none");
+
+    // One row with its own date, the other without.
+    await purchaseService.updateRow(order.id, rowB.id, { confirmedDeliveryDate: "2030-03-25" });
+    expect(await confirmationOf()).toBe("partial");
+
+    // The order's date covers row A.
+    await purchaseService.updatePurchaseOrderHeader(order.id, { confirmedDeliveryDate: "2030-03-11" });
+    expect(await confirmationOf()).toBe("confirmed");
+
+    // Only the rows still to come count: row A, unconfirmed, is received.
+    await purchaseService.updatePurchaseOrderHeader(order.id, { confirmedDeliveryDate: null });
+    expect(await confirmationOf()).toBe("partial");
+    await purchaseService.receiveGoods(order.id, rowA.id, { locationId: location.id, quantity: 1 }, user.id);
+    expect(await confirmationOf()).toBe("confirmed");
+
+    // Mottagen: nothing more to come.
+    await purchaseService.receiveGoods(order.id, rowB.id, { locationId: location.id, quantity: 1 }, user.id);
+    expect(await confirmationOf()).toBeNull();
+
+    const column = PURCHASE_ORDER_CSV_COLUMNS.find((c) => c.label === "Bekräftad av leverantör")!;
+    const csvRow = (await purchaseService.listPurchaseOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows[0]!;
+    expect(column.value({ ...csvRow, supplierConfirmation: "partial" })).toBe("Delvis");
+    expect(column.value(csvRow)).toBeNull();
   });
 
   it("PATCH persists a lego row's ställpris (it used to be dropped)", async () => {

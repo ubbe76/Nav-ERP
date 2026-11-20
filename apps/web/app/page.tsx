@@ -47,14 +47,15 @@ import {
 import { DEVIATION_TYPE_LABELS, type DeviationListRow } from "../lib/quality";
 import { stockholmToday } from "../lib/date";
 import { satisfiesRule } from "../lib/permissions";
-import type {
-  CapacityResult,
-  ManufacturingOrder,
-  OnboardingView,
-  Paged,
-  PurchaseOrder,
-  SalesOrder,
-  StockTransaction,
+import {
+  PURCHASE_ORDER_STATUS_PILL,
+  type CapacityResult,
+  type ManufacturingOrder,
+  type OnboardingView,
+  type Paged,
+  type PurchaseOrder,
+  type SalesOrder,
+  type StockTransaction,
 } from "../lib/types";
 
 const ROLE_LABELS: Record<string, string> = { admin: "Administratör", supervisor: "Arbetsledare", user: "Användare" };
@@ -144,7 +145,9 @@ export default async function OverviewPage() {
     has("arrivals")
       ? orNull(
           apiGet<Paged<PurchaseOrder>>(
-            `/api/v1/purchase-orders?status=confirmed,partially_received&deliveryTo=${weekEnd}&sort=delivery&limit=${OVERVIEW_CARD_ROWS}`,
+            // Utkast too: an order due this week that is not sent yet is
+            // what the card's status shows.
+            `/api/v1/purchase-orders?status=draft,confirmed,partially_received&deliveryTo=${weekEnd}&sort=delivery&limit=${OVERVIEW_CARD_ROWS}`,
             cookieHeader
           )
         )
@@ -295,7 +298,12 @@ export default async function OverviewPage() {
         key="arrivals"
         title={OVERVIEW_CARD_LABELS.arrivals}
         rows={deliveryRows(
-          (arrivalsPage?.rows ?? []).map((o) => ({ ...o, counterpartyName: o.supplierName, nextDeliveryDate: o.nextDeliveryDate ?? null })),
+          (arrivalsPage?.rows ?? []).map((o) => ({
+            ...o,
+            counterpartyName: o.supplierName,
+            nextDeliveryDate: o.nextDeliveryDate ?? null,
+            statusLabel: PURCHASE_ORDER_STATUS_PILL[o.status].label,
+          })),
           today,
           "/inkop/ordrar"
         )}
