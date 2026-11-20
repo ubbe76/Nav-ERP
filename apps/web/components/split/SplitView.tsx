@@ -51,7 +51,11 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
   const [filter, setFilter] = useState(saved?.filter ?? 0);
   const [rows, setRows] = useState<SplitRow[]>(saved?.rows ?? []);
   const [total, setTotal] = useState<number | null>(saved?.total ?? null);
-  const [loading, setLoading] = useState(false);
+  // A new search or filter: the rows fade until the new ones are in. A
+  // background read (more rows, the refresh on a new card) changes nothing
+  // on screen until it lands.
+  const [replacing, setReplacing] = useState(false);
+  const loading = useRef(false);
   const [failed, setFailed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -81,9 +85,10 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(
-    async (offset: number, limit: number) => {
+    async (offset: number, limit: number, replace = false) => {
       const mine = ++seq.current;
-      setLoading(true);
+      loading.current = true;
+      if (replace) setReplacing(true);
       const { search: q, filter: f } = state.current;
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
       if (q.trim()) params.set("search", q.trim());
@@ -99,7 +104,10 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
       } catch {
         if (mine === seq.current) setFailed(true);
       } finally {
-        if (mine === seq.current) setLoading(false);
+        if (mine === seq.current) {
+          loading.current = false;
+          setReplacing(false);
+        }
       }
     },
     [config]
@@ -113,19 +121,24 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
     const wasFirst = first.current;
     first.current = false;
     if (!wasFirst && scroller.current) scroller.current.scrollTop = 0;
-    const timer = setTimeout(() => void load(0, Math.min(keep, 200)), wasFirst || !search ? 0 : 250);
+    const timer = setTimeout(() => void load(0, Math.min(keep, 200), !wasFirst), wasFirst || !search ? 0 : 250);
     return () => clearTimeout(timer);
   }, [search, filter, load]);
 
-  // More rows as the end comes into view.
+  // More rows as the end comes into view. The list scrolls on its own beside
+  // a card; on a narrow screen it is part of the page (overflow visible), and
+  // then the window is what the end comes into — watched against the list
+  // itself, the end was always "in view" and every page was read, one after
+  // the other, the rows fading with each (2026-11-20, an iPhone).
   useEffect(() => {
     const node = sentinel.current;
-    const root = scroller.current;
-    if (!node || !root) return;
+    const box = scroller.current;
+    if (!node || !box) return;
+    const root = getComputedStyle(box).overflowY === "visible" ? null : box;
     const observer = new IntersectionObserver(
       (entries) => {
         const s = state.current;
-        if (entries[0]?.isIntersecting && !loading && s.total !== null && s.rows.length < s.total) {
+        if (entries[0]?.isIntersecting && !loading.current && s.total !== null && s.rows.length < s.total) {
           void load(s.rows.length, PAGE);
         }
       },
@@ -133,7 +146,7 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [load, loading]);
+  }, [load, rows.length]);
 
   useEffect(() => remember, [remember]);
   useEffect(() => {
@@ -185,7 +198,7 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
           ))}
         </div>
       )}
-      <div className={styles.rows} ref={scroller} onScroll={remember} data-pending={loading || undefined}>
+      <div className={styles.rows} ref={scroller} onScroll={remember} data-pending={replacing || undefined}>
         {rows.map((row) => (
           <Link
             key={row.id}

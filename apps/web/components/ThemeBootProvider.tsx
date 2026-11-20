@@ -58,6 +58,23 @@ export function ThemeBootProvider({ boot, children }: { boot: ThemeBootClient; c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idsKey, boot.defaultTheme, boot.locked, boot.userTheme]);
 
+  // A choice made in another page of this browser — the frame around the
+  // tabs (every page there is its own document since Programramen), another
+  // tab or window — reaches this page through storage's own event: the theme
+  // follows at once instead of at the next load (2026-11-20, Dracula in the
+  // menu, the old theme in the tab). Applied only, never saved again; a
+  // locked theme or one this page does not know is left alone.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== THEME_STORAGE_KEY || !e.newValue || boot.locked || !ids.includes(e.newValue)) return;
+      applyTheme(e.newValue);
+      setTheme(e.newValue);
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey, boot.locked]);
+
   const choose = useCallback((id: string, opts?: { browserOnly?: boolean }) => {
     applyTheme(id);
     setTheme(id);
