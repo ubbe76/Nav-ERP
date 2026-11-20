@@ -8,10 +8,12 @@ Statistikrapporterna filtreras med ett månadsintervall (**Från månad** / **Ti
 
 **Rapporter → Orderförteckning kundorder** och **Rapporter → Orderförteckning inköp** listar ordrarna med **Ordervärde** och **Restvärde** — som en rad per order, eller med kryssrutan **Visa rader** som order med sina rader (artikel, antal, **Levererat**/**Mottaget**, rest, à-pris, belopp, restbelopp och leveransdatum).
 
+Orderförteckningen för kundorder tar bara med kundordrar, aldrig offerter. Det gäller öppna offerter, förlorade offerter och offerter med statusen **Order**, alltså offerter som en kundorder har skapats från. Det är kundordern som bär värdet, så offerten skulle annars räknas en gång till. Offerterna följer du i [Offerter](/hjalp/forsaljning#offerter) och i [Offertuppföljning](#offertuppfoljning).
+
 Urvalet:
 
 - **Datum avser** — **Orderdatum** (dagen ordern skapades) eller **Leveransdatum**, med **Från** och **Till**. Leveransdatum är radens eget datum, annars orderns; på inköpsordrar går **Bekräftat leveransdatum** före **Önskat leveransdatum**, samma regel som planeringen använder. Tomma datum = inget datumurval.
-- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Offert, Bekräftad och Under tillverkning för kundordrar; Utkast, Bekräftad och Delvis mottagen för inköpsordrar), **Varugrupp**, **Artikelkod** och **Artikel**.
+- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Bekräftad och Under tillverkning för kundordrar; Utkast, Bekräftad och Delvis mottagen för inköpsordrar), **Varugrupp**, **Artikelkod** och **Artikel**.
 - **Bara rader med rest** — bara rader som inte är fullt levererade eller mottagna.
 
 Urvalet gäller **orderraderna**: leveransdatum, artikel, varugrupp, artikelkod och rest väljer rader, och en order visas med de rader som kom med — dess ordervärde och restvärde summerar bara dem. Ordrar utan rader visas inte.
