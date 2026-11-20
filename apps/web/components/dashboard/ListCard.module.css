@@ -48,13 +48,13 @@
   white-space: nowrap;
 }
 
+/* Wraps rather than truncates: on a phone the line's last part (an inköps-
+   order's Leverantören har inte bekräftat) would otherwise be cut off. */
 .secondary {
   font-family: var(--font-body);
   font-size: 12.5px;
   color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .aside {

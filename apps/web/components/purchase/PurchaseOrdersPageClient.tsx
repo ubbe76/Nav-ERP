@@ -11,10 +11,21 @@ import buttonStyles from "../ui/Button.module.css";
 import { NewPurchaseOrderForm } from "./NewPurchaseOrderForm";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { useListColumns } from "../ui/ListColumns";
-import { PURCHASE_ORDER_STATUS_PILL, type Paged, type PurchaseOrder } from "../../lib/types";
+import { PURCHASE_ORDER_STATUS_PILL, type Paged, type PurchaseOrder, type SupplierConfirmation } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/inkop/ordrar/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
+
+// Bekräftad av leverantör: Ja when every row still to come has a Bekräftat
+// leveransdatum (its own or the order's), Delvis when some do, Nej when none
+// (an Utkast too) — the CSV export's labels (export-columns.ts); – once the
+// order is received, closed or cancelled. Nej and Delvis stand out: the
+// supplier still owes a confirmation.
+const SUPPLIER_CONFIRMATION: Record<SupplierConfirmation, string> = {
+  confirmed: "Ja",
+  partial: "Delvis",
+  none: "Nej",
+};
 
 export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<PurchaseOrder>; pageSize: number }) {
   // ?ny=1 (the "+ Ny inköpsorder" link on the Inköp page) opens the form at once.
@@ -26,6 +37,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
     { key: "status", label: "Status", width: "160px" },
     { key: "currency", label: "Valuta", width: "90px" },
     { key: "expectedDeliveryDate", label: "Leveransdatum", width: "170px" },
+    { key: "supplierConfirmation", label: "Bekräftad av leverantör", width: "215px" },
   ]);
 
   return (
@@ -95,6 +107,13 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
               return order.currency;
             case "expectedDeliveryDate":
               return order.nextDeliveryDate ?? order.expectedDeliveryDate ?? "–";
+            case "supplierConfirmation": {
+              const state = order.supplierConfirmation;
+              if (!state) return "–";
+              return (
+                <span className={state === "confirmed" ? undefined : styles.unconfirmed}>{SUPPLIER_CONFIRMATION[state]}</span>
+              );
+            }
             default:
               return null;
           }

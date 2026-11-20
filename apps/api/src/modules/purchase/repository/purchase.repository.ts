@@ -63,6 +63,7 @@ import {
   splitLateFilter,
   type ListQuery,
   type PurchaseOrderStatus,
+  type SupplierConfirmation,
   type UpdateArticleSupplierInput,
   type UpdateContactInput,
   type UpdateDeliveryAddressInput,
@@ -1013,6 +1014,14 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
       // date), else the order's own — so one early row shows the order late.
       // Also the deliveryTo filter's and sort=delivery's date.
       const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}, r.expected_delivery_date, ${purchaseOrders.expectedDeliveryDate})) from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered), ${purchaseOrders.confirmedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`;
+      // Bekräftad av leverantör: the supplier's confirmation is a Bekräftat
+      // leveransdatum (order-dates.md). Over the rows still to come, each
+      // confirmed by its own date or the order's: all ⇒ confirmed, some ⇒
+      // partial, none ⇒ none; no open row ⇒ the order's own date. Only on an
+      // open order (Utkast — not sent, so normally none —, Bekräftad, Delvis
+      // mottagen); null once received, closed or cancelled. Derived, never
+      // stored.
+      const supplierConfirmationSql = sql<SupplierConfirmation | null>`case when ${purchaseOrders.status} in ('draft', 'confirmed', 'partially_received') then (select case when count(*) = 0 then (case when ${purchaseOrders.confirmedDeliveryDate} is null then 'none' else 'confirmed' end) when bool_and(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}) is not null) then 'confirmed' when bool_or(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}) is not null) then 'partial' else 'none' end from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered) end`;
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -1080,6 +1089,7 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
             ...getTableColumns(purchaseOrders),
             supplierName: suppliers.name,
             nextDeliveryDate: nextDeliveryDateSql,
+            supplierConfirmation: supplierConfirmationSql,
             ...(query.withOpenRows ? { openRowCount: openRowCountSql } : {}),
           })
           .from(purchaseOrders)

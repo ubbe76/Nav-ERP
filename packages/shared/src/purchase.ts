@@ -22,6 +22,11 @@ export const purchaseOrderStatusSchema = z.enum([
 ]);
 export type PurchaseOrderStatus = z.infer<typeof purchaseOrderStatusSchema>;
 
+// Bekräftad av leverantör on the IO list (listPurchaseOrders derives it from
+// the Bekräftat leveransdatum of the rows still to come): all ⇒ confirmed,
+// some ⇒ partial, none ⇒ none. Null once received, closed or cancelled.
+export type SupplierConfirmation = "confirmed" | "partial" | "none";
+
 export const listPurchaseOrdersQuerySchema = listQuerySchema.extend({
   // Also "late" (Sen) — see orderStatusListParam in list.ts.
   status: orderStatusListParam(purchaseOrderStatusSchema.options),

@@ -385,7 +385,9 @@ describe("purchase_order_late", () => {
       [draft.id, "2030-03-01", `/inkop/ordrar/${draft.id}`],
       [partial.id, YESTERDAY, `/inkop/ordrar/${partial.id}`],
     ]);
-    expect(g.items[0]!.secondary).toBe("3 dagar försenad · leveransdatum 2030-03-01");
+    // The status first: the Utkast has not been sent.
+    expect(g.items[0]!.secondary).toBe("Utkast · 3 dagar försenad · leveransdatum 2030-03-01");
+    expect(g.items[1]!.secondary).toBe(`Delvis mottagen · 1 dag försenad · leveransdatum ${YESTERDAY}`);
   });
 
   it("a confirmed date in the future wins over a passed requested date; received and cancelled orders never count", async () => {

@@ -188,7 +188,7 @@ Utöver dem kan du lägga till kortet **Favoriter** (dina [favoriter](#favoriter
 | Kort | Innehåll | Se alla |
 |---|---|---|
 | **Leveranser denna vecka** | Bekräftade kundordrar och kundordrar under tillverkning vars nästa leveransdatum infaller senast på söndag, sena först | Kundorder |
-| **Inleveranser denna vecka** | Bekräftade och dellevererade inköpsordrar vars nästa leveransdatum infaller senast på söndag (ett bekräftat datum går före det önskade), sena först | Inköpsorder |
+| **Inleveranser denna vecka** | Inköpsordrar i status Utkast, Bekräftad eller Delvis mottagen vars nästa leveransdatum infaller senast på söndag (ett bekräftat datum går före det önskade), sena först. Under varje order står statusen, så att ett utkast som inte är skickat syns, och om leverantören har bekräftat den ([Bekräftat leveransdatum](/hjalp/inkop#bekraftat-leveransdatum)) | Inköpsorder |
 | **Beläggning denna vecka** | Resurserna med planerad tid den här veckan, mest belastade först, med timmar mot kapacitet och procent | Beläggning |
 | **Förfallna kundfakturor** | Samma rader som aviseringen med samma namn | Försäljning → Öppna poster |
 | **Leverantörsfakturor att betala** | Samma rader som aviseringen med samma namn | Inköp → Öppna poster |

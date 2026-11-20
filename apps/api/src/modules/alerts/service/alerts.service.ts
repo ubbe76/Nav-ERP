@@ -13,6 +13,7 @@ import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { stockholmNow } from "../../shipping/service/pickup.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
 import type { AlertsRepository } from "../repository/alerts.repository.js";
+import { PURCHASE_ORDER_STATUS_LABELS } from "../../purchase/service/export-columns.js";
 import { alertKindDef, batchExpirySeverity, quoteFollowupSeverity, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
 
 // Aviseringar — computeAlerts runs the readers of the requested kinds in
@@ -203,6 +204,7 @@ export function createAlertsService(deps: {
       }));
     },
 
+    // The status first: a late Utkast has not been sent to the supplier.
     async purchase_order_late(today) {
       const rows = await repo.latePurchaseOrders(today);
       return rows.map((r) => ({
@@ -210,7 +212,7 @@ export function createAlertsService(deps: {
         severity: "yellow",
         href: `/inkop/ordrar/${r.orderId}`,
         primary: `${r.orderNumber} ${r.partnerName}`,
-        secondary: `${daysLateText(r.earliestDate, today)} · leveransdatum ${r.earliestDate}`,
+        secondary: `${PURCHASE_ORDER_STATUS_LABELS[r.status]} · ${daysLateText(r.earliestDate, today)} · leveransdatum ${r.earliestDate}`,
         date: r.earliestDate,
       }));
     },

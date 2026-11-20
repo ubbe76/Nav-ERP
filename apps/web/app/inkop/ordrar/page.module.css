@@ -5,3 +5,9 @@
 .rowLink:hover {
   color: var(--accent-fg);
 }
+
+/* Bekräftad av leverantör: Nej/Delvis — a confirmation still owed. */
+.unconfirmed {
+  font-weight: 600;
+  color: var(--status-delayed-text);
+}
