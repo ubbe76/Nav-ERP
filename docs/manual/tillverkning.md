@@ -116,7 +116,7 @@ Leverantörens namn-/kontaktkolumner ("Namn (2)"/"Namn (3)") samt "Skapa inte fa
 
 ## Tillverkningsorder
 
-**Tillverkning → Ordrar** listar alla TO med sök och statusfilter. Statusfiltret har också **Sen**: frisläppta och pågående ordrar som produktionsplaneringen markerar **Sen** — samma urval som aviseringen [Sena tillverkningsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas. Filtret har också **Halvfabrikat sent** — ordrar där ett halvfabrikat som ordern behöver blir klart för sent, se [Halvfabrikat sent](#halvfabrikat-sent).
+**Tillverkning → Ordrar** listar alla TO med sök och statusfilter. Du kan välja flera statusar samtidigt, och **Öppna** väljer Planerad, Frisläppt och Pågår. Klara, stängda och makulerade ordrar visas bara med **Visa avslutade**, se [Lista och kort](/hjalp/komma-igang#lista-och-kort). Statusfiltret har också **Sen**: frisläppta och pågående ordrar som produktionsplaneringen markerar **Sen** — samma urval som aviseringen [Sena tillverkningsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas. Filtret har också **Halvfabrikat sent** — ordrar där ett halvfabrikat som ordern behöver blir klart för sent, se [Halvfabrikat sent](#halvfabrikat-sent).
 
 ### Läsläge
 

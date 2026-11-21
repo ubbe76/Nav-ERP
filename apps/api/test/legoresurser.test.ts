@@ -289,7 +289,7 @@ describe("goods receipt auto-reports the lego operation", () => {
 
     const final = await purchaseService.receiveGoods(ioOrder.id, row.id, { quantity: 3 }, fixture.user.id);
     expect(final.operationReport).toEqual({ ok: true });
-    expect(final.orderStatus).toBe("received");
+    expect(final.orderStatus).toBe("closed");
     operation = await mfgService.getOperation(fixture.legoOp.id);
     expect(operation?.status).toBe("done");
     expect(operation?.quantityCompleted).toBe("4.0000");
@@ -324,7 +324,7 @@ describe("goods receipt auto-reports the lego operation", () => {
     expect(result.operationReport?.message).toBeTruthy();
     // The receipt itself stands.
     expect(result.row?.quantityReceived).toBe("4.0000");
-    expect(result.orderStatus).toBe("received");
+    expect(result.orderStatus).toBe("closed");
     // The operation was never touched.
     const operation = await mfgService.getOperation(fixture.legoOp.id);
     expect(operation?.quantityCompleted).toBeNull();
@@ -352,7 +352,7 @@ describe("goods receipt auto-reports the lego operation", () => {
 
     const receipt = await purchaseService.receiveGoods(ioOrder.id, row.id, { quantity: 50 }, fixture.user.id);
     expect(receipt.operationReport).toEqual({ ok: true });
-    expect(receipt.orderStatus).toBe("received"); // the IO row itself is fully received…
+    expect(receipt.orderStatus).toBe("closed"); // the IO row itself is fully received (and the order closed)…
     const operation = await mfgService.getOperation(fixture.legoOp.id);
     expect(operation?.status).toBe("pending"); // …but the operation is not covered.
     expect(operation?.quantityCompleted).toBe("50.0000");

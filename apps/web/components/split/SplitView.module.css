@@ -131,11 +131,35 @@
 .chip:hover {
   background: var(--color-divider);
 }
-.chip[aria-checked="true"] {
+.chip[aria-pressed="true"] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
+}
+
+/* Visa avslutade: its own line under the chips. */
+.finishedToggle {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.finishedToggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.chipDivider {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--color-border);
 }
 
 .rows {
@@ -212,6 +236,17 @@
 }
 .status[data-tone="draft"] {
   color: var(--status-draft-text);
+}
+.rowNote {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rowNote[data-tone="delayed"] {
+  color: var(--status-delayed-text);
 }
 
 .note {

@@ -6,6 +6,8 @@ import { listPageView } from "../../../lib/listViewServer";
 import { PurchaseOrdersPageClient } from "../../../components/purchase/PurchaseOrdersPageClient";
 import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
+import { withFinishedRule } from "../../../lib/listFilter";
+import { PURCHASE_ORDER_FILTER } from "../../../lib/statusFilters";
 import { getListPageSize } from "../../../lib/listPageSize";
 import type { Paged, PurchaseOrder } from "../../../lib/types";
 
@@ -17,7 +19,7 @@ export default async function PurchaseOrdersPage(props: { searchParams: Promise<
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const orders = await apiGet<Paged<PurchaseOrder>>(
-    `/api/v1/purchase-orders${listApiQuery(searchParams, ["status", "kind"], pageSize)}`,
+    `/api/v1/purchase-orders${listApiQuery(withFinishedRule(PURCHASE_ORDER_FILTER, searchParams), ["status", "kind"], pageSize)}`,
     cookieHeader
   );
 

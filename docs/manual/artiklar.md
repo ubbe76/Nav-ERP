@@ -4,7 +4,7 @@ Artikelregistret är grunden för allt annat i Nav|ERP — lager, inköp, förs�
 
 ## Artikelregistret
 
-Menyvalet **Artiklar** öppnar modulens sida med artikelregistret, importen och grunddata i ett rutnät. **Artiklar → Artikelregister** (`/artiklar/register`) listar alla artiklar med nummer, benämning, typ, **ABC** (klassen i [ABC-analysen](/hjalp/lager#abc-analys), **–** utanför klassningen), varugrupp, artikelkod, standardenhet, standardkostnad och status. Filtret **Alla ABC-klasser** begränsar listan till klass A, B eller C. Med rader markerade kan du lägga dem i din personliga lista med **Kopiera (N)**, och **Kopiera alla träffar** tar hela sökningen — se [Kopierat](#kopierat). Sök på artikelnummer/benämning och filtrera på **artikeltyp**, **varugrupp** eller **artikelkod** (se [Artikelkoder](#artikelkoder)).
+Menyvalet **Artiklar** öppnar modulens sida med artikelregistret, importen och grunddata i ett rutnät. **Artiklar → Artikelregister** (`/artiklar/register`) listar alla artiklar med nummer, benämning, typ, **ABC** (klassen i [ABC-analysen](/hjalp/lager#abc-analys), **–** utanför klassningen), varugrupp, artikelkod, standardenhet, standardkostnad och status. Filtret **Alla ABC-klasser** begränsar listan till klass A, B eller C. Med rader markerade kan du lägga dem i din personliga lista med **Kopiera (N)**, och **Kopiera alla träffar** tar hela sökningen — se [Kopierat](#kopierat). Sök på artikelnummer/benämning och filtrera på **artikeltyp**, **varugrupp** eller **artikelkod** (se [Artikelkoder](#artikelkoder)). I typfiltret kan du välja flera typer samtidigt, till exempel **Köpt** och **Tillverkad**.
 
 Sökfältet går att använda helt från tangentbordet:
 

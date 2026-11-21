@@ -30,7 +30,10 @@ describe("list query schemas", () => {
   });
 
   it("validates article type and groupId filters", () => {
-    expect(listArticlesQuerySchema.parse({ type: "manufactured" }).type).toBe("manufactured");
+    // One or several types (the register's chips and Typ menu, 2026-11-21).
+    expect(listArticlesQuerySchema.parse({ type: "manufactured" }).type).toEqual(["manufactured"]);
+    expect(listArticlesQuerySchema.parse({ type: "manufactured,service" }).type).toEqual(["manufactured", "service"]);
+    expect(listArticlesQuerySchema.parse({ type: "" }).type).toBeUndefined();
     expect(() => listArticlesQuerySchema.parse({ type: "bogus" })).toThrow();
     expect(() => listArticlesQuerySchema.parse({ groupId: "not-a-uuid" })).toThrow();
   });

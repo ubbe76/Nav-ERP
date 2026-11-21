@@ -1,6 +1,6 @@
 // Lista och kort (Programramen, steg 2): the narrow list beside a card —
 // for each function, where its rows come from (the list's own endpoint with
-// search/limit/offset and the filter's query), the quick filters, and how a
+// search/limit/offset and the filter's query), the filter chips, and how a
 // row reads on two lines (name and amount, number · date and status). Keyed
 // by the list page's path, which is also the function (lib/navFunctions.ts).
 import {
@@ -22,6 +22,18 @@ import {
   type SupplierInvoice,
 } from "../../lib/types";
 import { formatMoney, formatQuantity } from "../../lib/format";
+import { SUPPLIER_CONFIRMATION_TEXT } from "../../lib/overviewCardRows";
+import type { MultiFilter } from "../../lib/listFilter";
+import {
+  ARTICLE_TYPE_FILTER,
+  INQUIRY_FILTER,
+  INVOICE_FILTER,
+  MANUFACTURING_ORDER_FILTER,
+  PURCHASE_ORDER_FILTER,
+  QUOTE_FILTER,
+  SALES_ORDER_FILTER,
+  SUPPLIER_INVOICE_FILTER,
+} from "../../lib/statusFilters";
 
 export type SplitTone = "running" | "delayed" | "stopped" | "done" | "draft";
 
@@ -32,6 +44,9 @@ export interface SplitRow {
   amount?: string | null;
   secondary: string;
   status?: { label: string; tone: SplitTone } | null;
+  // A third line under the two, for what the status does not say — an
+  // inköpsorder's supplier confirmation (Bekräftad av leverantör).
+  note?: { label: string; tone?: SplitTone } | null;
 }
 
 export interface SplitListConfig {
@@ -43,8 +58,10 @@ export interface SplitListConfig {
   newHref?: string;
   newLabel: string;
   searchPlaceholder: string;
-  // The first is Alla (no query).
-  filters: { label: string; query: string }[];
+  // The chips under the search: Alla, the filter's groups (Öppna), one per
+  // status (or article type) and what narrows them (Sen) — several at once,
+  // the same definition as the table's Status menu. None on the registers.
+  filter?: MultiFilter;
   row: (raw: unknown) => SplitRow;
 }
 
@@ -87,12 +104,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/forsaljning/ordrar?ny=1",
     newLabel: "Ny kundorder",
     searchPlaceholder: "Sök i kundorder",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Öppna", query: "status=confirmed,in_production" },
-      { label: "Levererade", query: "status=delivered" },
-      { label: "Fakturerade", query: "status=invoiced" },
-    ],
+    filter: SALES_ORDER_FILTER,
     row: salesOrder("order"),
   },
   "/forsaljning/offerter": {
@@ -103,12 +115,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/forsaljning/offerter?ny=1",
     newLabel: "Ny offert",
     searchPlaceholder: "Sök i offerter",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Öppna", query: "status=quote" },
-      { label: "Order", query: "status=ordered" },
-      { label: "Förlorade", query: "status=lost" },
-    ],
+    filter: QUOTE_FILTER,
     row: salesOrder("quote"),
   },
   "/inkop/ordrar": {
@@ -119,12 +126,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/inkop/ordrar?ny=1",
     newLabel: "Ny inköpsorder",
     searchPlaceholder: "Sök i inköpsorder",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Öppna", query: "status=draft,confirmed,partially_received" },
-      { label: "Mottagna", query: "status=received" },
-      { label: "Stängda", query: "status=closed" },
-    ],
+    filter: PURCHASE_ORDER_FILTER,
     row: (raw) => {
       const o = raw as PurchaseOrder;
       const pill = PURCHASE_ORDER_STATUS_PILL[o.status];
@@ -134,6 +136,16 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
         primary: o.supplierName,
         secondary: join(o.orderNumber, `lev ${shortDate(o.nextDeliveryDate ?? o.expectedDeliveryDate)}`),
         status: pill ? { label: pill.label, tone: pill.status } : null,
+        // Both, as the table and Inleveranser denna vecka show them: the
+        // status says whether the order is sent, this whether the supplier
+        // has given its dates (null once nothing is left to receive). Delvis
+        // and Nej stand out, as in the table's column.
+        note: o.supplierConfirmation
+          ? {
+              label: SUPPLIER_CONFIRMATION_TEXT[o.supplierConfirmation],
+              tone: o.supplierConfirmation === "confirmed" ? undefined : "delayed",
+            }
+          : null,
       };
     },
   },
@@ -145,12 +157,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/inkop/forfragningar?ny=1",
     newLabel: "Ny förfrågan",
     searchPlaceholder: "Sök i förfrågningar",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Utkast", query: "status=draft" },
-      { label: "Skickade", query: "status=sent" },
-      { label: "Besvarade", query: "status=answered" },
-    ],
+    filter: INQUIRY_FILTER,
     row: (raw) => {
       const q = raw as Inquiry;
       const pill = INQUIRY_STATUS_PILL[q.status];
@@ -171,12 +178,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/tillverkning/ordrar?ny=1",
     newLabel: "Ny tillverkningsorder",
     searchPlaceholder: "Sök i tillverkningsordrar",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Planerade", query: "status=planned" },
-      { label: "Frisläppta", query: "status=released" },
-      { label: "Pågår", query: "status=in_progress" },
-    ],
+    filter: MANUFACTURING_ORDER_FILTER,
     row: (raw) => {
       const m = raw as ManufacturingOrder;
       const pill = MANUFACTURING_ORDER_STATUS_PILL[m.status];
@@ -198,12 +200,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/forsaljning/fakturor?ny=1",
     newLabel: "Ny faktura",
     searchPlaceholder: "Sök i fakturor",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Utkast", query: "status=draft" },
-      { label: "Utfärdade", query: "status=issued" },
-      { label: "Betalda", query: "status=paid" },
-    ],
+    filter: INVOICE_FILTER,
     row: (raw) => {
       const f = raw as Invoice;
       const pill = INVOICE_STATUS_PILL[f.status];
@@ -225,12 +222,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/inkop/leverantorsfakturor?ny=1",
     newLabel: "Ny leverantörsfaktura",
     searchPlaceholder: "Sök i leverantörsfakturor",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Utkast", query: "status=draft" },
-      { label: "Godkända", query: "status=approved" },
-      { label: "Betalda", query: "status=paid" },
-    ],
+    filter: SUPPLIER_INVOICE_FILTER,
     row: (raw) => {
       const f = raw as SupplierInvoice;
       const pill = SUPPLIER_INVOICE_STATUS_PILL[f.status];
@@ -252,12 +244,7 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/artiklar/register?ny=1",
     newLabel: "Ny artikel",
     searchPlaceholder: "Sök i artikelregister",
-    filters: [
-      { label: "Alla", query: "" },
-      { label: "Köpta", query: "type=purchased" },
-      { label: "Tillverkade", query: "type=manufactured" },
-      { label: "Tjänster", query: "type=service" },
-    ],
+    filter: ARTICLE_TYPE_FILTER,
     row: (raw) => {
       const a = raw as Article;
       return {
@@ -278,7 +265,6 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/kunder?ny=1",
     newLabel: "Ny kund",
     searchPlaceholder: "Sök i kunder",
-    filters: [{ label: "Alla", query: "" }],
     row: (raw) => {
       const c = raw as Customer;
       return {
@@ -298,7 +284,6 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     newHref: "/leverantorer?ny=1",
     newLabel: "Ny leverantör",
     searchPlaceholder: "Sök i leverantörer",
-    filters: [{ label: "Alla", query: "" }],
     row: (raw) => {
       const s = raw as Supplier;
       return {

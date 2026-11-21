@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { articleCodes, db, units } from "@navet/db";
-import { createArticleSchema, updateArticleSchema, createArticleGroupSchema, updateArticleGroupSchema } from "@navet/shared";
+import { createArticleSchema, updateArticleSchema, createArticleGroupSchema, updateArticleGroupSchema, listArticlesQuerySchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { explodeBom } from "../src/modules/article/service/bom-explosion.js";
 import {
@@ -446,9 +446,16 @@ describe("article service — list search/filter/pagination", () => {
   it("filters by type and group", async () => {
     const { group } = await seedArticles();
 
-    const purchased = await service.listArticles({ type: "purchased", limit: 50, offset: 0 });
+    const purchased = await service.listArticles(parsed(listArticlesQuerySchema, { type: "purchased" }));
     expect(purchased.total).toBe(1);
     expect(purchased.rows[0]?.articleNumber).toBe("SKRUV-1");
+
+    // Several types at once (the register's chips and Typ menu, 2026-11-21).
+    const both = await service.listArticles(parsed(listArticlesQuerySchema, { type: "purchased,manufactured" }));
+    expect(both.total).toBe(3);
+    const services = await service.listArticles(parsed(listArticlesQuerySchema, { type: "service" }));
+    expect(services.total).toBe(0);
+    expect(listArticlesQuerySchema.safeParse({ type: "purchased,phantom" }).success).toBe(false);
 
     const grouped = await service.listArticles({ groupId: group.id, limit: 50, offset: 0 });
     expect(grouped.total).toBe(1);

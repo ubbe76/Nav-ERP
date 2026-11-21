@@ -9,7 +9,8 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewPurchaseOrderForm } from "./NewPurchaseOrderForm";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { FINISHED_HIDDEN_HINT, ListExportLink, ListFilterSelect, ListToolbar, Pagination, ListMultiFilter, useFinishedHidden } from "../ui/ListControls";
+import { PURCHASE_ORDER_FILTER } from "../../lib/statusFilters";
 import { useListColumns } from "../ui/ListColumns";
 import { PURCHASE_ORDER_STATUS_PILL, type Paged, type PurchaseOrder, type SupplierConfirmation } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
@@ -31,6 +32,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
   // ?ny=1 (the "+ Ny inköpsorder" link on the Inköp page) opens the form at once.
   const [modalOpen, setModalOpen] = useState(useSearchParams().get("ny") === "1");
 
+  const finishedHidden = useFinishedHidden(PURCHASE_ORDER_FILTER);
   const view = useListColumns([
     { key: "orderNumber", label: "Ordernummer", width: "140px" },
     { key: "supplierName", label: "Leverantör", width: "1fr" },
@@ -59,17 +61,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
       </div>
 
       <ListToolbar placeholder="Sök ordernummer eller leverantör…">
-        <ListFilterSelect
-          param="status"
-          allLabel="Alla statusar"
-          ariaLabel="Filtrera på status"
-          // Sen (late) is derived from the rows, not a stored status — the
-          // API takes it in the same param.
-          options={[
-            ...Object.entries(PURCHASE_ORDER_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label })),
-            { value: "late", label: "Sen" },
-          ]}
-        />
+        <ListMultiFilter filter={PURCHASE_ORDER_FILTER} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
         <ListFilterSelect
           param="kind"
           allLabel="Alla ordertyper"
@@ -79,7 +71,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
             { value: "regular", label: "Övriga inköp" },
           ]}
         />
-        <ListExportLink endpoint="/api/v1/purchase-orders/csv" />
+        <ListExportLink endpoint="/api/v1/purchase-orders/csv" filter={PURCHASE_ORDER_FILTER} />
         {view.chooser}
       </ListToolbar>
 
@@ -88,7 +80,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
         onColumnResize={view.onColumnResize}
         {...view.reorder}
         rows={orders.rows}
-        emptyText="Inga ordrar matchar sökningen"
+        emptyText={`Inga ordrar matchar sökningen${finishedHidden ? `. ${FINISHED_HIDDEN_HINT}` : ""}`}
         renderCell={(order, key) => {
           switch (key) {
             case "orderNumber":

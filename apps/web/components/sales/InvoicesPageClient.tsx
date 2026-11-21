@@ -9,7 +9,8 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { ListExportLink, ListToolbar, Pagination, ListMultiFilter } from "../ui/ListControls";
+import { INVOICE_FILTER } from "../../lib/statusFilters";
 import { useListColumns } from "../ui/ListColumns";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
@@ -90,12 +91,7 @@ export function InvoicesPageClient({
       </div>
 
       <ListToolbar placeholder="Sök fakturanr eller kund…">
-        <ListFilterSelect
-          param="status"
-          allLabel="Alla statusar"
-          ariaLabel="Filtrera på status"
-          options={Object.entries(INVOICE_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
-        />
+        <ListMultiFilter filter={INVOICE_FILTER} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
         <ListExportLink endpoint="/api/v1/invoices/csv" />
         {view.chooser}
       </ListToolbar>

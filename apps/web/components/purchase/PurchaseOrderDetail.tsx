@@ -77,13 +77,19 @@ interface PurchaseOrderDetailProps {
 }
 
 // The status steps (Programramen steg 3); Avbruten stands outside the flow.
+// The last receipt closes the order (Stängd automatiskt, 2026-11-21), so
+// Mottagen is a step only on an order that holds it (an older one, or one
+// set by Ändra status manuellt — Stäng order closes it).
 const PURCHASE_STEPS = ["draft", "confirmed", "partially_received", "received", "closed"] as const;
 
 function purchaseSteps(order: PurchaseOrder) {
   const pill = PURCHASE_ORDER_STATUS_PILL[order.status];
   if (order.status === "cancelled") return { steps: [], current: null, outside: { status: pill.status, label: pill.label } };
   return {
-    steps: PURCHASE_STEPS.map((key) => ({ key, label: PURCHASE_ORDER_STATUS_PILL[key].label })),
+    steps: PURCHASE_STEPS.filter((key) => key !== "received" || order.status === "received").map((key) => ({
+      key,
+      label: PURCHASE_ORDER_STATUS_PILL[key].label,
+    })),
     current: order.status,
     outside: null,
   };

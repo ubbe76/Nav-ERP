@@ -1124,6 +1124,14 @@ export function createPurchaseService(
     documentVatCode(book, { id: defaultVatCodeId }, "purchase", { allowInactive: defaultVatCodeId === current });
   }
 
+  // Stängd automatiskt: a row change on a partially received order that
+  // leaves nothing to receive closes it (recomputePartiallyReceived) — said
+  // in the order's history like the receipt that does it.
+  async function logAutoClosed(orderNumber: string, before: string, after: string, userId: string | null) {
+    if (after !== "closed" || before === "closed") return;
+    await audit.log({ entityType: "purchase_order", entityId: orderNumber, action: "closed_automatically", userId });
+  }
+
   return {
     async createSupplier(input: CreateSupplierInput) {
       await validateRegisterRefs(input);
@@ -1804,6 +1812,7 @@ export function createPurchaseService(
           },
           userId: userId ?? null,
         });
+        await logAutoClosed(order.orderNumber, order.status, result.orderStatus, userId ?? null);
         return { row: result.row!, orderStatus: result.orderStatus };
       }
       switch (result.reason) {
@@ -1840,6 +1849,7 @@ export function createPurchaseService(
             : null,
           userId: userId ?? null,
         });
+        await logAutoClosed(order.orderNumber, order.status, result.orderStatus, userId ?? null);
         return { orderStatus: result.orderStatus };
       }
       switch (result.reason) {
@@ -1909,7 +1919,9 @@ export function createPurchaseService(
     ) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
-      if (order.status === "cancelled" || order.status === "closed") {
+      // A closed order can still be sent (as a received one could): the last
+      // receipt closes it now (Stängd automatiskt).
+      if (order.status === "cancelled") {
         throw new InvalidStatusTransitionError(`Cannot email an order in status "${order.status}"`);
       }
       const to = input.to ?? (await repo.supplierOrderDefaults(order.supplierId)).purchaseOrderRecipient;
@@ -2061,6 +2073,16 @@ export function createPurchaseService(
           },
           userId: createdBy,
         });
+        // Stängd automatiskt: the receipt that received the last of the
+        // order closed it — said in the order's history.
+        if (result.orderStatus === "closed") {
+          await audit.log({
+            entityType: "purchase_order",
+            entityId: order?.orderNumber ?? orderId,
+            action: "closed_automatically",
+            userId: createdBy,
+          });
+        }
         // Lego row: the receipt is what "the operation happened" means, so
         // it auto-reports the linked MO operation — every receipt reports the
         // received quantity, and the operation only flips to done once
@@ -2164,7 +2186,7 @@ export function createPurchaseService(
             throw new PurchaseReceiptAlreadyUndoneError();
           case "invalid_status":
             throw new InvalidStatusTransitionError(
-              "Receipts can only be undone while the order is partially received or received"
+              "Receipts can only be undone while the order is partially received, received or closed"
             );
           case "insufficient_stock":
             throw new PurchaseReceiptStockMissingError(result.available, result.required);

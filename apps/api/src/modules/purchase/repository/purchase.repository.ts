@@ -226,8 +226,9 @@ async function bumpRevision(tx: Tx, orderId: string) {
 }
 
 // A row edit/delete on a partially received order can make every remaining
-// row fully covered — mirror receiveGoods' status recomputation. Other
-// statuses are left untouched (the service guards which ones are editable).
+// row fully covered — mirror receiveGoods' status recomputation (all
+// received ⇒ closed). Other statuses are left untouched (the service guards
+// which ones are editable).
 async function recomputePartiallyReceived(tx: Tx, orderId: string): Promise<PurchaseOrderStatus> {
   // Locked: a receipt on another row holds this lock while it recomputes the
   // status, so the two never write a status from a stale set of rows (and a
@@ -238,19 +239,24 @@ async function recomputePartiallyReceived(tx: Tx, orderId: string): Promise<Purc
   const allReceived =
     allRows.length > 0 && allRows.every((r) => Number(r.quantityReceived) >= Number(r.quantityOrdered));
   if (!allReceived) return "partially_received";
-  await tx.update(purchaseOrders).set({ status: "received", updatedAt: new Date() }).where(eq(purchaseOrders.id, orderId));
-  return "received";
+  await tx.update(purchaseOrders).set({ status: "closed", updatedAt: new Date() }).where(eq(purchaseOrders.id, orderId));
+  return "closed";
 }
 
 // Receipt (and its undo): the order status follows what the rows hold —
-// everything received ⇒ received, something ⇒ partially received, nothing
-// (every receipt undone) ⇒ back to confirmed.
+// everything received ⇒ closed, something ⇒ partially received, nothing
+// (every receipt undone) ⇒ back to confirmed. Stängd automatiskt
+// (2026-11-21, the user: "När allt är inlevererat på en order ska den
+// automatiskt stängas"): the last receipt closes the order — Mottagen is
+// no longer reached by a receipt (old orders and Ändra status manuellt can
+// still hold it, and Stäng order still closes those) — and Ångra
+// inleverans on a closed order opens it again (the user's choice).
 async function recomputeReceiptStatus(tx: Tx, orderId: string): Promise<PurchaseOrderStatus> {
   const allRows = await tx.select().from(purchaseOrderRows).where(eq(purchaseOrderRows.purchaseOrderId, orderId));
   const allReceived =
     allRows.length > 0 && allRows.every((r) => Number(r.quantityReceived) >= Number(r.quantityOrdered));
   const anyReceived = allRows.some((r) => Number(r.quantityReceived) > 0);
-  const status: PurchaseOrderStatus = allReceived ? "received" : anyReceived ? "partially_received" : "confirmed";
+  const status: PurchaseOrderStatus = allReceived ? "closed" : anyReceived ? "partially_received" : "confirmed";
   await tx.update(purchaseOrders).set({ status, updatedAt: new Date() }).where(eq(purchaseOrders.id, orderId));
   return status;
 }
@@ -1706,9 +1712,10 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
         if (!row) return { ok: false, reason: "receipt_not_found" };
 
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
-        // A closed order is finished business — and a received/partially
-        // received one is the only kind a live receipt can sit on.
-        if (!order || (order.status !== "partially_received" && order.status !== "received")) {
+        // A live receipt sits on a partially received, received or closed
+        // order — closed is what the last receipt makes it (Stängd
+        // automatiskt), and undoing a receipt opens it again.
+        if (!order || (order.status !== "partially_received" && order.status !== "received" && order.status !== "closed")) {
           return { ok: false, reason: "invalid_status" };
         }
 

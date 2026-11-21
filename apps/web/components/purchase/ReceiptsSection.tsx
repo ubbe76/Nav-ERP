@@ -111,7 +111,9 @@ export function ReceiptsSection({
   );
   const printable = [...printEntryById.values()].filter((e): e is ReceiptPrintEntry => e !== null);
   // A closed order is finished business; the API refuses it too.
-  const canUndo = can(["inkop"]) && (orderStatus === "partially_received" || orderStatus === "received");
+  // Closed too: the last receipt closes the order (Stängd automatiskt), and
+  // undoing one opens it again.
+  const canUndo = can(["inkop"]) && (orderStatus === "partially_received" || orderStatus === "received" || orderStatus === "closed");
 
   async function undo(receipt: PurchaseReceipt) {
     const row = receipt.purchaseOrderRowId ? rowById.get(receipt.purchaseOrderRowId) : undefined;

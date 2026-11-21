@@ -499,8 +499,9 @@ describe("Rapportera avsändning (createDispatch)", () => {
       { quantity: 10 },
       f.user.id,
     );
+    // The last receipt closes the order (Stängd automatiskt).
     expect((await purchaseService.getPurchaseOrder(f.order.id))!.status).toBe(
-      "received",
+      "closed",
     );
     await expect(
       purchaseService.createDispatch(
@@ -1060,7 +1061,7 @@ describe("the dispatch routes (inject, real service)", () => {
       { quantity: 10 },
       f.user.id,
     );
-    await purchaseService.close(f.order.id);
+    // The last receipt closed it (Stängd automatiskt).
     const closed = await server.inject({
       method: "POST",
       url: `/purchase-orders/${f.order.id}/dispatches`,

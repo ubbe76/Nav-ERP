@@ -9,9 +9,10 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewQuoteForm } from "./NewQuoteForm";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { FINISHED_HIDDEN_HINT, ListExportLink, ListToolbar, Pagination, ListMultiFilter, useFinishedHidden } from "../ui/ListControls";
+import { QUOTE_FILTER, SALES_ORDER_FILTER } from "../../lib/statusFilters";
 import { useListColumns } from "../ui/ListColumns";
-import { SALES_ORDER_STATUS_PILL, type Paged, type SalesOrder, type SalesOrderStatus } from "../../lib/types";
+import { SALES_ORDER_STATUS_PILL, type Paged, type SalesOrder } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/forsaljning/ordrar/page.module.css";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
@@ -19,8 +20,6 @@ import { HelpLink } from "../ui/HelpLink";
 
 // One list component for both routines: kind "quote" = /forsaljning/offerter,
 // "order" = /forsaljning/ordrar (the page passes kind to the API as ?kind=).
-const QUOTE_STATUSES: SalesOrderStatus[] = ["quote", "ordered", "lost", "cancelled"];
-const ORDER_STATUSES: SalesOrderStatus[] = ["confirmed", "in_production", "delivered", "invoiced", "cancelled"];
 
 export function SalesOrdersPageClient({
   orders,
@@ -35,7 +34,8 @@ export function SalesOrdersPageClient({
   const [modalOpen, setModalOpen] = useState(useSearchParams().get("ny") === "1");
   const isQuote = kind === "quote";
   const detailBase = isQuote ? "/forsaljning/offerter" : "/forsaljning/ordrar";
-  const statuses = isQuote ? QUOTE_STATUSES : ORDER_STATUSES;
+  const statusFilter = isQuote ? QUOTE_FILTER : SALES_ORDER_FILTER;
+  const finishedHidden = useFinishedHidden(statusFilter);
   const view = useListColumns([
     { key: "orderNumber", label: isQuote ? "Offert" : "Ordernummer", width: "140px" },
     { key: "customerName", label: "Kund", width: "1fr" },
@@ -70,18 +70,8 @@ export function SalesOrdersPageClient({
       </div>
 
       <ListToolbar placeholder={isQuote ? "Sök offertnummer eller kund…" : "Sök ordernummer eller kund…"}>
-        <ListFilterSelect
-          param="status"
-          allLabel="Alla statusar"
-          ariaLabel="Filtrera på status"
-          // Sen (late) is derived from the rows, not a stored status — the
-          // API takes it in the same param. Never on quotes.
-          options={[
-            ...statuses.map((value) => ({ value, label: SALES_ORDER_STATUS_PILL[value].label })),
-            ...(isQuote ? [] : [{ value: "late", label: "Sen" }]),
-          ]}
-        />
-        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}`} />
+        <ListMultiFilter filter={statusFilter} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
+        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}`} filter={statusFilter} />
         {view.chooser}
       </ListToolbar>
 
@@ -90,7 +80,7 @@ export function SalesOrdersPageClient({
         onColumnResize={view.onColumnResize}
         {...view.reorder}
         rows={orders.rows}
-        emptyText={isQuote ? "Inga offerter matchar sökningen" : "Inga ordrar matchar sökningen"}
+        emptyText={isQuote ? "Inga offerter matchar sökningen" : `Inga ordrar matchar sökningen${finishedHidden ? `. ${FINISHED_HIDDEN_HINT}` : ""}`}
         renderCell={(order, key) => {
           switch (key) {
             case "orderNumber":

@@ -718,8 +718,9 @@ describe("B6 — statusskrivningar bara från den lästa statusen", () => {
       },
       () => purchaseService.updateRow(f.order.id, first!.id, { quantity: 3, bumpRevision: false })
     );
-    expect(editing.ok && editing.value?.orderStatus).toBe("received");
-    expect(await orderStatus(f.order.id)).toBe("received");
+    // Nothing left to receive ⇒ closed (Stängd automatiskt, 2026-11-21).
+    expect(editing.ok && editing.value?.orderStatus).toBe("closed");
+    expect(await orderStatus(f.order.id)).toBe("closed");
   });
 
   // Makulera read "sent" and cancelled an inquiry that had become an order.

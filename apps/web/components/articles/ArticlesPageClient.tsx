@@ -10,7 +10,8 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Input, Select } from "../ui/Field";
 import { FormError, FormNotice } from "../ui/Form";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation } from "../ui/ListControls";
+import { ListExportLink, ListFilterSelect, ListToolbar, Pagination, useListNavigation, ListMultiFilter } from "../ui/ListControls";
+import { ARTICLE_TYPE_FILTER } from "../../lib/statusFilters";
 import { useListColumns } from "../ui/ListColumns";
 import buttonStyles from "../ui/Button.module.css";
 import { NewArticleForm } from "./NewArticleForm";
@@ -442,12 +443,7 @@ export function ArticlesPageClient({
       </div>
 
       <ListToolbar placeholder="Sök artikelnummer eller benämning…" onSearchKeyDown={onSearchKeyDown}>
-        <ListFilterSelect
-          param="type"
-          allLabel="Alla typer"
-          ariaLabel="Filtrera på artikeltyp"
-          options={Object.entries(ARTICLE_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
-        />
+        <ListMultiFilter filter={ARTICLE_TYPE_FILTER} allLabel="Alla typer" ariaLabel="Filtrera på artikeltyp" />
         <ListFilterSelect
           param="groupId"
           allLabel="Alla varugrupper"

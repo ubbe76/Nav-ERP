@@ -42,7 +42,8 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   // address, else the supplier's E-post.
   const defaultTo = order.defaultRecipient ?? "";
   const drawingCount = await countDrawings(rows.map((r) => r.articleId), cookieHeader);
-  const mailable = order.status !== "cancelled" && order.status !== "closed";
+  // A closed order can still be sent: the last receipt closes it now.
+  const mailable = order.status !== "cancelled";
 
   return (
     <AppShell>
