@@ -162,7 +162,7 @@ describe("purchase — order rows in alternative units", () => {
     const [row] = await purchaseService.listRows(order.id);
 
     const result = await purchaseService.receiveGoods(order.id, row!.id, { quantity: 100 }, user.id);
-    expect(result.orderStatus).toBe("received");
+    expect(result.orderStatus).toBe("closed");
 
     const balances = await stockService.balancesForArticles([article.id]);
     expect(Number(balances[0]?.quantityOnHand)).toBe(100);

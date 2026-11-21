@@ -298,7 +298,7 @@ export function createArticleRepository(db: Db) {
       const pattern = ilikePattern(query.search);
       conditions.push(or(ilike(articles.articleNumber, pattern), ilike(articles.name, pattern)));
     }
-    if (query.type) conditions.push(eq(articles.type, query.type));
+    if (query.type) conditions.push(inArray(articles.type, query.type));
     if (query.groupId) conditions.push(eq(articles.groupId, query.groupId));
     if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
     const numberRanges = articleNumberRangesCondition(query.articleNumberRanges);

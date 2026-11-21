@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type KeyboardEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Checkbox, Input } from "./Field";
 import { LIST_PAGE_SIZE, LIST_PAGE_SIZE_OPTIONS } from "../../lib/listQuery";
@@ -9,6 +9,20 @@ import { confirmLeave } from "../../lib/unsavedGuard";
 import styles from "./ListControls.module.css";
 import { ExportMenu } from "./ExportMenu";
 import { ListViewToggle } from "../split/ListViewToggle";
+import {
+  SHOW_FINISHED_PARAM,
+  filterParamValue,
+  filterSummary,
+  groupChosen,
+  parseFilterValue,
+  showsFinished,
+  toggleFilterGroup,
+  toggleFilterValue,
+  visibleOptions,
+  withFinishedRule,
+  withoutFinished,
+  type MultiFilter,
+} from "../../lib/listFilter";
 
 // Återkoppling (Nav som program, punkt 7): while a list's new search, filter
 // or page is on its way, <html data-list-pending> fades the table
@@ -69,6 +83,9 @@ export function useListNavigation() {
   return {
     params: searchParams,
     setFilter: (key: string, value: string | null) => apply({ [key]: value }, true),
+    // Several params in one navigation (Visa avslutade off also drops the
+    // finished statuses from the choice).
+    setFilters: (updates: Record<string, string | null>) => apply(updates, true),
     setPage: (page: number, skipGuard = false) => apply({ page: page <= 1 ? null : String(page) }, false, skipGuard),
   };
 }
@@ -196,6 +213,175 @@ export function ListFilterSelect({
   );
 }
 
+// Flerval (2026-11-21): a status (or type) filter where several values can
+// be chosen at once — a button saying what is chosen ("Alla statusar",
+// "Öppna", "Utkast, Bekräftad") and a panel of checkboxes: the filter's
+// groups (Öppna), its statuses and, apart, what narrows them (Sen). The
+// same definition draws the narrow list's chips (lib/statusFilters.ts).
+// Each click applies at once; the chosen values are kept here too, so two
+// quick clicks build on each other before the address has caught up.
+export function ListMultiFilter({ filter, allLabel, ariaLabel }: { filter: MultiFilter; allLabel: string; ariaLabel: string }) {
+  const { params, setFilter, setFilters } = useListNavigation();
+  const raw = params.get(filter.param) ?? "";
+  const rawTicked = params.get(SHOW_FINISHED_PARAM) === "true";
+  const [selected, setSelected] = useState(() => parseFilterValue(filter, raw));
+  // Visa avslutade (filter.finished): the box, kept here like the choice.
+  const [ticked, setTicked] = useState(rawTicked);
+  const show = showsFinished(filter, selected, ticked);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+
+  // Follow the address when it changes from outside (favourite, Back).
+  useEffect(() => {
+    setSelected(parseFilterValue(filter, raw));
+  }, [raw]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setTicked(rawTicked);
+  }, [rawTicked]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(e: PointerEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  function choose(next: string[]) {
+    setSelected(next);
+    // A declined leave prompt: back to what the list shows.
+    void setFilter(filter.param, filterParamValue(next) || null).then((applied) => {
+      if (!applied) setSelected(parseFilterValue(filter, raw));
+    });
+  }
+
+  function tick(on: boolean) {
+    const next = on ? selected : withoutFinished(filter, selected);
+    setTicked(on);
+    setSelected(next);
+    void setFilters({ [SHOW_FINISHED_PARAM]: on ? "true" : null, [filter.param]: filterParamValue(next) || null }).then((applied) => {
+      if (!applied) {
+        setTicked(rawTicked);
+        setSelected(parseFilterValue(filter, raw));
+      }
+    });
+  }
+
+  const summary = filterSummary(filter, selected, allLabel);
+  return (
+    <>
+    <div className={styles.multi} ref={wrapRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.multiTrigger}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`${ariaLabel}: ${summary}`}
+        data-chosen={selected.length > 0 || undefined}
+        onClick={() => setOpen(!open)}
+      >
+        <span className={styles.multiSummary}>{summary}</span>
+        <span className={styles.chevron}>▾</span>
+      </button>
+      {open && (
+        <div className={styles.multiPanel} id={panelId} role="group" aria-label={ariaLabel}>
+          {filter.groups && filter.groups.length > 0 && (
+            <>
+              {filter.groups.map((group) => {
+                const state = groupChosen(group, selected);
+                return (
+                  <label key={group.label} className={styles.multiOption}>
+                    <input
+                      type="checkbox"
+                      checked={state === "all"}
+                      ref={(el) => {
+                        if (el) el.indeterminate = state === "some";
+                      }}
+                      onChange={() => choose(toggleFilterGroup(filter, selected, group))}
+                    />
+                    {group.label}
+                  </label>
+                );
+              })}
+              <hr className={styles.multiDivider} />
+            </>
+          )}
+          {visibleOptions(filter, show).map((option) => (
+            <label key={option.value} className={styles.multiOption}>
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={() => choose(toggleFilterValue(filter, selected, option.value))}
+              />
+              {option.label}
+            </label>
+          ))}
+          {filter.narrow && filter.narrow.length > 0 && (
+            <>
+              <hr className={styles.multiDivider} />
+              {filter.narrow.map((option) => (
+                <label key={option.value} className={styles.multiOption}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(option.value)}
+                    onChange={() => choose(toggleFilterValue(filter, selected, option.value))}
+                  />
+                  {option.label}
+                </label>
+              ))}
+              <p className={styles.multiHint}>
+                {filter.narrow.map((o) => o.label).join(" och ")} visar de som är sena bland statusarna du har valt, eller
+                bland alla om ingen status är vald.
+              </p>
+            </>
+          )}
+          <button type="button" className={styles.multiReset} disabled={selected.length === 0} onClick={() => choose([])}>
+            Visa alla
+          </button>
+        </div>
+      )}
+    </div>
+    {filter.finished && (
+      <label className={styles.finishedToggle} title={`Visar även ${finishedLabels(filter)}`}>
+        <Checkbox checked={show} onChange={(e) => tick(e.target.checked)} />
+        {filter.finished.label}
+      </label>
+    )}
+    </>
+  );
+}
+
+// True while the list leaves its finished orders out — the empty text then
+// says where they are.
+export function useFinishedHidden(filter: MultiFilter): boolean {
+  const params = useSearchParams();
+  if (!filter.finished) return false;
+  const chosen = parseFilterValue(filter, params.get(filter.param));
+  return !showsFinished(filter, chosen, params.get(SHOW_FINISHED_PARAM) === "true");
+}
+
+export const FINISHED_HIDDEN_HINT = "Avslutade ordrar visas med Visa avslutade.";
+
+// "stängda och makulerade": the finished statuses as the box's tooltip says them.
+function finishedLabels(filter: MultiFilter): string {
+  const labels = filter.options.filter((o) => filter.finished?.values.includes(o.value)).map((o) => o.label.toLowerCase());
+  return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} och ${labels.at(-1)}` : (labels[0] ?? "");
+}
+
 // A boolean query-param filter rendered as a checkbox — e.g. "Endast
 // förfallna"/overdueOnly, "Visa alla artiklar"/showAll. Absent from the URL
 // when unchecked, "true" when checked (mirrors ListFilterSelect's "" = all).
@@ -215,9 +401,24 @@ export function ListToggleFilter({ param, label }: { param: string; label: strin
 // (see registerListCsvRoute), just never paginated, so `page` is dropped
 // before building the query string. `endpoint` is the CSV route; ExportMenu
 // offers CSV and Excel.
-export function ListExportLink({ endpoint, renameParams }: { endpoint: string; renameParams?: Record<string, string> }) {
+export function ListExportLink({
+  endpoint,
+  renameParams,
+  filter,
+}: {
+  endpoint: string;
+  renameParams?: Record<string, string>;
+  // A list that hides its finished orders (Visa avslutade): the export
+  // asks for the same rows as the list.
+  filter?: MultiFilter;
+}) {
   const searchParams = useSearchParams();
   const params = new URLSearchParams(searchParams.toString());
+  if (filter) {
+    const ruled = withFinishedRule(filter, Object.fromEntries(params.entries()));
+    for (const key of [...params.keys()]) params.delete(key);
+    for (const [key, value] of Object.entries(ruled)) if (typeof value === "string" && value !== "") params.set(key, value);
+  }
   params.delete("page");
   // For pages whose URL param differs from the API's (e.g. ?article= → articleId).
   for (const [from, to] of Object.entries(renameParams ?? {})) {

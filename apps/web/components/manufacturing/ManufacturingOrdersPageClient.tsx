@@ -13,7 +13,8 @@ import { Checkbox } from "../ui/Field";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { FormError, FormNotice } from "../ui/Form";
 import { NewManufacturingOrderForm } from "./NewManufacturingOrderForm";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { FINISHED_HIDDEN_HINT, ListExportLink, ListToolbar, Pagination, ListMultiFilter, useFinishedHidden } from "../ui/ListControls";
+import { MANUFACTURING_ORDER_FILTER } from "../../lib/statusFilters";
 import { useListColumns } from "../ui/ListColumns";
 import { MANUFACTURING_ORDER_STATUS_PILL, type ManufacturingOrder, type Paged } from "../../lib/types";
 import {
@@ -161,6 +162,7 @@ export function ManufacturingOrdersPageClient({
     </span>
   );
 
+  const finishedHidden = useFinishedHidden(MANUFACTURING_ORDER_FILTER);
   const view = useListColumns([
     {
       key: "select",
@@ -208,19 +210,8 @@ export function ManufacturingOrdersPageClient({
       </div>
 
       <ListToolbar placeholder="Sök ordernummer eller artikel…">
-        <ListFilterSelect
-          param="status"
-          allLabel="Alla statusar"
-          ariaLabel="Filtrera på status"
-          // Sen (late) is derived from the plan, not a stored status — the
-          // API takes it in the same param.
-          options={[
-            ...Object.entries(MANUFACTURING_ORDER_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label })),
-            { value: "late", label: "Sen" },
-            { value: "component_late", label: "Halvfabrikat sent" },
-          ]}
-        />
-        {!readOnly && <ListExportLink endpoint="/api/v1/manufacturing-orders/csv" />}
+        <ListMultiFilter filter={MANUFACTURING_ORDER_FILTER} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
+        {!readOnly && <ListExportLink endpoint="/api/v1/manufacturing-orders/csv" filter={MANUFACTURING_ORDER_FILTER} />}
         {view.chooser}
       </ListToolbar>
 
@@ -278,7 +269,7 @@ export function ManufacturingOrdersPageClient({
         onColumnResize={view.onColumnResize}
         {...view.reorder}
         rows={orders.rows}
-        emptyText="Inga ordrar matchar sökningen"
+        emptyText={`Inga ordrar matchar sökningen${finishedHidden ? `. ${FINISHED_HIDDEN_HINT}` : ""}`}
         renderCell={(order, key) => {
           switch (key) {
             case "select": {

@@ -37,7 +37,8 @@ describe("SPLIT_LISTS", () => {
     for (const [key, config] of Object.entries(SPLIT_LISTS)) {
       expect(config.path).toBe(key);
       expect(functionOf(key)).toBe(key);
-      expect(config.filters[0]).toEqual({ label: "Alla", query: "" });
+      // The status (or type) filter is the one the table's menu draws too.
+      if (config.filter) expect(config.filter.options.length).toBeGreaterThan(1);
       expect(config.api.startsWith("/api/v1/")).toBe(true);
     }
     const order = SPLIT_LISTS["/forsaljning/ordrar"]!.row({
@@ -49,6 +50,20 @@ describe("SPLIT_LISTS", () => {
     });
     expect(order).toMatchObject({ href: "/forsaljning/ordrar/o1", primary: "Exempel AB", secondary: "KO-5001 · lev 11-27", status: { label: "Bekräftad" } });
     expect(functionOf(order.href)).toBe("/forsaljning/ordrar");
+    // An inköpsorder shows both its status and the supplier's confirmation
+    // (an Utkast can already carry confirmed dates); none once received.
+    const purchase = SPLIT_LISTS["/inkop/ordrar"]!;
+    const io = { id: "p1", orderNumber: "IO-1020", supplierName: "Exempel AB", nextDeliveryDate: "2026-11-19" };
+    expect(purchase.row({ ...io, status: "draft", supplierConfirmation: "partial" })).toMatchObject({
+      secondary: "IO-1020 · lev 11-19",
+      status: { label: "Utkast" },
+      note: { label: "Leverantören har bekräftat delvis", tone: "delayed" },
+    });
+    expect(purchase.row({ ...io, status: "confirmed", supplierConfirmation: "confirmed" }).note).toEqual({
+      label: "Leverantören har bekräftat",
+      tone: undefined,
+    });
+    expect(purchase.row({ ...io, status: "received", supplierConfirmation: null }).note).toBeNull();
     const article = SPLIT_LISTS["/artiklar/register"]!.row({ id: "a1", articleNumber: "1001", name: "Plåt", type: "purchased", active: true });
     expect(functionOf(`/artiklar/3f2a1b4c-1d2e-4f5a-8b9c-0d1e2f3a4b5c`)).toBe("/artiklar/register");
     // Programramen steg 3: the list's row opens the summary beside the list;

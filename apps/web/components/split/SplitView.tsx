@@ -5,6 +5,18 @@ import Link from "next/link";
 import { Plus, Search } from "lucide-react";
 import { apiFetch } from "../../lib/api";
 import type { Paged } from "../../lib/types";
+import {
+  SHOW_FINISHED_PARAM,
+  effectiveFilterValue,
+  filterParamValue,
+  groupChosen,
+  showsFinished,
+  toggleFilterGroup,
+  toggleFilterValue,
+  visibleOptions,
+  withoutFinished,
+  type MultiFilter,
+} from "../../lib/listFilter";
 import { SPLIT_LISTS, type SplitRow } from "./splitLists";
 import { TableIcon, useSetListView } from "./ListViewToggle";
 import styles from "./SplitView.module.css";
@@ -23,7 +35,10 @@ interface Cached {
   rows: SplitRow[];
   total: number | null;
   search: string;
-  filter: number;
+  // The filter's chosen values (statuses, article types); none = Alla.
+  chosen: string[];
+  // Visa avslutade (the orders' end statuses hidden until ticked).
+  ticked: boolean;
   scrollTop: number;
 }
 
@@ -48,7 +63,9 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
   const config = SPLIT_LISTS[list]!;
   const saved = cache.get(list);
   const [search, setSearch] = useState(saved?.search ?? "");
-  const [filter, setFilter] = useState(saved?.filter ?? 0);
+  const [chosen, setChosen] = useState<string[]>(saved?.chosen ?? []);
+  const [ticked, setTicked] = useState(saved?.ticked ?? false);
+  const chosenKey = `${chosen.join(",")}|${ticked}`;
   const [rows, setRows] = useState<SplitRow[]>(saved?.rows ?? []);
   const [total, setTotal] = useState<number | null>(saved?.total ?? null);
   // A new search or filter: the rows fade until the new ones are in. A
@@ -60,9 +77,26 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
   const scroller = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
-  const state = useRef({ rows, total, search, filter });
-  state.current = { rows, total, search, filter };
+  const state = useRef({ rows, total, search, chosen, ticked });
+  state.current = { rows, total, search, chosen, ticked };
   const setView = useSetListView();
+
+  // The search and the chosen filter values — `api`: as the API is asked
+  // (the finished statuses left out unless shown), otherwise as the table
+  // page's address takes them, so Visa som tabell keeps them.
+  const listQuery = useCallback(
+    ({ search: q, chosen: c, ticked: t }: { search: string; chosen: string[]; ticked: boolean }, api: boolean): [string, string][] => {
+      const out: [string, string][] = [];
+      if (q.trim()) out.push(["search", q.trim()]);
+      const f = config.filter;
+      if (!f) return out;
+      const value = api ? effectiveFilterValue(f, c, showsFinished(f, c, t)) : filterParamValue(c);
+      if (value) out.push([f.param, value]);
+      if (!api && t && f.finished) out.push([SHOW_FINISHED_PARAM, "true"]);
+      return out;
+    },
+    [config]
+  );
 
   // The scroll position is read while the list is on screen (on unmount the
   // ref is already gone: the last known one stays).
@@ -89,13 +123,11 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
       const mine = ++seq.current;
       loading.current = true;
       if (replace) setReplacing(true);
-      const { search: q, filter: f } = state.current;
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-      if (q.trim()) params.set("search", q.trim());
-      const extra = config.filters[f]?.query;
+      for (const [key, value] of listQuery(state.current, true)) params.set(key, value);
       const sep = config.api.includes("?") ? "&" : "?";
       try {
-        const page = await apiFetch<Paged<unknown>>(`${config.api}${sep}${params.toString()}${extra ? `&${extra}` : ""}`);
+        const page = await apiFetch<Paged<unknown>>(`${config.api}${sep}${params.toString()}`);
         if (mine !== seq.current) return;
         const next = page.rows.map(config.row);
         setRows((current) => (offset === 0 ? next : [...current, ...next.filter((r) => !current.some((c) => c.id === r.id))]));
@@ -110,7 +142,7 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
         }
       }
     },
-    [config]
+    [config, listQuery]
   );
 
   // A new search or filter reads the list from the top; the first read on a
@@ -123,7 +155,7 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
     if (!wasFirst && scroller.current) scroller.current.scrollTop = 0;
     const timer = setTimeout(() => void load(0, Math.min(keep, 200), !wasFirst), wasFirst || !search ? 0 : 250);
     return () => clearTimeout(timer);
-  }, [search, filter, load]);
+  }, [search, chosenKey, load]);
 
   // More rows as the end comes into view. The list scrolls on its own beside
   // a card; on a narrow screen it is part of the page (overflow visible), and
@@ -151,7 +183,7 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
   useEffect(() => remember, [remember]);
   useEffect(() => {
     remember();
-  }, [rows, total, search, filter, remember]);
+  }, [rows, total, search, chosen, ticked, remember]);
 
   return (
     <aside className={styles.list} aria-label={config.title}>
@@ -160,7 +192,7 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
         <button
           type="button"
           className={styles.iconButton}
-          onClick={() => setView(list, "table")}
+          onClick={() => setView(list, "table", new URLSearchParams(listQuery(state.current, false)).toString())}
           title="Visa som tabell"
           aria-label="Visa som tabell"
         >
@@ -182,21 +214,17 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
           onChange={(e) => setSearch(e.target.value)}
         />
       </label>
-      {config.filters.length > 1 && (
-        <div className={styles.chips} role="radiogroup" aria-label="Urval">
-          {config.filters.map((f, i) => (
-            <button
-              key={f.label}
-              type="button"
-              role="radio"
-              aria-checked={filter === i}
-              className={styles.chip}
-              onClick={() => setFilter(i)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+      {config.filter && (
+        <FilterChips
+          filter={config.filter}
+          chosen={chosen}
+          ticked={ticked}
+          onChange={setChosen}
+          onTick={(on) => {
+            setTicked(on);
+            if (!on) setChosen((c) => withoutFinished(config.filter!, c));
+          }}
+        />
       )}
       <div className={styles.rows} ref={scroller} onScroll={remember} data-pending={replacing || undefined}>
         {rows.map((row) => (
@@ -217,13 +245,91 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
             ) : (
               <span />
             )}
+            {row.note && (
+              <span className={styles.rowNote} data-tone={row.note.tone}>
+                {row.note.label}
+              </span>
+            )}
           </Link>
         ))}
         {failed && <p className={styles.note}>Kunde inte läsa listan just nu.</p>}
-        {!failed && total === 0 && <p className={styles.note}>Inga träffar.</p>}
+        {!failed && total === 0 && (
+          <p className={styles.note}>
+            Inga träffar.
+            {config.filter?.finished && !showsFinished(config.filter, chosen, ticked) && " Avslutade ordrar visas med Visa avslutade."}
+          </p>
+        )}
         <div ref={sentinel} className={styles.sentinel} />
       </div>
       <div className={styles.foot}>{total === null ? "Hämtar…" : `${rows.length} av ${total}`}</div>
     </aside>
+  );
+}
+
+// Flerval (2026-11-21): Alla clears; a status (or type) chip is chosen on
+// its own and several can be; a group (Öppna) chooses all its statuses and
+// shows as chosen while they all are; what narrows them (Sen) stands apart,
+// after a line — the late ones among the chosen statuses.
+function FilterChips({
+  filter,
+  chosen,
+  ticked,
+  onChange,
+  onTick,
+}: {
+  filter: MultiFilter;
+  chosen: string[];
+  ticked: boolean;
+  onChange: (next: string[]) => void;
+  onTick: (on: boolean) => void;
+}) {
+  const show = showsFinished(filter, chosen, ticked);
+  return (
+    <div className={styles.chips} role="group" aria-label="Urval">
+      <button type="button" aria-pressed={chosen.length === 0} className={styles.chip} onClick={() => onChange([])}>
+        Alla
+      </button>
+      {filter.groups?.map((group) => (
+        <button
+          key={group.label}
+          type="button"
+          aria-pressed={groupChosen(group, chosen) === "all"}
+          className={styles.chip}
+          onClick={() => onChange(toggleFilterGroup(filter, chosen, group))}
+        >
+          {group.label}
+        </button>
+      ))}
+      {visibleOptions(filter, show).map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={chosen.includes(option.value)}
+          className={styles.chip}
+          onClick={() => onChange(toggleFilterValue(filter, chosen, option.value))}
+        >
+          {option.label}
+        </button>
+      ))}
+      {filter.narrow && filter.narrow.length > 0 && <span className={styles.chipDivider} aria-hidden="true" />}
+      {filter.narrow?.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={chosen.includes(option.value)}
+          className={styles.chip}
+          title={`${option.label} bland de valda statusarna (eller bland alla)`}
+          onClick={() => onChange(toggleFilterValue(filter, chosen, option.value))}
+        >
+          {option.label}
+        </button>
+      ))}
+      {filter.finished && (
+        <label className={styles.finishedToggle}>
+          <input type="checkbox" checked={show} onChange={(e) => onTick(e.target.checked)} />
+          {filter.finished.label}
+        </label>
+      )}
+    </div>
   );
 }

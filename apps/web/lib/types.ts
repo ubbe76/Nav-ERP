@@ -5871,6 +5871,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
+  // Inköpsorder: the last receipt (or a row change) left nothing to receive.
+  closed_automatically: "Stängd automatiskt",
   completed: "Färdigrapporterad",
   posted: "Bokförd",
   delivered: "Levererad",

@@ -592,7 +592,7 @@ describe("Materialbrist — lego purchase receipt", () => {
       message: "Det finns inte tillräckligt med ingående delar: Plåt 2 mm (behöver 8 st, tillgängligt 3 st)",
     });
     expect(await rowReceived(f.order.id)).toBe(4);
-    expect(result.orderStatus).toBe("received");
+    expect(result.orderStatus).toBe("closed");
     // The TO side is untouched and the receipt has no report to undo.
     expect(await totalBalance(f.component.id)).toBe(3);
     expect(await liveReports(f.mo.id)).toHaveLength(0);

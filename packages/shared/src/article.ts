@@ -1,6 +1,6 @@
 import { articleBarcodeSchema } from "./scan.js";
 import { z } from "zod";
-import { listQuerySchema } from "./list.js";
+import { listQuerySchema, statusListParam } from "./list.js";
 import { abcClassListParam } from "./abc.js";
 import { parcelKindSchema } from "./shipping.js";
 // vatRates/vatRateSchema moved to vat.ts in B5 — imported here for the
@@ -28,7 +28,9 @@ export const SHELF_LIFE_DAYS_MAX = 36500;
 export type ArticleType = z.infer<typeof articleTypeSchema>;
 
 export const listArticlesQuerySchema = listQuerySchema.extend({
-  type: articleTypeSchema.optional(),
+  // One or several types ("purchased,manufactured" — the register's chips
+  // and Typ menu choose several at once).
+  type: statusListParam(articleTypeSchema.options),
   groupId: z.string().uuid().optional(),
   // Artikelkod (Grunddata) — the list's selection besides the varugrupp.
   articleCodeId: z.string().uuid().optional(),

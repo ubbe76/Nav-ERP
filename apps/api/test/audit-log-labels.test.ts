@@ -55,6 +55,8 @@ describe("händelseloggens etiketter", () => {
     ["action", "operation_moved"],
     ["action", "operation_unlocked"],
     ["action", "run_order_changed"],
+    // Inköpsorder stängd automatiskt vid sista inleveransen (2026-11-21).
+    ["action", "closed_automatically"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

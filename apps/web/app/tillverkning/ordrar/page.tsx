@@ -6,6 +6,8 @@ import { listPageView } from "../../../lib/listViewServer";
 import { ManufacturingOrdersPageClient } from "../../../components/manufacturing/ManufacturingOrdersPageClient";
 import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
+import { withFinishedRule } from "../../../lib/listFilter";
+import { MANUFACTURING_ORDER_FILTER } from "../../../lib/statusFilters";
 import { getListPageSize } from "../../../lib/listPageSize";
 import type { ManufacturingOrder, Paged } from "../../../lib/types";
 
@@ -17,7 +19,7 @@ export default async function ManufacturingOrdersPage(props: { searchParams: Pro
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const orders = await apiGet<Paged<ManufacturingOrder>>(
-    `/api/v1/manufacturing-orders${listApiQuery(searchParams, ["status"], pageSize)}`,
+    `/api/v1/manufacturing-orders${listApiQuery(withFinishedRule(MANUFACTURING_ORDER_FILTER, searchParams), ["status"], pageSize)}`,
     cookieHeader
   );
 

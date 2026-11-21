@@ -244,7 +244,7 @@ describe("the article register's ABC column", () => {
     expect(onlyA.total).toBe(2);
     expect(onlyA.rows.map((r) => r.articleNumber)).toEqual(["P1", "P2"]);
     // The class filter combines with the others (where built once).
-    const cManufactured = await articleService.listArticles({ limit: 50, offset: 0, abcClass: ["B", "C"], type: "manufactured" });
+    const cManufactured = await articleService.listArticles({ limit: 50, offset: 0, abcClass: ["B", "C"], type: ["manufactured"] });
     expect(cManufactured.total).toBe(1);
     expect(cManufactured.rows[0]).toMatchObject({ articleNumber: "M1", abcClass: "B" });
     const paged = await articleService.listArticles({ limit: 1, offset: 1, abcClass: ["A", "B", "C"] });

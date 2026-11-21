@@ -6,7 +6,8 @@ import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
-import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
+import { ListExportLink, ListToolbar, Pagination, ListMultiFilter } from "../ui/ListControls";
+import { INQUIRY_FILTER } from "../../lib/statusFilters";
 import { useListColumns } from "../ui/ListColumns";
 import buttonStyles from "../ui/Button.module.css";
 import { NewInquiryForm } from "./NewInquiryForm";
@@ -47,12 +48,7 @@ export function InquiriesPageClient({ inquiries, pageSize }: { inquiries: Paged<
       </div>
 
       <ListToolbar placeholder="Sök förfrågansnummer eller leverantör…">
-        <ListFilterSelect
-          param="status"
-          allLabel="Alla statusar"
-          ariaLabel="Filtrera på status"
-          options={Object.entries(INQUIRY_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
-        />
+        <ListMultiFilter filter={INQUIRY_FILTER} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
         <ListExportLink endpoint="/api/v1/inquiries/csv" />
         {view.chooser}
       </ListToolbar>

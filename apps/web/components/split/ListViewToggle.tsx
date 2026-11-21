@@ -23,13 +23,14 @@ function readCookie(): string | undefined {
 }
 
 // Sets the view for the list and shows its page in it (the page reads the
-// cookie on the server).
-export function useSetListView(): (list: string, view: ListView) => void {
+// cookie on the server). `query`: the narrow list's search and filter, so
+// Visa som tabell shows the same rows.
+export function useSetListView(): (list: string, view: ListView, query?: string) => void {
   const router = useRouter();
-  return (list, view) => {
+  return (list, view, query) => {
     const value = withListView(readCookie(), list, view);
     document.cookie = `${LIST_VIEW_COOKIE}=${value}; path=/; max-age=31536000; samesite=lax`;
-    router.push(list);
+    router.push(query ? `${list}?${query}` : list);
     router.refresh();
   };
 }

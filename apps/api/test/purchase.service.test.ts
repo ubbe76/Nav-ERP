@@ -205,7 +205,7 @@ describe("purchase service — order lifecycle", () => {
 });
 
 describe("purchase service — goods receipt", () => {
-  it("moves to partially_received on a partial delivery, then received once fully covered", async () => {
+  it("moves to partially_received on a partial delivery, then closes once fully covered", async () => {
     const { order, row, location, user } = await makeOrderWithRow(10);
     await purchaseService.confirm(order.id);
 
@@ -213,9 +213,33 @@ describe("purchase service — goods receipt", () => {
     expect(first.orderStatus).toBe("partially_received");
     expect(first.row.quantityReceived).toBe("4.0000");
 
+    // Stängd automatiskt (2026-11-21): the last receipt closes the order.
     const second = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, user.id);
-    expect(second.orderStatus).toBe("received");
+    expect(second.orderStatus).toBe("closed");
     expect(second.row.quantityReceived).toBe("10.0000");
+    const logged = await db.execute<{ action: string; user_id: string | null }>(
+      sql`SELECT action, user_id FROM audit_log WHERE entity_type = 'purchase_order' AND entity_id = ${order.orderNumber} AND action LIKE 'closed%'`
+    );
+    expect([...logged]).toEqual([{ action: "closed_automatically", user_id: user.id }]);
+  });
+
+  it("Ångra inleverans opens an automatically closed order again, and the next receipt closes it", async () => {
+    const { order, row, location, user } = await makeOrderWithRow(10);
+    await purchaseService.confirm(order.id);
+    const first = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, user.id);
+    const second = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, user.id);
+    expect(second.orderStatus).toBe("closed");
+
+    const undone = await purchaseService.undoReceipt(order.id, second.receiptId, user.id);
+    expect(undone.orderStatus).toBe("partially_received");
+    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("partially_received");
+
+    const again = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 6 }, user.id);
+    expect(again.orderStatus).toBe("closed");
+    // Every receipt undone: back to Bekräftad, as before.
+    await purchaseService.undoReceipt(order.id, again.receiptId, user.id);
+    const last = await purchaseService.undoReceipt(order.id, first.receiptId, user.id);
+    expect(last.orderStatus).toBe("confirmed");
   });
 
   it("rejects receiving more than what remains on the row", async () => {
@@ -266,7 +290,7 @@ describe("purchase service — goods receipt", () => {
         // Exactly on the limit (10 × 1.1 is 11.000000000000002 in floats).
         const result = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 5 }, user.id);
         expect(result.row.quantityReceived).toBe("11.0000");
-        expect(result.orderStatus).toBe("received");
+        expect(result.orderStatus).toBe("closed");
 
         const [balance] = [
           ...(await db.execute<{ q: string }>(
@@ -283,7 +307,7 @@ describe("purchase service — goods receipt", () => {
         await purchaseService.confirm(order.id);
         const result = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 250 }, user.id);
         expect(result.row.quantityReceived).toBe("250.0000");
-        expect(result.orderStatus).toBe("received");
+        expect(result.orderStatus).toBe("closed");
       });
     });
 
@@ -333,15 +357,17 @@ describe("purchase service — goods receipt", () => {
 });
 
 describe("purchase service — closing", () => {
-  it("closes an order only once fully received", async () => {
-    const { order, row, location, user } = await makeOrderWithRow(5);
+  it("Stäng order closes a Mottagen order (an older one, or set by hand) — never an open one", async () => {
+    const { order, user } = await makeOrderWithRow(5);
     await purchaseService.confirm(order.id);
 
     await expect(purchaseService.close(order.id)).rejects.toThrow(InvalidStatusTransitionError);
 
-    await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 5 }, user.id);
+    // A receipt closes the order by itself now; Mottagen is reached by hand.
+    await purchaseService.setStatus(order.id, "received", user.id);
     const closed = await purchaseService.close(order.id);
     expect(closed?.status).toBe("closed");
+    await expect(purchaseService.close(order.id)).rejects.toThrow(InvalidStatusTransitionError);
   });
 });
 
@@ -828,6 +854,16 @@ describe("purchase service — document email", () => {
       InvalidStatusTransitionError
     );
   });
+
+  it("emails a closed purchase order — the last receipt closes it, and it could be sent when Mottagen", async () => {
+    const { order, row, location, user } = await makeOrderWithRow(2);
+    await purchaseService.confirm(order.id);
+    await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 2 }, user.id);
+
+    const sent = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
+    expect(sent?.status).toBe("closed");
+    expect(sentMails).toHaveLength(1);
+  });
 });
 
 // articles.rounding (Avrundning): the service rounds the BASE quantity up to
@@ -910,8 +946,9 @@ describe("purchase service — row editing", () => {
     await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, user.id);
 
     const result = await purchaseService.updateRow(order.id, row.id, { quantity: 4 });
-    expect(result.orderStatus).toBe("received");
-    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("received");
+    expect(result.orderStatus).toBe("closed");
+    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("closed");
+    expect(await auditRows("purchase_order", "closed_automatically")).toHaveLength(1);
   });
 
   it("deletes an untouched row but refuses one with receipts", async () => {
@@ -1467,9 +1504,9 @@ describe("purchase service — audit trail", () => {
     expect(cancelled).toHaveLength(1);
     expect(cancelled[0]!.entityId).toBe(draftOrder.orderNumber);
 
-    const { order, user: user2, row, location } = await makeOrderWithRow(5);
+    const { order, user: user2 } = await makeOrderWithRow(5);
     await purchaseService.confirm(order.id, user2.id);
-    await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 5 }, user2.id);
+    await purchaseService.setStatus(order.id, "received", user2.id);
     await purchaseService.close(order.id, user2.id);
     const closed = await auditRows("purchase_order", "closed");
     expect(closed).toHaveLength(1);

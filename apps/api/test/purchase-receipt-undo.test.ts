@@ -207,16 +207,23 @@ describe("Ångra inleverans — ordinary row", () => {
     expect((await purchaseService.listRows(order.id))[0]!.quantityReceived).toBe("5.0000");
   });
 
-  it("is refused on a closed order and for a receipt of another order", async () => {
+  it("opens a closed order again; is refused on a cancelled order and for a receipt of another order", async () => {
     const { user, location, order, row } = await makeOrder(10);
-    await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 10 }, user.id);
+    // The last receipt closes the order (Stängd automatiskt, 2026-11-21).
+    const received = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 10 }, user.id);
+    expect(received.orderStatus).toBe("closed");
     const [receipt] = await receiptIds(order.id);
 
     const other = await makeOrder(1);
     await expect(purchaseService.undoReceipt(other.order.id, receipt!, user.id)).rejects.toThrow(PurchaseReceiptNotFoundError);
 
-    await purchaseService.close(order.id);
+    // Set by hand (Ändra status manuellt): a cancelled order keeps its receipts.
+    await purchaseService.setStatus(order.id, "cancelled", user.id);
     await expect(purchaseService.undoReceipt(order.id, receipt!, user.id)).rejects.toThrow(InvalidStatusTransitionError);
+
+    await purchaseService.setStatus(order.id, "closed", user.id);
+    const undone = await purchaseService.undoReceipt(order.id, receipt!, user.id);
+    expect(undone.orderStatus).toBe("confirmed");
   });
 
   it("keeps undone receipts out of the article's inleveranslogg", async () => {

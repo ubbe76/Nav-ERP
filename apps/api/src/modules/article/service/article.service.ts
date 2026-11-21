@@ -710,7 +710,7 @@ export function createArticleService(
       const { onlyIds } = await restrictingIds({ copied: selection.copied === true }, userId);
       if (onlyIds?.length === 0) return [];
       return repo.listIds(
-        { type: selection.type, groupId: selection.groupId, articleNumberRanges: range, activeOnly: selection.activeOnly === true },
+        { type: selection.type ? [selection.type] : undefined, groupId: selection.groupId, articleNumberRanges: range, activeOnly: selection.activeOnly === true },
         { onlyIds }
       );
     },
