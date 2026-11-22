@@ -387,6 +387,12 @@ export const PERSONAL_SECTIONS: ModuleNavSection[] = [
     title: "Löneperiod",
     items: [
       {
+        href: "/personal/stamplingar",
+        title: "Stämplingar",
+        description: "Rätta en anställds närvaro, frånvaro och arbetsstämplingar dag för dag — ändra, lägg till och ta bort.",
+        roles: ["admin", "supervisor"],
+      },
+      {
         href: "/personal/attestering",
         title: "Attestering",
         description: "Gå igenom och attestera personalens närvaro, frånvaro och tid per löneperiod.",

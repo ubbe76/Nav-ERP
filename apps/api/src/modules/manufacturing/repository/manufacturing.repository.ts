@@ -142,7 +142,7 @@ export interface ConsumedMaterialLine {
 }
 
 // Where a reporting event came from (mo_reports.source).
-export type ReportSource = "terminal" | "card" | "purchase_receipt" | "auto_close";
+export type ReportSource = "terminal" | "card" | "purchase_receipt" | "auto_close" | "stamp_correction";
 
 export type UndoReportResult =
   | {
@@ -1196,6 +1196,171 @@ async function undoReportInTx(
     .returning();
 
   return { ok: true, order: updatedOrder!, statusBefore: order.status, report, timeReport };
+}
+
+// Stämplingar (Personal & lön, 2026-11-22): the timereport module's side of
+// a corrected, afterwards-registered or removed work stamp, run inside the
+// report's transaction (the PurchaseReceiptLink pattern). writeTimeReport
+// runs after the stamp's old report is undone (the undo deletes the old time
+// report) and is given the new operation's resource; finish runs once the
+// new report row exists (null when the stamp is removed) and writes the
+// stamp — it throws when the stamp changed meanwhile, which rolls the whole
+// correction back.
+export interface StampReportLink {
+  writeTimeReport(tx: Tx, operationWorkCenterId: string | null): Promise<string>;
+  finish(tx: Tx, reportId: string | null): Promise<void>;
+}
+
+export interface ReplaceStampReportInput {
+  // The stamp's live report, undone first; null = nothing to undo (a stamp
+  // registered afterwards, or one whose report was undone on the TO card).
+  undoReportId: string | null;
+  // The stamp's new report; null = the stamp is removed.
+  report: {
+    operationId: string;
+    quantityOk: number;
+    quantityScrapped: number;
+    scrapReason?: string;
+    scrapReasonId?: string;
+    markDone: boolean;
+    employeeId: string;
+    materialShortage?: MaterialShortageCheck;
+  } | null;
+  userId: string;
+}
+
+export type ReplaceStampReportResult =
+  | {
+      ok: true;
+      undone: Extract<UndoReportResult, { ok: true }> | null;
+      reported: Extract<CompleteOperationResult, { ok: true }> | null;
+      reportId: string | null;
+    }
+  | { ok: false; stage: "undo"; result: Exclude<UndoReportResult, { ok: true }> }
+  | { ok: false; stage: "report"; result: Exclude<CompleteOperationResult, { ok: true }> };
+
+class StampReportRollback extends Error {
+  constructor(readonly failure: Extract<ReplaceStampReportResult, { ok: false }>) {
+    super("stamp report rolled back");
+  }
+}
+
+// Undo the stamp's report and write its new one in ONE transaction, so a
+// correction never leaves a stamp without its report (a separate undo and
+// report would, when the second is refused). The locks the two steps take
+// are taken up front in the order the reports and the undo use, so the
+// combination adds no new order: the report row → the operations (old and
+// new, sorted) → their orders (sorted) → the serial series when the new
+// operation may receive goods (right after the orders, as in the report) →
+// the orders' articles and components in ONE sorted round (artikel → plats
+// for the undo's returns that follow). Moving a stamp to an operation on
+// another order holds two orders; two such moves crosswise at the same
+// moment can deadlock, and Postgres then aborts one — accepted.
+async function replaceStampReportInTx(
+  tx: Tx,
+  input: ReplaceStampReportInput,
+  link: StampReportLink
+): Promise<Extract<ReplaceStampReportResult, { ok: true }>> {
+  let oldOperationId: string | null = null;
+  if (input.undoReportId) {
+    const [report] = await tx.select().from(moReports).where(eq(moReports.id, input.undoReportId)).for("update");
+    oldOperationId = report?.moOperationId ?? null;
+  }
+  const operationIds = [...new Set([oldOperationId, input.report?.operationId].filter((id): id is string => id !== null && id !== undefined))].sort();
+  const operations =
+    operationIds.length > 0
+      ? await tx.select().from(moOperations).where(inArray(moOperations.id, operationIds)).orderBy(asc(moOperations.id)).for("update")
+      : [];
+  const orderIds = [...new Set(operations.map((op) => op.manufacturingOrderId))].sort();
+  const orders =
+    orderIds.length > 0
+      ? await tx
+          .select()
+          .from(manufacturingOrders)
+          .where(inArray(manufacturingOrders.id, orderIds))
+          .orderBy(asc(manufacturingOrders.id))
+          .for("update")
+      : [];
+  const newOperation = input.report ? operations.find((op) => op.id === input.report!.operationId) : undefined;
+  if (input.report && !newOperation) {
+    throw new StampReportRollback({ ok: false, stage: "report", result: { ok: false, reason: "operation_not_found" } });
+  }
+  if (newOperation) {
+    const [last] = await tx
+      .select({ sequenceNo: moOperations.sequenceNo })
+      .from(moOperations)
+      .where(eq(moOperations.manufacturingOrderId, newOperation.manufacturingOrderId))
+      .orderBy(desc(moOperations.sequenceNo))
+      .limit(1);
+    const order = orders.find((o) => o.id === newOperation.manufacturingOrderId);
+    if (order && last?.sequenceNo === newOperation.sequenceNo) await lockSerialSeriesForReceipt(tx, order.articleId);
+  }
+  const components = orderIds.length
+    ? await tx
+        .selectDistinct({ articleId: moMaterialConsumptions.componentArticleId })
+        .from(moMaterialConsumptions)
+        .where(inArray(moMaterialConsumptions.manufacturingOrderId, orderIds))
+    : [];
+  await lockArticlesForOutflow(tx, [...orders.map((o) => o.articleId), ...components.map((c) => c.articleId)]);
+
+  let undone: Extract<UndoReportResult, { ok: true }> | null = null;
+  if (input.undoReportId) {
+    const result = await undoReportInTx(tx, input.undoReportId, { undoneBy: input.userId, fromPurchaseReceipt: false });
+    if (!result.ok) throw new StampReportRollback({ ok: false, stage: "undo", result });
+    undone = result;
+  }
+
+  if (!input.report || !newOperation) {
+    await link.finish(tx, null);
+    return { ok: true, undone, reported: null, reportId: null };
+  }
+
+  const timeReportId = await link.writeTimeReport(tx, newOperation.workCenterId);
+  const { operationId, materialShortage, ...quantities } = input.report;
+  if (quantities.quantityOk > 0 || quantities.quantityScrapped > 0 || quantities.markDone) {
+    // Operationen klar records the operation's total time, as the
+    // terminal's stamp-out does — the new time report included.
+    let actualTime: number | undefined;
+    if (quantities.markDone) {
+      const [sum] = await tx
+        .select({ total: sql<string>`coalesce(sum(${timeReports.hours}), 0)` })
+        .from(timeReports)
+        .where(eq(timeReports.moOperationId, operationId));
+      actualTime = Number(sum?.total ?? 0);
+    }
+    const reported = await reportOperationQuantitiesInTx(tx, operationId, {
+      ...quantities,
+      actualTime,
+      createdBy: input.userId,
+      source: "stamp_correction",
+      timeReportId,
+      materialShortage,
+    });
+    if (!reported.ok) throw new StampReportRollback({ ok: false, stage: "report", result: reported });
+    await link.finish(tx, reported.reportId);
+    return { ok: true, undone, reported, reportId: reported.reportId };
+  }
+
+  // Nothing to report: a time-only row, as a 0/0 stamp-out writes, so the
+  // stamp's time can still be undone from the TO card.
+  const order = orders.find((o) => o.id === newOperation.manufacturingOrderId);
+  if (!order || (order.status !== "released" && order.status !== "in_progress" && order.status !== "done")) {
+    throw new StampReportRollback({ ok: false, stage: "report", result: { ok: false, reason: "invalid_status" } });
+  }
+  const [row] = await tx
+    .insert(moReports)
+    .values({
+      manufacturingOrderId: newOperation.manufacturingOrderId,
+      moOperationId: operationId,
+      kind: "operation",
+      source: "stamp_correction",
+      timeReportId,
+      employeeId: quantities.employeeId,
+      createdBy: input.userId,
+    })
+    .returning();
+  await link.finish(tx, row!.id);
+  return { ok: true, undone, reported: null, reportId: row!.id };
 }
 
 // Alternativa resurser (#15) for GET /articles/:id/routing and the routing
@@ -2559,6 +2724,16 @@ export function createManufacturingRepository(db: Db) {
     // together or not at all).
     async undoPurchaseReceiptReportInTx(tx: Tx, reportId: string, input: { undoneBy: string }): Promise<UndoReportResult> {
       return undoReportInTx(tx, reportId, { ...input, fromPurchaseReceipt: true });
+    },
+
+    // Stämplingar: see replaceStampReportInTx.
+    async replaceStampReport(input: ReplaceStampReportInput, link: StampReportLink): Promise<ReplaceStampReportResult> {
+      try {
+        return await db.transaction((tx) => replaceStampReportInTx(tx, input, link));
+      } catch (err) {
+        if (err instanceof StampReportRollback) return err.failure;
+        throw err;
+      }
     },
 
 

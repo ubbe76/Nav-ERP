@@ -30,6 +30,7 @@ import type {
   PurchaseReceiptLink,
   ReportOperationQuantitiesInput,
   ReportSource,
+  StampReportLink,
   UndoReportResult,
 } from "../repository/manufacturing.repository.js";
 // Materialbrist vid rapportering: the check itself is a leaf the repository
@@ -2005,6 +2006,72 @@ export function createManufacturingService(
         reportId
       );
       return () => logReportUndone(result, userId);
+    },
+
+    // Stämplingar (Personal & lön, 2026-11-22): a work stamp corrected,
+    // registered afterwards or removed — its report undone and the new one
+    // written in ONE transaction (repo.replaceStampReport), the timereport
+    // module's time report and stamp written inside it through the link.
+    // The scrap reason is checked before anything is written; Materialbrist
+    // as on the TO card (allowMaterialShortage after a 409 in "warn").
+    async replaceStampReport(
+      input: {
+        undoReportId: string | null;
+        report: {
+          operationId: string;
+          quantityOk: number;
+          quantityScrapped: number;
+          scrapReason?: string;
+          scrapReasonId?: string;
+          markDone: boolean;
+          employeeId: string;
+          allowMaterialShortage?: boolean;
+        } | null;
+        userId: string;
+      },
+      link: StampReportLink
+    ) {
+      let report = null;
+      if (input.report) {
+        const { allowMaterialShortage, ...rest } = input.report;
+        await assertScrapReason(rest);
+        report = { ...rest, materialShortage: await materialShortageCheck(allowMaterialShortage) };
+      }
+      const result = await repo.replaceStampReport({ undoReportId: input.undoReportId, report, userId: input.userId }, link);
+      if (!result.ok) {
+        if (result.stage === "undo") assertReportUndone(result.result, input.undoReportId ?? "");
+        else {
+          const operationId = input.report?.operationId ?? "";
+          switch (result.result.reason) {
+            case "operation_not_found":
+              throw new MOOperationNotFoundError(operationId);
+            case "order_not_found":
+              throw new ManufacturingOrderNotFoundError(operationId);
+            case "invalid_status":
+              throw new InvalidStatusTransitionError(
+                "Operations can only be reported while the order is released, in progress or done"
+              );
+          }
+        }
+        throw new Error("unreachable");
+      }
+      if (result.undone) await logReportUndone(result.undone, input.userId);
+      const receipt = result.reported?.receipt;
+      if (receipt?.completed) {
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: receipt.order.orderNumber,
+          action: "completed",
+          detail: { quantity: Number(receipt.order.quantityReceived), automatic: true },
+          userId: input.userId,
+        });
+      }
+      return {
+        reportId: result.reportId,
+        received: receipt?.received ?? 0,
+        orderCompleted: receipt?.completed ?? false,
+        receivedSerialNumbers: result.reported?.receivedSerialNumbers ?? [],
+      };
     },
 
     async close(moId: string, userId: string | null = null) {

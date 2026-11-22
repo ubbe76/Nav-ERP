@@ -279,6 +279,26 @@ export function createPayrollRepository(db: Db) {
       });
     },
 
+    // Ändra frånvaro (2026-11-22): the period guard on the old and the new
+    // day, then the row — only while it still lies on the day read (a
+    // correction in between ⇒ null). A taken (employee, date, code) fails on
+    // absences_employee_date_type_unique.
+    async updateAbsence(
+      id: string,
+      values: { absenceTypeId: string; date: string; minutes: number; note: string | null },
+      expectedDate: string
+    ) {
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [expectedDate, values.date]);
+        const [row] = await tx
+          .update(absences)
+          .set(values)
+          .where(and(eq(absences.id, id), eq(absences.date, expectedDate)))
+          .returning();
+        return row ?? null;
+      });
+    },
+
     // --- Övertidsdispositioner (per-dag-avvikelse från personalkortets default) ---
 
     async listEmployeeOvertimeDispositions(employeeId: string, from: string, to: string) {

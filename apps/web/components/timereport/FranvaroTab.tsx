@@ -44,6 +44,25 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
   const [date, setDate] = useState(stockholmToday());
   const [hours, setHours] = useState("");
   const [note, setNote] = useState("");
+  // Ändra frånvaro (2026-11-22): the row being changed fills the form above.
+  const [editing, setEditing] = useState<Absence | null>(null);
+
+  function startEdit(a: Absence) {
+    setError(null);
+    setEditing(a);
+    setAbsenceTypeId(a.absenceTypeId);
+    setDate(a.date);
+    setHours(minutesToHoursInput(a.minutes));
+    setNote(a.note ?? "");
+  }
+
+  function resetForm() {
+    setEditing(null);
+    setAbsenceTypeId("");
+    setDate(stockholmToday());
+    setHours("");
+    setNote("");
+  }
 
   const [openStamps, setOpenStamps] = useState<StampSession[]>([]);
   useEffect(() => {
@@ -88,24 +107,34 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
       setError("Ange antal timmar (t.ex. 8 eller 4,5)");
       return;
     }
+    const minutes = Math.round(parsedHours * 60);
     setPending(true);
     try {
-      await apiFetch(`/api/v1/employees/${employeeId}/absences`, {
-        method: "POST",
-        body: JSON.stringify({
-          absenceTypeId,
-          date,
-          minutes: Math.round(parsedHours * 60),
-          note: note.trim() === "" ? undefined : note.trim(),
-        }),
-      });
-      setAbsenceTypeId("");
-      setDate(stockholmToday());
-      setHours("");
-      setNote("");
+      if (editing) {
+        // Only what changed.
+        const body: Record<string, unknown> = {};
+        if (absenceTypeId !== editing.absenceTypeId) body.absenceTypeId = absenceTypeId;
+        if (date !== editing.date) body.date = date;
+        if (minutes !== editing.minutes) body.minutes = minutes;
+        if (note.trim() !== (editing.note ?? "")) body.note = note.trim() || null;
+        if (Object.keys(body).length > 0) {
+          await apiFetch(`/api/v1/absences/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        }
+      } else {
+        await apiFetch(`/api/v1/employees/${employeeId}/absences`, {
+          method: "POST",
+          body: JSON.stringify({
+            absenceTypeId,
+            date,
+            minutes,
+            note: note.trim() === "" ? undefined : note.trim(),
+          }),
+        });
+      }
+      resetForm();
       router.refresh();
     } catch (err) {
-      setError(absenceErrorMessage(err, "Kunde inte registrera frånvaron"));
+      setError(absenceErrorMessage(err, editing ? "Kunde inte ändra frånvaron" : "Kunde inte registrera frånvaron"));
     } finally {
       setPending(false);
     }
@@ -138,7 +167,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
       {canManage ? (
         <Card>
           <Form onSubmit={addAbsence}>
-            <strong>Registrera frånvaro</strong>
+            <strong>{editing ? "Ändra frånvaro" : "Registrera frånvaro"}</strong>
             <FormRow>
               <Field label="Frånvarokod" htmlFor="absenceTypeId">
                 <Select
@@ -180,8 +209,13 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
               <Input id="absenceNote" value={note} onChange={(e) => setNote(e.target.value)} />
             </Field>
             <FormActions>
+              {editing && (
+                <Button type="button" variant="ghost" onClick={resetForm}>
+                  Avbryt
+                </Button>
+              )}
               <Button type="submit" variant="secondary" disabled={pending}>
-                {pending ? "Registrerar…" : "Registrera"}
+                {pending ? "Sparar…" : editing ? "Spara ändringen" : "Registrera"}
               </Button>
             </FormActions>
           </Form>
@@ -206,9 +240,14 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
                     <span className="num">{formatHours(a.minutes)}</span>
                   </span>
                   {canManage && (
-                    <Button type="button" variant="ghost" onClick={() => deleteAbsence(a.id)}>
-                      Ta bort
-                    </Button>
+                    <span>
+                      <Button type="button" variant="ghost" onClick={() => startEdit(a)}>
+                        Ändra
+                      </Button>
+                      <Button type="button" variant="ghost" onClick={() => deleteAbsence(a.id)}>
+                        Ta bort
+                      </Button>
+                    </span>
                   )}
                 </div>
                 {a.note && <span className={styles.inlineNote}>{a.note}</span>}

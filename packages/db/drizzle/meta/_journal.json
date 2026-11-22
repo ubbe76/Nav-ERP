@@ -1639,6 +1639,13 @@
       "when": 1795025388056,
       "tag": "0233_terminal_pin",
       "breakpoints": true
+    },
+    {
+      "idx": 234,
+      "version": "7",
+      "when": 1795343311081,
+      "tag": "0234_stamp_correction_report_source",
+      "breakpoints": true
     }
   ]
 }

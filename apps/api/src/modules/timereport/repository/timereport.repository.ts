@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne, or, sql, getTableColumns, type SQL } from "drizzle-orm";
 import {
+  absenceTypes,
   absences,
   articles,
   atfTransactions,
@@ -7,8 +8,11 @@ import {
   attendanceSessions,
   employeeWorkCenters,
   employees,
+  deviationReasons,
   manufacturingOrders,
+  moOperationScrap,
   moOperations,
+  moReports,
   stampSessions,
   timeReports,
   weekSchedules,
@@ -32,6 +36,7 @@ import {
   type ErasureFacts,
 } from "./employee-erasure.js";
 import { localDateOf } from "./stamp-close.js";
+import { stampUnchanged, type StampExpected } from "./stamp-correction.js";
 // Leaf in the payroll module (schema + error only) — no cycle.
 import { assertPayrollPeriodsOpenInTx, sharePayrollConfigInTx } from "../../payroll/repository/payroll-period-guard.js";
 
@@ -476,6 +481,243 @@ export function createTimeReportRepository(db: Db) {
         .from(timeReports)
         .where(eq(timeReports.moOperationId, moOperationId));
       return Number(row?.total ?? 0);
+    },
+
+    // --- Stämplingar (Personal & lön, 2026-11-22) ---
+
+    // One Stockholm day of an employee, [from, to) its instants: attendance
+    // and work stamps overlapping it (an open one counts as still going),
+    // the day's absences, the live reports behind the stamps' time reports
+    // (with their scrap reasons) and the manual time reports dated that day
+    // (a report no stamp points at).
+    async stampDay(employeeId: string, date: string, from: Date, to: Date) {
+      const attendance = await db
+        .select()
+        .from(attendanceSessions)
+        .where(
+          and(
+            eq(attendanceSessions.employeeId, employeeId),
+            lt(attendanceSessions.startedAt, to),
+            or(isNull(attendanceSessions.stoppedAt), gt(attendanceSessions.stoppedAt, from))
+          )
+        )
+        .orderBy(asc(attendanceSessions.startedAt));
+      const dayAbsences = await db
+        .select({
+          id: absences.id,
+          absenceTypeId: absences.absenceTypeId,
+          code: absenceTypes.code,
+          name: absenceTypes.name,
+          date: absences.date,
+          minutes: absences.minutes,
+          note: absences.note,
+        })
+        .from(absences)
+        .innerJoin(absenceTypes, eq(absenceTypes.id, absences.absenceTypeId))
+        .where(and(eq(absences.employeeId, employeeId), eq(absences.date, date)))
+        .orderBy(asc(absenceTypes.code));
+      const operationColumns = {
+        moOperationId: moOperations.id,
+        sequenceNo: moOperations.sequenceNo,
+        operationDescription: moOperations.description,
+        operationStatus: moOperations.status,
+        manufacturingOrderId: manufacturingOrders.id,
+        orderNumber: manufacturingOrders.orderNumber,
+        orderStatus: manufacturingOrders.status,
+        articleNumber: articles.articleNumber,
+        articleName: articles.name,
+      };
+      const stamps = await db
+        .select({
+          id: stampSessions.id,
+          startedAt: stampSessions.startedAt,
+          stoppedAt: stampSessions.stoppedAt,
+          pausedAt: stampSessions.pausedAt,
+          pausedSeconds: stampSessions.pausedSeconds,
+          kind: stampSessions.kind,
+          timeReportId: stampSessions.timeReportId,
+          ...operationColumns,
+          workCenterCode: workCenters.code,
+          workCenterName: workCenters.name,
+          hours: timeReports.hours,
+          reportDate: timeReports.date,
+          note: timeReports.note,
+        })
+        .from(stampSessions)
+        .innerJoin(moOperations, eq(moOperations.id, stampSessions.moOperationId))
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+        .leftJoin(workCenters, eq(workCenters.id, sql`coalesce(${stampSessions.workCenterId}, ${moOperations.workCenterId})`))
+        .leftJoin(timeReports, eq(timeReports.id, stampSessions.timeReportId))
+        .where(
+          and(
+            eq(stampSessions.employeeId, employeeId),
+            lt(stampSessions.startedAt, to),
+            or(isNull(stampSessions.stoppedAt), gt(stampSessions.stoppedAt, from))
+          )
+        )
+        .orderBy(asc(stampSessions.startedAt));
+      const timeReportIds = stamps.flatMap((s) => (s.timeReportId ? [s.timeReportId] : []));
+      const reports = timeReportIds.length
+        ? await db
+            .select({
+              id: moReports.id,
+              timeReportId: moReports.timeReportId,
+              source: moReports.source,
+              quantityOk: moReports.quantityOk,
+              quantityScrapped: moReports.quantityScrapped,
+              quantityReceived: moReports.quantityReceived,
+              markedDone: moReports.markedDone,
+            })
+            .from(moReports)
+            .where(and(inArray(moReports.timeReportId, timeReportIds), isNull(moReports.undoneAt)))
+        : [];
+      const scrap = reports.length
+        ? await db
+            .select({
+              moReportId: moOperationScrap.moReportId,
+              reasonId: moOperationScrap.reasonId,
+              reasonName: deviationReasons.name,
+              reason: moOperationScrap.reason,
+            })
+            .from(moOperationScrap)
+            .leftJoin(deviationReasons, eq(deviationReasons.id, moOperationScrap.reasonId))
+            .where(inArray(moOperationScrap.moReportId, reports.map((r) => r.id)))
+        : [];
+      const manual = await db
+        .select({
+          id: timeReports.id,
+          date: timeReports.date,
+          hours: timeReports.hours,
+          kind: timeReports.kind,
+          note: timeReports.note,
+          ...operationColumns,
+        })
+        .from(timeReports)
+        .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+        .where(
+          and(
+            eq(timeReports.employeeId, employeeId),
+            eq(timeReports.date, date),
+            sql`not exists (select 1 from ${stampSessions} where ${stampSessions.timeReportId} = ${timeReports.id})`
+          )
+        )
+        .orderBy(asc(timeReports.createdAt));
+      return { attendance, absences: dayAbsences, stamps, reports, scrap, manual };
+    },
+
+    // The live report a stamp's time report belongs to, with the scrap
+    // reason it logged — what a correction compares the new quantities with.
+    async findLiveStampReport(timeReportId: string) {
+      const [report] = await db
+        .select()
+        .from(moReports)
+        .where(and(eq(moReports.timeReportId, timeReportId), isNull(moReports.undoneAt)));
+      if (!report) return null;
+      const [scrap] = await db
+        .select({ reasonId: moOperationScrap.reasonId, reason: moOperationScrap.reason })
+        .from(moOperationScrap)
+        .where(eq(moOperationScrap.moReportId, report.id))
+        .limit(1);
+      return { report, scrapReasonId: scrap?.reasonId ?? null, scrapReason: scrap?.reason ?? null };
+    },
+
+    // The operation a stamp is corrected to or registered on: its order's
+    // status and whether its resource is a lego resource (reported on the IO).
+    async findStampTarget(moOperationId: string) {
+      const [row] = await db
+        .select({
+          id: moOperations.id,
+          manufacturingOrderId: moOperations.manufacturingOrderId,
+          workCenterType: workCenters.type,
+          orderStatus: manufacturingOrders.status,
+        })
+        .from(moOperations)
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+        .where(eq(moOperations.id, moOperationId));
+      return row ?? null;
+    },
+
+    // Times, pause, type and note corrected in place — the report and its
+    // quantities untouched. Only while the stamp and its time report are
+    // still the ones read (false otherwise).
+    async correctStampInPlace(
+      expected: StampExpected & { timeReportId: string | null },
+      values: { startedAt: Date; stoppedAt: Date; pausedSeconds: number; kind: TimeKind | null },
+      timeReport: { date: string; hours: number; kind: TimeKind | null; note: string | null } | null
+    ): Promise<boolean> {
+      return db.transaction(async (tx) => {
+        const rows = await tx
+          .update(stampSessions)
+          .set({ ...values, pausedSeconds: String(values.pausedSeconds) })
+          .where(
+            and(
+              stampUnchanged(expected),
+              expected.timeReportId ? eq(stampSessions.timeReportId, expected.timeReportId) : isNull(stampSessions.timeReportId)
+            )
+          )
+          .returning({ id: stampSessions.id });
+        if (rows.length === 0) return false;
+        if (timeReport && expected.timeReportId) {
+          await tx
+            .update(timeReports)
+            .set({ ...timeReport, hours: String(timeReport.hours) })
+            .where(eq(timeReports.id, expected.timeReportId));
+        }
+        return true;
+      });
+    },
+
+    // A stamp whose report was undone on the TO card (no time report left):
+    // just the row, while it is still the one read.
+    async deleteStampWithoutReport(expected: StampExpected): Promise<boolean> {
+      const rows = await db
+        .delete(stampSessions)
+        .where(and(stampUnchanged(expected), isNull(stampSessions.timeReportId)))
+        .returning({ id: stampSessions.id });
+      return rows.length > 0;
+    },
+
+    // A forgotten day's attendance, closed from the start. The period guard
+    // first (both days), then the employee's row FOR UPDATE — the lock an
+    // attendance INSERT's FK KEY SHARE waits for, so two additions (or one
+    // and a Kom) see each other — and the overlap check under it.
+    async createClosedAttendance(
+      employeeId: string,
+      values: {
+        startedAt: Date;
+        stoppedAt: Date;
+        startReasonId: string | null;
+        startNote: string | null;
+        stopReasonId: string | null;
+        stopNote: string | null;
+      },
+      createdBy: string
+    ): Promise<{ ok: true; row: typeof attendanceSessions.$inferSelect } | { ok: false; reason: "employee_not_found" | "overlap" }> {
+      return db.transaction(async (tx) => {
+        await assertPayrollPeriodsOpenInTx(tx, [localDateOf(values.startedAt), localDateOf(values.stoppedAt)]);
+        if (!(await lockEmployee(tx, employeeId))) return { ok: false, reason: "employee_not_found" };
+        const [overlap] = await tx
+          .select({ id: attendanceSessions.id })
+          .from(attendanceSessions)
+          .where(
+            and(
+              eq(attendanceSessions.employeeId, employeeId),
+              lt(attendanceSessions.startedAt, values.stoppedAt),
+              sql`coalesce(${attendanceSessions.stoppedAt}, now()) > ${values.startedAt.toISOString()}::timestamptz`
+            )
+          )
+          .limit(1);
+        if (overlap) return { ok: false, reason: "overlap" };
+        const [row] = await tx
+          .insert(attendanceSessions)
+          .values({ employeeId, ...values, createdBy })
+          .returning();
+        return { ok: true, row: row! };
+      });
     },
 
     async findTimeReportById(id: string) {

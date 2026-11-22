@@ -1,5 +1,6 @@
 import type {
   CreateAbsenceInput,
+  UpdateAbsenceInput,
   CreateAbsenceTypeInput,
   CreateAttendanceDeviationReasonInput,
   UpdateAttendanceDeviationReasonInput,
@@ -928,6 +929,46 @@ export function createPayrollService(
         entityId: row.id,
         action: "created",
         detail: { employeeId, date: row.date, absenceTypeId: row.absenceTypeId, minutes: row.minutes },
+        userId,
+      });
+      return row;
+    },
+
+    // Ändra frånvaro (Stämplingar and the personalkort, 2026-11-22).
+    async updateAbsence(id: string, input: UpdateAbsenceInput, userId: string) {
+      const existing = await repo.findAbsenceById(id);
+      if (!existing) throw new AbsenceNotFoundError(id);
+      if (input.absenceTypeId !== undefined && input.absenceTypeId !== existing.absenceTypeId) {
+        const type = await repo.findAbsenceTypeById(input.absenceTypeId);
+        if (!type) throw new AbsenceTypeNotFoundError(input.absenceTypeId);
+        if (!type.active) throw new InactiveAbsenceTypeError(input.absenceTypeId);
+      }
+      const values = {
+        absenceTypeId: input.absenceTypeId ?? existing.absenceTypeId,
+        date: input.date ?? existing.date,
+        minutes: input.minutes ?? existing.minutes,
+        note: input.note === undefined ? existing.note : input.note || null,
+      };
+      for (const date of new Set([existing.date, values.date])) {
+        if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
+      }
+      let row;
+      try {
+        row = await repo.updateAbsence(id, values, existing.date);
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new DuplicateAbsenceError();
+        throw err;
+      }
+      if (!row) throw new AbsenceNotFoundError(id);
+      await audit.log({
+        entityType: "absence",
+        entityId: row.id,
+        action: "updated",
+        detail: {
+          employeeId: row.employeeId,
+          before: { date: existing.date, absenceTypeId: existing.absenceTypeId, minutes: existing.minutes },
+          after: { date: row.date, absenceTypeId: row.absenceTypeId, minutes: row.minutes },
+        },
         userId,
       });
       return row;

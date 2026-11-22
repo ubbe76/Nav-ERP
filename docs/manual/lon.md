@@ -1,6 +1,6 @@
 # Personal & lön
 
-Menyn **Personal & lön** samlar personalregistret och lönen. Menyvalet öppnar en sida med tre grupper: **Personal** (**Anställda**), **Löneperiod** (**Attestering** och **Löneunderlag**) och **Inställningar** (**Lönekoder** samt **Lön, PAXml & schema**, som öppnar sidan [Lön, PAXml & schema](#lon-paxml-schema) och bara visas för administratörer). Menyn kräver rättigheten **Personal & lön** i behörighetsgruppen (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)); **Anställda**, **Attestering** och **Löneunderlag** är dessutom bara för administratörer och arbetsledare, **Lönekoder** bara för administratörer.
+Menyn **Personal & lön** samlar personalregistret och lönen. Menyvalet öppnar en sida med tre grupper: **Personal** (**Anställda**), **Löneperiod** (**Stämplingar**, **Attestering** och **Löneunderlag**) och **Inställningar** (**Lönekoder** samt **Lön, PAXml & schema**, som öppnar sidan [Lön, PAXml & schema](#lon-paxml-schema) och bara visas för administratörer). Menyn kräver rättigheten **Personal & lön** i behörighetsgruppen (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)); **Anställda**, **Stämplingar**, **Attestering** och **Löneunderlag** är dessutom bara för administratörer och arbetsledare, **Lönekoder** bara för administratörer.
 
 Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning → export: frånvaro och OB registreras löpande, varje anställds underlag attesteras för en löneperiod, perioden låses och löneunderlaget exporteras till lönesystemet (PAXml). Kapitlet byggs ut i takt med att rutinerna färdigställs — hittills finns personalregistret (**Anställda**), grundregistren löneunderlaget bygger på (**Lönekoder**), frånvaroregistreringen på personalkortet, arbetsledarens månadsvy **Attestering** och rapportsidan **Löneunderlag** med export till PAXml.
 
@@ -92,11 +92,45 @@ Personalkortets flik **Frånvaro** (se [Anställda](#anstallda)) registrerar fr�
 
 Kortet **Registrera frånvaro** har fälten **Frånvarokod** (en av frånvarokoderna ovan), **Datum**, **Timmar** och en valfri **Anteckning**. Knappen **Hämta ur schema** fyller i Timmar med den schemalagda nettotiden för valt datum — en hel dag frånvaro motsvarar alltså schemats nettotid, inte alltid 8 timmar. På veckans sista arbetsdag i ett veckoschema med utjämning är det den uträknade tiden. Saknas ett schema för dagen visas ett felmeddelande i stället.
 
-Kortet **Registrerad frånvaro** listar registrerade poster med datum, namn och antal timmar för perioden från tre månader bakåt till tolv månader framåt (så syns även planerad frånvaro, t.ex. semester); en **Ta bort**-knapp tar bort en post.
+Kortet **Registrerad frånvaro** listar registrerade poster med datum, namn och antal timmar för perioden från tre månader bakåt till tolv månader framåt (så syns även planerad frånvaro, t.ex. semester). **Ändra** fyller formuläret ovanför med posten — rubriken blir **Ändra frånvaro** — så att frånvarokod, datum, timmar och anteckning kan ändras och sparas med **Spara ändringen** (**Avbryt** lämnar posten som den var). **Ta bort** tar bort en post.
 
 Har den anställde öppna arbeten visas det överst på fliken, med en länk till **Pågående arbete**.
 
-Hela personalkortet — inklusive Frånvaro-fliken och listan **Registrerad frånvaro** — kräver rollen arbetsledare eller administratör; övriga användare ser varken sidan eller listan, eftersom frånvaro räknas som hälsodata. Låsta löneperioder blockerar både registrering och borttag av frånvaro i den perioden.
+Hela personalkortet — inklusive Frånvaro-fliken och listan **Registrerad frånvaro** — kräver rollen arbetsledare eller administratör; övriga användare ser varken sidan eller listan, eftersom frånvaro räknas som hälsodata. Låsta löneperioder blockerar registrering, ändring och borttag av frånvaro i den perioden — en ändring prövas mot både det gamla och det nya datumet.
+
+## Stämplingar
+
+**Personal & lön → Stämplingar** visar en anställds dag — närvaro, frånvaro och arbete — och är platsen för att rätta stämplingar: ändra, lägga till och ta bort. Sidan är öppen för arbetsledare och administratörer, liksom attesteringen.
+
+Välj **Anställd** överst och dag med **◀** och **▶**, datumfältet eller **I dag**. Adressen innehåller anställd och dag, så en dag går att länka till; i [Attestering](#attestering) öppnar datumet på en dag i **Detaljer** samma dag här. Under väljarna står dagens summa ur lönen — **Schema**, **Arbetat**, **Frånvaro** och, när något fattas, **Ofördelat** — och den räknas om efter varje ändring. Ligger dagen i en låst löneperiod står det överst, och då går närvaro och frånvaro inte att ändra; på arbetet går bara typen att ändra.
+
+### Närvaro
+
+Kortet **Närvaro** listar dagens närvaropass med klockslag (ett pass över midnatt visar datumet på den andra dagen) och anledningarna vid ankomst och hemgång.
+
+- **+ Lägg till närvaro** registrerar en närvaro som aldrig stämplades, till exempel en dag då den anställde glömde både **Kom** och **Gå hem**. Fälten **Kom** och **Gick** krävs — en närvaro som läggs till i efterhand är alltid avslutad — och sluttiden får inte ligga i framtiden. Passet får inte överlappa en annan närvaro för samma anställd. Valfritt: **Anledning vid ankomst** och **Anledning vid hemgång** med var sin **Kommentar**.
+- **Ändra** fungerar som i attesteringens **Detaljer**: start- och sluttid, anledningar och kommentarer. Flyttas sluttiden följer den anställdes arbeten med och pausas vid den nya sluttiden, och töms sluttiden öppnas närvaron igen.
+- **Ta bort** tar bort ett avslutat pass (efter en bekräftelse). Ett pass som pågår har ingen **Ta bort** — sätt en sluttid med **Ändra** först.
+
+### Frånvaro
+
+Kortet **Frånvaro** listar dagens frånvaroposter med kod, namn, timmar och anteckning. **+ Registrera frånvaro** har samma fält som personalkortet (**Frånvarokod**, **Datum**, **Timmar**, **Anteckning (valfritt)**). **Ändra** ändrar kod, datum, timmar och anteckning på en post, och **Ta bort** tar bort den. Samma kod två gånger samma dag går inte att spara.
+
+### Arbete
+
+Kortet **Arbete** listar dagens arbetsstämplingar — tid, tillverkningsorder (länk till ordern), operation och artikel, med timmar, paus, typ (**Ställ**/**Produktion**), antal OK, kasserat med orsak, **Operationen klar** och anteckning — och de manuella tidrapporterna för dagen (**Manuell tidrapport**). Ett arbete som pågår eller är pausat ändras inte här; raden länkar till [Pågående arbete](/hjalp/tillverkning#pagaende-arbete), där det stämplas ut.
+
+- **Ändra** på en avslutad stämpling har fälten **Tillverkningsorder**, **Operation**, **Start**, **Slut**, **Paus (min)**, **Typ** (med inställningen **Dela tid i ställ och produktion**), **Antal OK**, **Kasserat** med orsak, **Operationen är klar** och **Anteckning (valfritt)**. Under tiderna visas **Tid som rapporteras**: slut minus start minus paus. Tidrapporten dateras på sluttidens dag, som vid en utstämpling.
+  - Ändras bara tider, paus, typ eller anteckning ändras stämplingen och dess tidrapport, och rapporteringen på tillverkningsordern lämnas som den är.
+  - Ändras operationen eller antalet ångras stämplingens rapport och görs om, i ett enda steg: antalet dras av på den gamla operationen och läggs på den nya, materialet läggs tillbaka och dras på nytt, och på orderns sista operation tas färdiga varor ut ur lagret och läggs in igen. I tillverkningsorderns **Rapporteringar** står den gamla raden kvar som ångrad och den nya som **Rättad stämpling**. Går något steg inte — till exempel när de färdiga varorna redan har levererats, ordern är stängd eller materialet saknas — sparas ingenting, och felet säger varför. Saknas material frågar Nav som vid en utstämpling om arbetet ska rapporteras ändå.
+  - En legooperation går inte att välja; den rapporteras på sin inköpsorder.
+- **+ Lägg till arbete** registrerar ett arbete som aldrig stämplades, med samma fält. Det blir en avslutad stämpling med tidrapport och rapport på ordern, som om den anställde stämplat in och ut vid tiderna. Ordern ska vara frisläppt, pågå eller vara klar.
+- **Ta bort** ångrar stämplingens rapport — antalet dras av, materialet läggs tillbaka och tidrapporten tas bort — och tar bort stämplingen, efter en bekräftelse.
+- En stämpling som rapporterades innan rapporteringsloggen fanns visar *Rapporterad före rapportloggen*: där går bara tider, typ och anteckning att ändra, och antalet rättas på tillverkningsordern.
+- En stämpling vars rapport har ångrats på tillverkningsordern visar det. **Ändra** rapporterar då arbetet igen, och **Ta bort** tar bort stämplingen.
+- På en **Manuell tidrapport** ändrar **Ändra** datum, timmar, typ och anteckning, och **Ta bort** tar bort tidrapporten.
+
+Tidrapporternas löneperiodregel gäller som vid utstämpling: ett arbete på en dag i en låst löneperiod går inte att ändra — utom typen — och inte att lägga till eller ta bort. Varje ändring står i händelseloggen.
 
 ## Attestering
 
@@ -120,7 +154,7 @@ Statusen visas som en av tre:
 
 ### Detaljer och korrigeringar
 
-**Detaljer** öppnar dagvyn för en anställd, med en rad per dag (**Datum**, **Schema**, **Arbetat**, **Frånvaro**, **ÖT** och **Ofördelat**). Under varje dag listas dagens närvarostämplingar med klockslag och dagens frånvaroposter.
+**Detaljer** öppnar dagvyn för en anställd, med en rad per dag (**Datum**, **Schema**, **Arbetat**, **Frånvaro**, **ÖT** och **Ofördelat**). Under varje dag listas dagens närvarostämplingar med klockslag och dagens frånvaroposter. Datumet är en länk till dagen i [Stämplingar](#stamplingar), där också arbetsstämplingarna kan rättas och en glömd närvaro läggas till.
 
 - Tabellen har kolumnen **Avvikelser**: antal dagar med sen ankomst eller tidig hemgång (till exempel "3 dagar") och, i varningsfärg, "{n} utan anledning" för dagar över marginalen där anledning saknas (inställningen var av eller tiden har korrigerats). Låsta perioder från före funktionen visar "–".
 - Under varje närvarostämpling står avvikelsen och anledningen, till exempel "Kom 07:12 (12 min sent) — Trafik/resa: kö på E4" och "Gick 15:20 (40 min tidigt) — Läkar-/tandläkarbesök". Minuterna räknas alltid om ur schemat och stämplingens tider, så en korrigerad tid ger rätt siffra direkt.

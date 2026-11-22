@@ -56,6 +56,18 @@ export const createAbsenceSchema = z.object({
 });
 export type CreateAbsenceInput = z.infer<typeof createAbsenceSchema>;
 
+// Ändra frånvaro (Stämplingar and the personalkort, 2026-11-22): any field;
+// note null clears it.
+export const updateAbsenceSchema = z
+  .object({
+    absenceTypeId: z.string().uuid().optional(),
+    date: z.string().date().optional(),
+    minutes: blankSafe(z.coerce.number().int().min(1).max(1440)).optional(),
+    note: z.string().max(2000).nullable().optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
+export type UpdateAbsenceInput = z.infer<typeof updateAbsenceSchema>;
+
 // Per-day override of an employee's default overtime compensation
 // (övertidsersättning vs komptid).
 export const setOvertimeDispositionSchema = z.object({

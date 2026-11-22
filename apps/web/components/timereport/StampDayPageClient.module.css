@@ -1,0 +1,123 @@
+/* Stämplingar: anställd + dag överst, sedan korten Närvaro, Frånvaro, Arbete. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 20px;
+  margin-bottom: 12px;
+}
+
+.controls > * {
+  min-width: 0;
+}
+
+.dayNav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The date field keeps its own width beside ◀ ▶ (Input is 100% wide). */
+.dayNav > input {
+  width: 11.5em;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.summary {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.summary strong {
+  color: var(--color-text-primary);
+}
+
+.locked {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-control);
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+  font-size: 14px;
+}
+
+.notice {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.cards {
+  display: grid;
+  gap: 16px;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.row:first-child {
+  border-top: none;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.time {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.meta {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+@media (max-width: 640px) {
+  .row {
+    flex-direction: column;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}
