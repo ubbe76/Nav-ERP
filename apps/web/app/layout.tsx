@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Figtree } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { headers } from "next/headers";
 import { fetchThemeBoot, themeBootScript } from "../lib/themes";
@@ -8,15 +8,22 @@ import { installPromptBootScript } from "../lib/installApp";
 import { embeddedBootScript } from "../lib/documentTabs";
 import { DocumentTabsProvider } from "../components/tabs/DocumentTabs";
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+// The two typefaces live in the repo (app/fonts, SIL Open Font License —
+// the licences beside them): next/font/google fetched them from Google at
+// every build, and a bad answer from there failed the web build now and
+// then ("next/font/google queries have exactly one entry"). Variable fonts,
+// so every weight the CSS asks for comes from one file each.
+const spaceGrotesk = localFont({
+  src: "./fonts/SpaceGrotesk-wght.woff2",
+  weight: "300 700",
+  display: "swap",
   variable: "--font-space-grotesk",
 });
 
-const figtree = Figtree({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const figtree = localFont({
+  src: "./fonts/Figtree-wght.woff2",
+  weight: "300 900",
+  display: "swap",
   variable: "--font-figtree",
 });
 

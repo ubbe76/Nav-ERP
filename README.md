@@ -830,6 +830,13 @@ fullständiga licenstexten (SPDX: `GPL-3.0-or-later`).
   är © 2010 Google Corporation och © 2012 Red Hat, Inc. och används under
   SIL Open Font License 1.1. Licenstexten finns i
   [`apps/api/assets/fonts/LICENSE`](apps/api/assets/fonts/LICENSE).
+- **Space Grotesk** och **Figtree** — webbens rubrik- och brödtextsnitt
+  (`apps/web/app/fonts`, variabla woff2 ur
+  [google/fonts](https://github.com/google/fonts)) är © 2020 The Space
+  Grotesk Project Authors och © 2022 The Figtree Project Authors och används
+  under SIL Open Font License 1.1. Licenstexterna finns bredvid filerna
+  ([`OFL-SpaceGrotesk.txt`](apps/web/app/fonts/OFL-SpaceGrotesk.txt),
+  [`OFL-Figtree.txt`](apps/web/app/fonts/OFL-Figtree.txt)).
 
 ## Historik
 

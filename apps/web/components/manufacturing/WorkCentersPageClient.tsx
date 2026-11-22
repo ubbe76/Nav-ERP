@@ -176,10 +176,13 @@ export function WorkCentersPageClient({
           { key: "code", label: "Nr", width: "60px" },
           { key: "name", label: "Namn", width: "minmax(120px, 1fr)" },
           { key: "type", label: "Typ", width: "80px" },
-          { key: "productionGroupId", label: "Produktionsgrupp", width: "150px" },
-          { key: "weekScheduleId", label: "Kapacitet", width: "140px" },
-          { key: "hourlyRate", label: "Timkostnad", width: "110px", align: "right" },
-          { key: "overheadPercent", label: "TO-påslag", width: "100px", align: "right" },
+          // Narrow enough to fit beside the module panel at 1440 px (about
+          // 1 060 px for the table): wider, the last column with Ändra was
+          // scrolled out of the card.
+          { key: "productionGroupId", label: "Produktionsgrupp", width: "130px" },
+          { key: "weekScheduleId", label: "Kapacitet", width: "125px" },
+          { key: "hourlyRate", label: "Timkostnad", width: "100px", align: "right" },
+          { key: "overheadPercent", label: "TO-påslag", width: "85px", align: "right" },
           { key: "active", label: "Status", width: "80px" },
           { key: "id", label: "", width: "140px", align: "right" },
         ]}
