@@ -519,7 +519,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.23 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.24 — inte redo för produktion**, se varningen överst. En tidig version (0.x) är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -703,6 +703,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **produktionsgrupper** som kopplar personal och resurser samt, under
   **Personal & lön**, **löneunderlaget**: frånvarohantering
   (frånvarokoder mappade mot lönearter, registrering per anställd/dag),
+  **Stämplingar** där en anställds närvaro, frånvaro och arbete en dag
+  rättas på ett ställe (arbetet ända ner till antalet på
+  tillverkningsordern), tider som fylls i som tt:mm,
   automatisk beräkning av övertid/mertid och OB ur schema mot närvaro,
   **tidattest med periodlåsning** (arbetsledaren attesterar per anställd
   och period, en låst period spärrar ändringar), löneunderlagsrapport per
