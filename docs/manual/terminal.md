@@ -99,7 +99,7 @@ Att stämpla in på en operation du redan har en öppen stämpling på avvisas �
 ## Ta ut ATF
 
 1. Välj **Ta ut ATF** i hemvyn.
-2. Antalet timmar är förifyllt med dagens schemalagda tid; ändra vid behov (t.ex. `2` eller `8,5`).
+2. **ATF-tid (tt:mm)** är förifylld med dagens schemalagda tid; ändra vid behov (t.ex. `2:00` eller `8:30` — ett tal utan kolon är minuter).
 3. Bekräfta — uttaget registreras på dagens datum och dras från ditt ATF-saldo, och om du är närvarostämplad stämplas du samtidigt ut ("Din närvarostämpling stämplas ut samtidigt").
 
 ATF-saldot och reglerna hanteras på personalkortet — se [Personal & tid](/hjalp/personal-tid).

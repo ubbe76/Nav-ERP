@@ -28,7 +28,8 @@ import { HelpLink } from "../ui/HelpLink";
 import { useCanOpenPersonal } from "../PermissionsProvider";
 import { stockholmYear } from "../../lib/date";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
-import { round2 } from "../../lib/format";
+import { DURATION_HINT, formatDuration, parseDuration } from "../../lib/duration";
+import { DurationInput } from "../ui/DurationInput";
 
 const TABS = ["Dagsscheman", "Veckoscheman", "Helgdagar"] as const;
 type Tab = (typeof TABS)[number];
@@ -519,17 +520,18 @@ function WeekScheduleForm({
     for (const day of schedule?.days ?? []) ids[day.weekday - 1] = day.dayScheduleId;
     return ids;
   });
-  // Ordinary hours per week as typed (timmar); empty = no balancing.
+  // Ordinary time and ATF per week as tt:mm (the API keeps minutes); an
+  // empty Ordinarie = no balancing.
   const [ordinaryHours, setOrdinaryHours] = useState(
-    // Two decimals is within half a minute, so saving rounds back to the stored minutes.
-    schedule?.ordinaryMinutesPerWeek != null ? String(round2(schedule.ordinaryMinutesPerWeek / 60)) : ""
+    schedule?.ordinaryMinutesPerWeek != null ? formatDuration(schedule.ordinaryMinutesPerWeek) : ""
   );
-  const [atfMinutes, setAtfMinutes] = useState(String(schedule?.atfMinutesPerWeek ?? 0));
+  const [atfMinutes, setAtfMinutes] = useState(formatDuration(schedule?.atfMinutesPerWeek ?? 0));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const ordinaryMinutes = parseOrdinaryMinutes(ordinaryHours);
-  const atfValue = atfMinutes.trim() === "" ? 0 : Math.round(Number(atfMinutes.replace(",", ".")));
+  const ordinaryMinutes = ordinaryHours.trim() === "" ? null : parseDuration(ordinaryHours);
+  const atfParsed = atfMinutes.trim() === "" ? 0 : parseDuration(atfMinutes);
+  const atfValue = atfParsed ?? Number.NaN;
   const days = dayScheduleIds
     .map((dayScheduleId, index) => ({ weekday: index + 1, dayScheduleId }))
     .filter((d) => d.dayScheduleId !== "");
@@ -542,6 +544,11 @@ function WeekScheduleForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    // An unreadable Ordinarie must not be saved as "no balancing".
+    if (scheduleBalancing && ((ordinaryHours.trim() !== "" && ordinaryMinutes === null) || atfParsed === null)) {
+      setError(DURATION_HINT);
+      return;
+    }
     setPending(true);
     try {
       const balancing = scheduleBalancing
@@ -599,27 +606,11 @@ function WeekScheduleForm({
       {scheduleBalancing && (
         <>
           <FormRow>
-            <Field label="Ordinarie arbetstid per vecka (timmar)" htmlFor="weekOrdinary">
-              <Input
-                id="weekOrdinary"
-                type="number"
-                min="0"
-                step="any"
-                size="md"
-                value={ordinaryHours}
-                onChange={(e) => setOrdinaryHours(e.target.value)}
-              />
+            <Field label="Ordinarie arbetstid per vecka (tt:mm)" htmlFor="weekOrdinary">
+              <DurationInput id="weekOrdinary" placeholder="t.ex. 40:00" size="md" value={ordinaryHours} onValueChange={setOrdinaryHours} />
             </Field>
-            <Field label="ATF per vecka (minuter)" htmlFor="weekAtf">
-              <Input
-                id="weekAtf"
-                type="number"
-                min="0"
-                step="any"
-                size="md"
-                value={atfMinutes}
-                onChange={(e) => setAtfMinutes(e.target.value)}
-              />
+            <Field label="ATF per vecka (tt:mm)" htmlFor="weekAtf">
+              <DurationInput id="weekAtf" placeholder="t.ex. 1:22" size="md" value={atfMinutes} onValueChange={setAtfMinutes} />
             </Field>
           </FormRow>
           <FormHint>Tomt = ingen utjämning: veckan följer då bara sina dagsscheman.</FormHint>
@@ -637,14 +628,6 @@ function WeekScheduleForm({
 }
 
 // Hours typed in the form -> whole minutes; null = empty or not a number.
-function parseOrdinaryMinutes(raw: string): number | null {
-  const trimmed = raw.trim().replace(",", ".");
-  if (trimmed === "") return null;
-  const hours = Number(trimmed);
-  if (!Number.isFinite(hours)) return null;
-  return Math.round(hours * 60);
-}
-
 interface PreviewRow {
   weekday: number;
   dayScheduleId: string;
@@ -707,12 +690,6 @@ function useBalancePreview(
   return ordinaryMinutes === null ? null : state;
 }
 
-// "8 h 00 min" — rounded to whole minutes before splitting, so 479.6 is 8 h 00.
-function formatHoursMinutes(minutes: number): string {
-  const whole = Math.round(minutes);
-  return `${Math.floor(whole / 60)} h ${String(whole % 60).padStart(2, "0")} min`;
-}
-
 function formatMinutesSv(value: number): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: 1 });
 }
@@ -724,7 +701,7 @@ function BalancePreview({ state }: { state: PreviewState }) {
       {data && (
         <>
           <FormHint>
-            {formatHoursMinutes(data.ordinaryMinutesPerDay)} ordinarie och {formatMinutesSv(data.atfMinutesPerDay)} min ATF per
+            {formatDuration(data.ordinaryMinutesPerDay)} ordinarie och {formatMinutesSv(data.atfMinutesPerDay)} min ATF per
             arbetsdag. Veckans sista arbetsdag (i fetstil) får det som återstår av veckan.
           </FormHint>
           <PreviewTable title="En hel vecka" week={data.fullWeek} />
@@ -762,7 +739,7 @@ function PreviewTable({ title, week }: { title: string; week: PreviewWeek }) {
                 <td style={cell}>{WEEKDAY_SHORT[row.weekday - 1]}</td>
                 <td style={cell}>{row.holiday ? "Helgdag" : row.dayScheduleCode}</td>
                 <td className="num" style={cell}>{row.holiday ? "—" : row.endTime}</td>
-                <td className="num" style={cell}>{row.holiday ? "—" : formatHours(row.netMinutes)}</td>
+                <td className="num" style={cell}>{row.holiday ? "—" : formatDuration(row.netMinutes)}</td>
               </tr>
             ))}
           </tbody>

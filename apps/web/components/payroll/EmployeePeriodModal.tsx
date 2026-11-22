@@ -8,11 +8,13 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Field, Input, Select } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { toDateTimeLocalValue } from "../../lib/date";
 import { stampDayHref } from "../../lib/stampDay";
+import { formatDuration, readAbsenceMinutes } from "../../lib/duration";
 import {
   MONTH_NAMES_SV,
   OVERTIME_COMPENSATION_LABELS,
@@ -33,12 +35,6 @@ function toClock(iso: string): string {
 
 function weekdayShort(date: string): string {
   return new Date(`${date}T00:00:00Z`).toLocaleDateString("sv-SE", { weekday: "short", timeZone: "UTC" });
-}
-
-// Minutes → comma-decimal hours for the Timmar field (same as the
-// personalkort's Frånvaro form).
-function minutesToHoursInput(minutes: number): string {
-  return (minutes / 60).toLocaleString("sv-SE", { maximumFractionDigits: 2 });
 }
 
 // A day is rendered when it carries any value at all — all-zero days (weekends
@@ -233,7 +229,7 @@ function PeriodDetail({
     if (!absenceTouched.current) {
       const firstUnaccounted = detail.days.find((day) => day.unaccountedMinutes > 0);
       setAbsenceDate(firstUnaccounted?.date ?? detail.days[0]?.date ?? "");
-      setAbsenceHours(firstUnaccounted ? minutesToHoursInput(firstUnaccounted.unaccountedMinutes) : "");
+      setAbsenceHours(firstUnaccounted ? formatDuration(firstUnaccounted.unaccountedMinutes) : "");
     }
   }, [employeeId, year, month, periodLocked]);
 
@@ -414,9 +410,10 @@ function PeriodDetail({
       setError("Välj en frånvarokod");
       return;
     }
-    const parsedHours = Number(absenceHours.replace(",", "."));
-    if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
-      setError("Ange antal timmar (t.ex. 8 eller 4,5)");
+    // Tid is tt:mm (lib/duration.ts); the API keeps minutes.
+    const minutes = readAbsenceMinutes(absenceHours);
+    if (typeof minutes === "string") {
+      setError(minutes);
       return;
     }
     setPending(true);
@@ -426,7 +423,7 @@ function PeriodDetail({
         body: JSON.stringify({
           absenceTypeId,
           date: absenceDate,
-          minutes: Math.round(parsedHours * 60),
+          minutes,
           note: absenceNote.trim() === "" ? undefined : absenceNote.trim(),
         }),
       });
@@ -738,16 +735,16 @@ function PeriodDetail({
               </Field>
             </FormRow>
             <FormRow>
-              <Field label="Timmar" htmlFor="detailAbsenceHours">
-                <Input
+              <Field label="Tid (tt:mm)" htmlFor="detailAbsenceHours">
+                <DurationInput
                   id="detailAbsenceHours"
                   required
-                  placeholder="t.ex. 8 eller 4,5"
+                  placeholder="t.ex. 8:00"
                   size="sm"
                   value={absenceHours}
-                  onChange={(e) => {
+                  onValueChange={(value) => {
                     absenceTouched.current = true;
-                    setAbsenceHours(e.target.value);
+                    setAbsenceHours(value);
                   }}
                 />
               </Field>

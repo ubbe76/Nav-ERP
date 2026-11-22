@@ -246,6 +246,16 @@ Alla registerlistor (artiklar, kunder, leverantörer, ordrar, saldon, transaktio
 
 Där en artikel ska väljas (orderrader, tillverkningsorder, struktur) finns en **sökbar artikelväljare**: klicka i fältet så visas de första träffarna, skriv för att söka på artikelnummer eller benämning, välj med piltangenterna + Enter eller med klick.
 
+## Tider (tt:mm)
+
+Fält där du rapporterar eller anger en tid fylls i som timmar och minuter, **tt:mm**: `1:30` är en och en halv timme och `40:00` fyrtio timmar. Det gäller tidrapporter, frånvaro, paus, ATF, tiden på tillverkningsorderns **Rapportera**, resursens kapacitet per dag och inställningarna under Personal & lön. Fälten har **(tt:mm)** i namnet.
+
+- Ett tal utan kolon är **minuter**: `90` blir 1:30 och `8` blir 0:08.
+- Punkt och komma fungerar också mellan timmar och minuter (`7.30`, `7,30`), men minuterna skrivs alltid med två siffror, så `4,5` godtas inte.
+- När du lämnar fältet skrivs tiden om till tt:mm, så att du ser hur den har lästs innan du sparar.
+
+Ställtid, stycktid och cykeltid i beredningen har kvar sina enheter (min, sek eller st/h), som står vid fälten. Listor och summor visar tiden som tidigare, i timmar med decimaler.
+
 ## Vanliga knappar
 
 | Knapp | Betydelse |

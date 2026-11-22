@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { Modal } from "../ui/Modal";
 import { SearchPicker } from "../ui/SearchPicker";
@@ -15,6 +16,7 @@ import { apiFetch } from "../../lib/api";
 import { confirmDelete } from "../../lib/confirm";
 import { addDaysIso, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { DURATION_HINT, durationFromHours, formatDuration, hoursFromDuration, parseDuration, readAbsenceMinutes } from "../../lib/duration";
 import { formatQuantity } from "../../lib/format";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { instantFromField, STAMP_DAY_PATH, stampDayHref, stampHours, stampRange } from "../../lib/stampDay";
@@ -63,14 +65,6 @@ function hoursText(hours: number): string {
 
 function minutesText(minutes: number): string {
   return hoursText(minutes / 60);
-}
-
-function hoursInput(minutes: number): string {
-  return (minutes / 60).toLocaleString("sv-SE", { maximumFractionDigits: 2 });
-}
-
-function parseHours(text: string): number {
-  return Number(text.trim().replace(",", "."));
 }
 
 function operationLabel(row: { orderNumber: string; sequenceNo: number; operationDescription: string | null }, workCenterName?: string | null) {
@@ -660,7 +654,7 @@ function AbsenceForm({
 }) {
   const [typeId, setTypeId] = useState(row?.absenceTypeId ?? "");
   const [day, setDay] = useState(row?.date ?? date);
-  const [hours, setHours] = useState(row ? hoursInput(row.minutes) : "");
+  const [hours, setHours] = useState(row ? formatDuration(row.minutes) : "");
   const [note, setNote] = useState(row?.note ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -672,12 +666,12 @@ function AbsenceForm({
       setError("Välj en frånvarokod");
       return;
     }
-    const parsed = parseHours(hours);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      setError("Ange antal timmar (t.ex. 8 eller 4,5)");
+    // Tid is tt:mm (lib/duration.ts); the API keeps minutes.
+    const minutes = readAbsenceMinutes(hours);
+    if (typeof minutes === "string") {
+      setError(minutes);
       return;
     }
-    const minutes = Math.round(parsed * 60);
     let body: Record<string, unknown>;
     if (!row) {
       body = { absenceTypeId: typeId, date: day, minutes, note: note.trim() || undefined };
@@ -723,8 +717,8 @@ function AbsenceForm({
         <Field label="Datum" htmlFor="sd-abs-date">
           <Input id="sd-abs-date" type="date" required value={day} onChange={(e) => setDay(e.target.value)} />
         </Field>
-        <Field label="Timmar" htmlFor="sd-abs-hours">
-          <Input id="sd-abs-hours" inputMode="decimal" required value={hours} onChange={(e) => setHours(e.target.value)} />
+        <Field label="Tid (tt:mm)" htmlFor="sd-abs-hours">
+          <DurationInput id="sd-abs-hours" required placeholder="t.ex. 8:00" value={hours} onValueChange={setHours} />
         </Field>
       </FormRow>
       <Field label="Anteckning (valfritt)" htmlFor="sd-abs-note">
@@ -767,7 +761,8 @@ function WorkStampForm({
   const [operationId, setOperationId] = useState(row?.moOperationId ?? "");
   const [start, setStart] = useState(row ? toDateTimeLocalValue(row.startedAt) : `${date}T07:00`);
   const [stop, setStop] = useState(row?.stoppedAt ? toDateTimeLocalValue(row.stoppedAt) : `${date}T16:00`);
-  const [pause, setPause] = useState(String(row?.pauseMinutes ?? 0));
+  // Paus as tt:mm; the API takes whole minutes.
+  const [pause, setPause] = useState(formatDuration(row?.pauseMinutes ?? 0));
   const [kind, setKind] = useState<TimeKind | "">(row ? (row.kind ?? "") : timeKindSplit ? "run" : "");
   const [quantityOk, setQuantityOk] = useState(row?.report ? String(row.report.quantityOk) : "0");
   const [quantityScrapped, setQuantityScrapped] = useState(row?.report ? String(row.report.quantityScrapped) : "0");
@@ -803,14 +798,18 @@ function WorkStampForm({
 
   const startedAt = instantFromField(start, row?.startedAt ?? null);
   const stoppedAt = instantFromField(stop, row?.stoppedAt ?? null);
-  const pauseMinutes = Number(pause) || 0;
-  const preview = stampHours(startedAt, stoppedAt, pauseMinutes);
+  const pauseMinutes = pause.trim() === "" ? 0 : parseDuration(pause);
+  const preview = pauseMinutes === null ? null : stampHours(startedAt, stoppedAt, pauseMinutes);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!operationId) {
       setError("Välj tillverkningsorder och operation");
+      return;
+    }
+    if (pauseMinutes === null) {
+      setError(`Paus: ${DURATION_HINT}`);
       return;
     }
     if (!startedAt || !stoppedAt || preview === null) {
@@ -897,12 +896,12 @@ function WorkStampForm({
         <Field label="Slut" htmlFor="sd-ws-stop">
           <Input id="sd-ws-stop" type="datetime-local" required value={stop} onChange={(e) => setStop(e.target.value)} />
         </Field>
-        <Field label="Paus (min)" htmlFor="sd-ws-pause">
-          <Input id="sd-ws-pause" type="number" min="0" step="1" value={pause} onChange={(e) => setPause(e.target.value)} />
+        <Field label="Paus (tt:mm)" htmlFor="sd-ws-pause">
+          <DurationInput id="sd-ws-pause" placeholder="t.ex. 0:30" value={pause} onValueChange={setPause} />
         </Field>
       </FormRow>
       <FormHint>
-        Tid som rapporteras: <span className="num">{preview === null ? "–" : hoursText(preview)}</span>
+        Tid som rapporteras: <span className="num">{preview === null ? "–" : durationFromHours(preview)}</span>
       </FormHint>
       {timeKindSplit && (
         <Field label="Typ" htmlFor="sd-ws-kind">
@@ -984,7 +983,8 @@ function ManualReportForm({
   onCancel: () => void;
 }) {
   const [day, setDay] = useState(row.date);
-  const [hours, setHours] = useState(row.hours.toLocaleString("sv-SE", { maximumFractionDigits: 2 }));
+  // Tid as tt:mm; the time report keeps hours with two decimals.
+  const [hours, setHours] = useState(durationFromHours(row.hours));
   const [kind, setKind] = useState<TimeKind | "">(row.kind ?? "");
   const [note, setNote] = useState(row.note ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -993,9 +993,9 @@ function ManualReportForm({
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const parsed = parseHours(hours);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      setError("Ange antal timmar (t.ex. 1,5)");
+    const parsed = hoursFromDuration(hours, row.hours);
+    if (parsed === null || parsed <= 0) {
+      setError(parsed === null ? DURATION_HINT : "Ange en tid större än 0:00.");
       return;
     }
     const body: Record<string, unknown> = {};
@@ -1026,8 +1026,8 @@ function ManualReportForm({
         <Field label="Datum" htmlFor="sd-tr-date">
           <Input id="sd-tr-date" type="date" required value={day} onChange={(e) => setDay(e.target.value)} />
         </Field>
-        <Field label="Timmar" htmlFor="sd-tr-hours">
-          <Input id="sd-tr-hours" inputMode="decimal" required value={hours} onChange={(e) => setHours(e.target.value)} />
+        <Field label="Tid (tt:mm)" htmlFor="sd-tr-hours">
+          <DurationInput id="sd-tr-hours" required value={hours} onValueChange={setHours} />
         </Field>
       </FormRow>
       {timeKindSplit && (

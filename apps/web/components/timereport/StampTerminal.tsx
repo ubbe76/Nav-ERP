@@ -10,6 +10,7 @@ import { FileText } from "lucide-react";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage, shortageList } from "../../lib/errorMessages";
+import { formatDuration, parseDuration } from "../../lib/duration";
 import { othersStampingOnOperation, stampRestSuggestion } from "../../lib/restSuggestion";
 import type {
   AtfStatus,
@@ -1059,7 +1060,7 @@ export function StampTerminal({
         ),
       ]);
       const scheduledMinutes = calendar[0]?.daySchedule?.netMinutes ?? null;
-      setAtfHours(scheduledMinutes ? String(scheduledMinutes / 60).replace(".", ",") : "");
+      setAtfHours(scheduledMinutes ? formatDuration(scheduledMinutes) : "");
       setError(null);
       setStep({ name: "atf", employee, atf, scheduledMinutes });
     } catch (err) {
@@ -1070,9 +1071,10 @@ export function StampTerminal({
   }
 
   async function takeAtf(employee: EmployeeDirectoryEntry, attendance: AttendanceSession | undefined) {
-    const hours = Number(atfHours.replace(",", "."));
-    if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
-      setError("Ange antal ATF-timmar, t.ex. 2 eller 8,5.");
+    // Tid as tt:mm — a bare number is minutes (lib/duration.ts).
+    const minutes = parseDuration(atfHours);
+    if (minutes === null || minutes <= 0 || minutes > 1440) {
+      setError("Ange ATF-tiden som tt:mm, t.ex. 8:00 eller 2:30.");
       return;
     }
     setBusy(true);
@@ -1082,17 +1084,17 @@ export function StampTerminal({
         body: JSON.stringify({
           date: stockholmToday(),
           type: "withdrawal",
-          minutes: Math.round(hours * 60),
+          minutes,
           note: "ATF via stämpelterminalen",
         }),
       });
       if (!attendance) {
         await refreshQuietly();
-        setNotice(`${formatHours(Math.round(hours * 60))} ATF uttaget för ${employee.name.split(" ")[0]}.`);
+        setNotice(`${formatHours(minutes)} ATF uttaget för ${employee.name.split(" ")[0]}.`);
         resetToKeypad();
         return;
       }
-      await finishAtf(employee, { kind: "atf", attendanceId: attendance.id, atfTransactionId: transaction.id, hours }, undefined, {
+      await finishAtf(employee, { kind: "atf", attendanceId: attendance.id, atfTransactionId: transaction.id, hours: minutes / 60 }, undefined, {
         fromAtfStep: true,
       });
     } catch (err) {
@@ -1499,15 +1501,22 @@ export function StampTerminal({
                     : "Ingen schemalagd tid idag."}
               </div>
             </div>
-            <input
-              className={styles.note}
-              type="text"
-              inputMode="decimal"
-              aria-label="ATF-timmar"
-              placeholder="Antal timmar, t.ex. 2 eller 8,5"
-              value={atfHours}
-              onChange={(e) => setAtfHours(e.target.value)}
-            />
+            <label className={styles.quantityField}>
+              ATF-tid (tt:mm)
+              <input
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="t.ex. 8:00"
+                value={atfHours}
+                onChange={(e) => setAtfHours(e.target.value)}
+                onBlur={(e) => {
+                  // Show what was understood ("90" → 1:30), as DurationInput.
+                  const minutes = parseDuration(e.target.value);
+                  if (minutes !== null && formatDuration(minutes) !== e.target.value) setAtfHours(formatDuration(minutes));
+                }}
+              />
+            </label>
             <p className={styles.hint}>
               {openAttendance.some((s) => s.employeeId === step.employee.id)
                 ? "Din närvarostämpling stämplas ut samtidigt."

@@ -3,6 +3,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Input, Label, Select } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
 import { FormError, FormHint } from "../ui/Form";
 import { BatchSelect, useBatchBalances } from "../stock/BatchSelect";
 import { compressSerialNumbers } from "../../lib/serials";
@@ -22,6 +23,7 @@ import { restFieldValue } from "../../lib/restSuggestion";
 import { defaultReportKind, suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { groupReportRows, moOperationLabel } from "../../lib/moReportRows";
 import { stockholmToday } from "../../lib/date";
+import { DURATION_HINT, durationFromHours, formatDuration, hoursFromDuration, parseDuration } from "../../lib/duration";
 import type {
   EmployeeDirectoryEntry,
   MOMaterialConsumption,
@@ -155,7 +157,7 @@ export function ReportPanel({
           <span>Klart/Kvar</span>
           <span>Antal klart</span>
           <span>Kasserat</span>
-          <span>Faktisk tid</span>
+          <span>Faktisk tid (tt:mm)</span>
           <span />
         </div>
 
@@ -259,6 +261,12 @@ function OperationRow({
       setError("Ange en kassationsorsak när kasserat antal är större än 0.");
       return;
     }
+    // Faktisk tid is tt:mm (the column keeps hours).
+    const actualHours = actualTime.trim() === "" ? null : hoursFromDuration(actualTime);
+    if (actualTime.trim() !== "" && actualHours === null) {
+      setError(`Faktisk tid: ${DURATION_HINT}`);
+      return;
+    }
     const quantityCompleted = quantity ?? prefill;
     // The field starts empty when the rest is not suggested: an empty Antal
     // klart with nothing scrapped is nothing to report (a typed 0 still is).
@@ -273,7 +281,7 @@ function OperationRow({
         apiFetch(`/api/v1/manufacturing-orders/${orderId}/operations/${op.id}/complete`, {
           method: "POST",
           body: JSON.stringify({
-            ...(actualTime ? { actualTime: Number(actualTime) } : {}),
+            ...(actualHours !== null ? { actualTime: actualHours } : {}),
             quantityCompleted: Number(quantityCompleted) || 0,
             quantityScrapped: scrapQty,
             ...(scrapQty > 0 && reasonRegister ? { scrapReasonId } : {}),
@@ -378,16 +386,14 @@ function OperationRow({
                 onChange={(e) => setScrapped(e.target.value)}
               />
             </Cell>
-            <Cell label="Faktisk tid">
-              <Input
+            <Cell label="Faktisk tid (tt:mm)">
+              <DurationInput
                 id={`actualTime-${op.id}`}
-                aria-label={`Faktisk tid för ${moOperationLabel(op)}`}
-                type="number"
-                min="0"
-                step="0.01"
+                aria-label={`Faktisk tid (tt:mm) för ${moOperationLabel(op)}`}
+                placeholder="tt:mm"
                 size="sm"
                 value={actualTime}
-                onChange={(e) => setActualTime(e.target.value)}
+                onValueChange={setActualTime}
               />
             </Cell>
             <div className={styles.action}>
@@ -612,9 +618,9 @@ function ReportTimeRow({
   // a typed value.
   const [kind, setKind] = useState<TimeKind | "">(defaultReportKind(timeKindSplit));
   const [typedHours, setTypedHours] = useState<string | null>(null);
-  const hours =
-    typedHours ??
-    suggestedReportHours(operations.find((op) => op.id === operationId), orderQuantity, timeReports, timeKindSplit ? kind : "");
+  // Tid is tt:mm; the suggestion is hours (two decimals) shown as tt:mm.
+  const suggestedHours = suggestedReportHours(operations.find((op) => op.id === operationId), orderQuantity, timeReports, timeKindSplit ? kind : "");
+  const hours = typedHours ?? (suggestedHours === "" ? "" : durationFromHours(suggestedHours));
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -624,6 +630,11 @@ function ReportTimeRow({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const minutes = parseDuration(hours);
+    if (minutes === null || minutes <= 0) {
+      setError(minutes === null ? DURATION_HINT : "Ange en tid större än 0:00.");
+      return;
+    }
     setPending(true);
     try {
       const created = await apiFetch<{ id: string }>("/api/v1/time-reports", {
@@ -632,7 +643,7 @@ function ReportTimeRow({
           employeeId,
           moOperationId: operationId,
           date,
-          hours: Number(hours),
+          hours: hoursFromDuration(hours),
           note: note || undefined,
           ...(timeKindSplit && kind ? { kind } : {}),
         }),
@@ -642,7 +653,7 @@ function ReportTimeRow({
       const operation = operations.find((op) => op.id === operationId);
       const employee = employees.find((emp) => emp.id === employeeId);
       notify({
-        message: `Rapporterat ${formatQuantity(Number(hours))} h${employee ? ` för ${employee.name}` : ""}${operation ? ` på ${moOperationLabel(operation)}` : ""}.`,
+        message: `Rapporterat ${formatDuration(minutes)}${employee ? ` för ${employee.name}` : ""}${operation ? ` på ${moOperationLabel(operation)}` : ""}.`,
         action:
           canUndo && created?.id
             ? {
@@ -707,8 +718,13 @@ function ReportTimeRow({
         <Cell label="Datum" className={styles.date}>
           <Input id="reportDate" aria-label="Datum" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
         </Cell>
-        <Cell label="Timmar" className={styles.hours}>
-          <Input id="reportHours" aria-label="Timmar" type="number" min="0" step="any" required size="sm" value={hours} onChange={(e) => setTypedHours(e.target.value)} />
+        <Cell label="Tid (tt:mm)" className={styles.time}>
+          <span className={styles.unitField}>
+            <DurationInput id="reportHours" aria-label="Tid (tt:mm)" placeholder="tt:mm" required size="sm" value={hours} onValueChange={setTypedHours} />
+            <span className={styles.unit} aria-hidden="true">
+              tt:mm
+            </span>
+          </span>
         </Cell>
         <Cell label="Anteckning (valfritt)" className={styles.grow}>
           <Input id="reportNote" aria-label="Anteckning (valfritt)" placeholder="Anteckning" value={note} onChange={(e) => setNote(e.target.value)} />

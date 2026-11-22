@@ -9,6 +9,8 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { Input, Select } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
+import { DURATION_HINT, durationFromHours, hoursFromDuration } from "../../lib/duration";
 import { FormError } from "../ui/Form";
 import { NewWorkCenterForm } from "./NewWorkCenterForm";
 import { apiFetch } from "../../lib/api";
@@ -43,7 +45,8 @@ function draftFor(workCenter: WorkCenter): RowDraft {
     productionGroupId: workCenter.productionGroupId ?? "",
     weekScheduleId: workCenter.weekScheduleId ?? "",
     capacityFactor: plain(workCenter.capacityFactor),
-    hoursPerDay: workCenter.hoursPerDay == null ? "" : plain(workCenter.hoursPerDay),
+    // Kapacitet per dag as tt:mm; the column keeps hours.
+    hoursPerDay: workCenter.hoursPerDay == null ? "" : durationFromHours(workCenter.hoursPerDay),
   };
 }
 
@@ -56,7 +59,7 @@ function patchFor(workCenter: WorkCenter, draft: RowDraft): Record<string, unkno
   if ((draft.productionGroupId || null) !== workCenter.productionGroupId) patch.productionGroupId = draft.productionGroupId || null;
   if ((draft.weekScheduleId || null) !== workCenter.weekScheduleId) patch.weekScheduleId = draft.weekScheduleId || null;
   if (Number(draft.capacityFactor) !== Number(workCenter.capacityFactor)) patch.capacityFactor = Number(draft.capacityFactor);
-  const hours = draft.hoursPerDay.trim() === "" ? null : Number(draft.hoursPerDay);
+  const hours = draft.hoursPerDay.trim() === "" ? null : hoursFromDuration(draft.hoursPerDay, workCenter.hoursPerDay);
   if (hours !== (workCenter.hoursPerDay == null ? null : Number(workCenter.hoursPerDay))) patch.hoursPerDay = hours;
   return patch;
 }
@@ -96,6 +99,11 @@ export function WorkCentersPageClient({
 
   async function saveEdit(workCenter: WorkCenter) {
     if (!draft) return;
+    // An unreadable Kapacitet must not be sent as "none".
+    if (draft.hoursPerDay.trim() !== "" && hoursFromDuration(draft.hoursPerDay) === null) {
+      setError(`Kapacitet per dag: ${DURATION_HINT}`);
+      return;
+    }
     const patch = patchFor(workCenter, draft);
     if (Object.keys(patch).length === 0) {
       cancelEdit();
@@ -250,18 +258,15 @@ export function WorkCentersPageClient({
                       />
                     </span>
                     <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--color-text-secondary)" }}>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="24"
-                        step="any"
+                      <DurationInput
                         size="xs"
+                        placeholder="tt:mm"
                         value={draft.hoursPerDay}
-                        onChange={(e) => update("hoursPerDay", e.target.value)}
+                        onValueChange={(value) => update("hoursPerDay", value)}
                         onKeyDown={keys}
-                        aria-label={`Kapacitet i timmar per dag för ${workCenter.name}`}
+                        aria-label={`Kapacitet per dag (tt:mm) för ${workCenter.name}`}
                       />
-                      h/dag
+                      tt:mm/dag
                     </span>
                   </span>
                 );

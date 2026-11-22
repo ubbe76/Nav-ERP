@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
+import { DURATION_HINT, durationFromHours, formatDuration, hoursFromDuration, parseDuration } from "../../lib/duration";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { confirmDelete } from "../../lib/confirm";
@@ -319,7 +321,8 @@ function AnstallningTab({ employee, onDirtyChange }: { employee: Employee; onDir
   const [employedTo, setEmployedTo] = useState(employee.employedTo ?? "");
   const [employmentType, setEmploymentType] = useState<EmploymentType | "">(employee.employmentType ?? "");
   const [wage, setWage] = useState(employee.wage ?? "");
-  const [weeklyHours, setWeeklyHours] = useState(employee.weeklyHours ?? "");
+  // Veckoarbetstid as tt:mm; the column keeps hours with two decimals.
+  const [weeklyHours, setWeeklyHours] = useState(employee.weeklyHours == null ? "" : durationFromHours(employee.weeklyHours));
   const [overtimeCompensation, setOvertimeCompensation] = useState<OvertimeCompensation>(
     employee.overtimeCompensation
   );
@@ -340,7 +343,12 @@ function AnstallningTab({ employee, onDirtyChange }: { employee: Employee; onDir
     if ((employmentType === "" ? null : employmentType) !== (employee.employmentType ?? null))
       patch.employmentType = employmentType === "" ? null : employmentType;
     if (numOrNull(wage) !== startNum(employee.wage)) patch.wage = numOrNull(wage);
-    if (numOrNull(weeklyHours) !== startNum(employee.weeklyHours)) patch.weeklyHours = numOrNull(weeklyHours);
+    const weekly = weeklyHours.trim() === "" ? null : hoursFromDuration(weeklyHours, employee.weeklyHours);
+    if (weeklyHours.trim() !== "" && (weekly === null || weekly > 168)) {
+      setError(weekly === null ? `Veckoarbetstid: ${DURATION_HINT}` : "Veckoarbetstiden kan vara högst 168:00.");
+      return;
+    }
+    if (weekly !== startNum(employee.weeklyHours)) patch.weeklyHours = weekly;
     if (overtimeCompensation !== employee.overtimeCompensation) patch.overtimeCompensation = overtimeCompensation;
     if (Object.keys(patch).length === 0) {
       setDirty(false);
@@ -404,16 +412,8 @@ function AnstallningTab({ employee, onDirtyChange }: { employee: Employee; onDir
         </FormRow>
 
         <FormRow>
-          <Field label="Veckoarbetstid (timmar)" htmlFor="weeklyHours">
-            <Input
-              id="weeklyHours"
-              type="number"
-              step="any"
-              min="0"
-              max="168"
-              value={weeklyHours}
-              onChange={(e) => setWeeklyHours(e.target.value)}
-            />
+          <Field label="Veckoarbetstid (tt:mm)" htmlFor="weeklyHours">
+            <DurationInput id="weeklyHours" placeholder="t.ex. 40:00" value={weeklyHours} onValueChange={setWeeklyHours} />
           </Field>
           <Field label="Övertidsersättning" htmlFor="overtimeCompensation">
             <Select
@@ -789,8 +789,9 @@ function AtfTab({
 
   // Inställningar
   const [atfMode, setAtfMode] = useState<AtfMode>(employee.atfMode);
+  // ATF per vecka as tt:mm; the API keeps minutes. Empty = the system's.
   const [minutesPerWeek, setMinutesPerWeek] = useState(
-    employee.atfMinutesPerWeek === null ? "" : String(employee.atfMinutesPerWeek)
+    employee.atfMinutesPerWeek === null ? "" : formatDuration(employee.atfMinutesPerWeek)
   );
   const [startDate, setStartDate] = useState(employee.atfStartDate ?? "");
   const [saved, setSaved] = useState(false);
@@ -813,13 +814,18 @@ function AtfTab({
     e.preventDefault();
     setError(null);
     setSaved(false);
+    const atfMinutes = minutesPerWeek.trim() === "" ? null : parseDuration(minutesPerWeek);
+    if (minutesPerWeek.trim() !== "" && (atfMinutes === null || atfMinutes > 600)) {
+      setError(atfMinutes === null ? `ATF per vecka: ${DURATION_HINT}` : "ATF per vecka kan vara högst 10:00.");
+      return;
+    }
     setPending(true);
     try {
       await apiFetch(`/api/v1/employees/${employee.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           atfMode,
-          atfMinutesPerWeek: minutesPerWeek.trim() === "" ? null : Number(minutesPerWeek),
+          atfMinutesPerWeek: atfMinutes,
           atfStartDate: startDate === "" ? null : startDate,
         }),
       });
@@ -836,9 +842,10 @@ function AtfTab({
   async function addTransaction(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const hours = Number(txHours.replace(",", "."));
-    if (!Number.isFinite(hours) || hours === 0) {
-      setError("Ange antal timmar (t.ex. 4 eller 0,5)");
+    // Tid as tt:mm; a justering may be negative. The API keeps minutes.
+    const minutes = parseDuration(txHours, { signed: txType !== "withdrawal" });
+    if (minutes === null || minutes === 0) {
+      setError(minutes === null ? DURATION_HINT : "Ange en tid som inte är 0:00.");
       return;
     }
     setTxPending(true);
@@ -848,7 +855,7 @@ function AtfTab({
         body: JSON.stringify({
           date: txDate,
           type: txType,
-          minutes: Math.round(hours * 60),
+          minutes,
           note: txNote.trim() === "" ? undefined : txNote.trim(),
         }),
       });
@@ -915,15 +922,12 @@ function AtfTab({
                 ))}
               </Select>
             </Field>
-            <Field label="Minuter per vecka" htmlFor="atfMinutes">
-              <Input
+            <Field label="ATF per vecka (tt:mm)" htmlFor="atfMinutes">
+              <DurationInput
                 id="atfMinutes"
-                type="number"
-                min={0}
-                max={600}
-                placeholder={`Systemstandard: ${systemSettings.atfMinutesPerWeek}`}
+                placeholder={`Systemstandard: ${formatDuration(systemSettings.atfMinutesPerWeek)}`}
                 value={minutesPerWeek}
-                onChange={(e) => setMinutesPerWeek(e.target.value)}
+                onValueChange={setMinutesPerWeek}
               />
             </Field>
           </FormRow>
@@ -932,7 +936,7 @@ function AtfTab({
           </Field>
           <FormHint>
             Tidbank samlar intjäningen till saldot; Veckouttag kvittar den löpande (kortare arbetsvecka läggs i
-            schemat). Tomt minutfält = följ systemstandarden. Intjäningen räknas per hel vecka (mån–sön) från
+            schemat). Tomt fält = följ systemstandarden. Intjäningen räknas per hel vecka (mån–sön) från
             startdatumet — ändras minutsatsen i efterhand räknas historiken om, korrigera i så fall med en justering.
           </FormHint>
           <FormActions>
@@ -980,15 +984,14 @@ function AtfTab({
             </Field>
           </FormRow>
           <FormRow>
-            <Field label="Timmar" htmlFor="txHours">
-              <Input
+            <Field label="Tid (tt:mm)" htmlFor="txHours">
+              <DurationInput
                 id="txHours"
-                type="number"
-                step="any"
                 required
-                placeholder={txType === "withdrawal" ? "t.ex. 4" : "t.ex. 12 eller -1,5"}
+                signed={txType !== "withdrawal"}
+                placeholder={txType === "withdrawal" ? "t.ex. 4:00" : "t.ex. 12:00 eller -1:30"}
                 value={txHours}
-                onChange={(e) => setTxHours(e.target.value)}
+                onValueChange={setTxHours}
               />
             </Field>
             <Field label="Notering" htmlFor="txNote">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Field, Input, Select } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -13,6 +14,7 @@ import type { Absence, AbsenceType, ResolvedCalendarDay, StampSession, UserRole 
 import { formatHours } from "./SchedulesPageClient";
 import styles from "./EmployeeTabs.module.css";
 import { stockholmToday } from "../../lib/date";
+import { formatDuration, readAbsenceMinutes } from "../../lib/duration";
 
 interface FranvaroTabProps {
   employeeId: string;
@@ -20,13 +22,6 @@ interface FranvaroTabProps {
   absenceTypes: AbsenceType[];
   initialAbsences: Absence[];
   userRole: UserRole;
-}
-
-// Converts net minutes (from a resolved day schedule) to a comma-decimal
-// hours string for the Timmar field — the reverse of addAbsence's
-// `.replace(",", ".")` parse below.
-function minutesToHoursInput(minutes: number): string {
-  return (minutes / 60).toLocaleString("sv-SE", { maximumFractionDigits: 2 });
 }
 
 // DuplicateAbsenceError/PayrollPeriodLockedError are mapped to Swedish copy
@@ -52,7 +47,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
     setEditing(a);
     setAbsenceTypeId(a.absenceTypeId);
     setDate(a.date);
-    setHours(minutesToHoursInput(a.minutes));
+    setHours(formatDuration(a.minutes));
     setNote(a.note ?? "");
   }
 
@@ -89,7 +84,7 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
         setError("Ingen schemalagd tid på valt datum");
         return;
       }
-      setHours(minutesToHoursInput(day.daySchedule.netMinutes));
+      setHours(formatDuration(day.daySchedule.netMinutes));
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte hämta schemat"));
     }
@@ -102,12 +97,12 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
       setError("Välj en frånvarokod");
       return;
     }
-    const parsedHours = Number(hours.replace(",", "."));
-    if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
-      setError("Ange antal timmar (t.ex. 8 eller 4,5)");
+    // Tid is tt:mm (lib/duration.ts); the API keeps minutes.
+    const minutes = readAbsenceMinutes(hours);
+    if (typeof minutes === "string") {
+      setError(minutes);
       return;
     }
-    const minutes = Math.round(parsedHours * 60);
     setPending(true);
     try {
       if (editing) {
@@ -189,15 +184,8 @@ export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbs
               </Field>
             </FormRow>
             <FormRow>
-              <Field label="Timmar" htmlFor="absenceHours">
-                <Input
-                  id="absenceHours"
-                  required
-                  placeholder="t.ex. 8 eller 4,5"
-                  size="sm"
-                  value={hours}
-                  onChange={(e) => setHours(e.target.value)}
-                />
+              <Field label="Tid (tt:mm)" htmlFor="absenceHours">
+                <DurationInput id="absenceHours" required placeholder="t.ex. 8:00" size="sm" value={hours} onValueChange={setHours} />
               </Field>
               <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: 2 }}>
                 <Button type="button" variant="ghost" onClick={fetchFromSchedule}>

@@ -216,7 +216,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                   { key: "sequenceNo", label: "Op", width: "70px", align: "right" },
                   { key: "workCenterName", label: "Resurs", width: "1fr" },
                   { key: "hours", label: "Timmar", width: "100px", align: "right" },
-                  { key: "setupHours", label: "Ställtid", width: "100px", align: "right" },
+                  { key: "setupHours", label: "Ställtid (h)", width: "100px", align: "right" },
                   { key: "hourlyRate", label: "Timkostnad", width: "120px", align: "right" },
                   { key: "laborAmount", label: "Lön", width: "110px", align: "right" },
                   { key: "setupPerUnit", label: "varav ställ/st", width: "130px", align: "right" },
