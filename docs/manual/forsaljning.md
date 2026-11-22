@@ -1013,7 +1013,7 @@ Det går inte att ångra bara en del av en rads antal. Ångra raden och leverera
 
 ## Frakt
 
-Frakten bokar transport hos en speditör direkt från en följesedel, via en förmedlare: **Sendify**, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker, **nShift** med era egna avtal, eller **Shipmondo** med Shipmondos priser och era egna avtal. Du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Minst en förmedlare måste vara aktiverad under **System → Frakt** (se [Fraktinställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via en förmedlare — egen bil, kunden hämtar eller ett eget avtal som bokas utanför Nav — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
+Frakten bokar transport hos en speditör direkt från en följesedel, via en förmedlare: **Sendify**, som erbjuder bland annat DHL, UPS, DSV, PostNord och Schenker, **nShift** med era egna avtal, eller **Shipmondo** med Shipmondos priser och era egna avtal. Du jämför priser, bokar och skriver ut fraktsedel utan att lämna systemet. Minst en förmedlare måste vara påslagen under **System → Frakt** (se [Fraktinställningar](/hjalp/system#fraktinstallningar)) innan knappen **Boka transport** visas. Frakt som inte bokas via en förmedlare — egen bil, kunden hämtar eller ett eget avtal som bokas utanför Nav — registreras med [Eget fraktsätt](#eget-fraktsatt), som alltid finns.
 
 ### Skapa en försändelse
 

@@ -18,15 +18,17 @@
   outline-offset: 1px;
 }
 
+/* A manual popover placed by SearchPicker.tsx (top/bottom, left, width,
+   max-height from the input) — reset the popover UA style's centring
+   (inset: 0; margin: auto) and its Canvas colours. */
 .list {
-  position: absolute;
+  position: fixed;
+  inset: auto;
   z-index: 30;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
   margin: 0;
   padding: 4px;
   list-style: none;
+  color: var(--color-text-primary);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);

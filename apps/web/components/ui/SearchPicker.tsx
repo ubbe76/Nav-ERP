@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "../../lib/api";
 import type { Paged } from "../../lib/types";
 import styles from "./SearchPicker.module.css";
@@ -28,6 +28,41 @@ const searchCache = new Map<string, CacheEntry>();
 function otherDialog(node: EventTarget | null, input: Element): HTMLDialogElement | null {
   const dialog = node instanceof Element ? node.closest("dialog") : null;
   return dialog && !dialog.contains(input) ? dialog : null;
+}
+
+// The list is a popover (top layer), placed with position: fixed under the
+// input — above it when there is less room below — like RowMenu: an
+// absolutely positioned list was clipped by the Table's overflow-x: auto
+// (the order cards' "+ Ny rad" picker on the last row showed its hits only
+// after scrolling inside the table), and a container query ancestor (the
+// order header) would capture a merely fixed one. It follows the input on
+// scroll and resize instead of closing: on a phone, focusing the input
+// scrolls the page as the keyboard opens.
+const LIST_MAX_HEIGHT = 280;
+const LIST_MIN_WIDTH = 320;
+const LIST_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
+function placeList(input: HTMLElement, list: HTMLElement) {
+  const rect = input.getBoundingClientRect();
+  const viewHeight = document.documentElement.clientHeight;
+  const viewWidth = document.documentElement.clientWidth;
+  const below = viewHeight - rect.bottom - LIST_GAP - VIEWPORT_MARGIN;
+  const above = rect.top - LIST_GAP - VIEWPORT_MARGIN;
+  // Decided on the full height, not the current rows, so the list does not
+  // jump from one side to the other while the hits narrow down.
+  const up = below < LIST_MAX_HEIGHT && above > below;
+  list.style.maxHeight = `${Math.max(Math.min(LIST_MAX_HEIGHT, up ? above : below), 0)}px`;
+  list.style.top = up ? "auto" : `${rect.bottom + LIST_GAP}px`;
+  list.style.bottom = up ? `${viewHeight - rect.top + LIST_GAP}px` : "auto";
+  // At least LIST_MIN_WIDTH, so a narrow field (the "+ Ny rad" cell) still
+  // shows the benämning; never wider than the window.
+  const width = Math.min(Math.max(rect.width, LIST_MIN_WIDTH), viewWidth - 2 * VIEWPORT_MARGIN);
+  list.style.width = `${width}px`;
+  list.style.left = `${Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewWidth - width - VIEWPORT_MARGIN))}px`;
+  // Scrolled out of sight (a long dialog, the page under the topbar): the
+  // list hides with it rather than float over the rest.
+  list.style.visibility = rect.bottom < 0 || rect.top > viewHeight ? "hidden" : "";
 }
 
 interface SearchPickerProps<T extends { id: string }> {
@@ -82,6 +117,7 @@ export function SearchPicker<T extends { id: string }>({
   const blurRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeq = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Enter pressed before the list matched the box (typed or scanned "1234" +
   // Enter within the debounce): the search runs at once and its first hit is
   // picked when it lands — never a row of the previous list.
@@ -262,6 +298,34 @@ export function SearchPicker<T extends { id: string }>({
     }
   }
 
+  // Into the top layer when it opens (a browser without popovers keeps the
+  // fixed list), and placed again as the rows change.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const input = inputRef.current;
+    if (!open || !list || !input) return;
+    if (typeof list.showPopover === "function" && !list.matches(":popover-open")) list.showPopover();
+    placeList(input, list);
+  }, [open, visible.length, loading]);
+
+  useEffect(() => {
+    if (!open) return;
+    const follow = (e: Event) => {
+      const list = listRef.current;
+      const input = inputRef.current;
+      if (!list || !input) return;
+      // The list's own scrolling moves nothing.
+      if (e.type === "scroll" && e.target instanceof Node && list.contains(e.target)) return;
+      placeList(input, list);
+    };
+    window.addEventListener("scroll", follow, { capture: true, passive: true });
+    window.addEventListener("resize", follow);
+    return () => {
+      window.removeEventListener("scroll", follow, { capture: true });
+      window.removeEventListener("resize", follow);
+    };
+  }, [open]);
+
   useEffect(() => {
     listRef.current?.querySelector('[data-highlighted="true"]')?.scrollIntoView({ block: "nearest" });
   }, [open, highlighted]);
@@ -271,6 +335,7 @@ export function SearchPicker<T extends { id: string }>({
   return (
     <div className={styles.picker}>
       <input
+        ref={inputRef}
         id={id}
         type="text"
         className={styles.input}
@@ -318,7 +383,7 @@ export function SearchPicker<T extends { id: string }>({
         }}
       />
       {open && (
-        <ul className={styles.list} role="listbox" id={listId} ref={listRef}>
+        <ul className={styles.list} role="listbox" id={listId} ref={listRef} popover="manual">
           {visible.map((item, index) => (
             <li key={item.id} role="none">
               <button
