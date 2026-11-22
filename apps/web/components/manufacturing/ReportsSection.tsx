@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Table } from "../ui/Table";
+import { Table, shareTrack } from "../ui/Table";
 import { GatedLink } from "../ui/GatedLink";
 import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
@@ -100,13 +100,16 @@ export function ReportsSection({
       <Table<MOReport>
         columns={[
           { key: "createdAt", label: "Tid", width: "130px" },
-          { key: "kind", label: "Rapportering", width: "minmax(0, 2fr)" },
-          { key: "sequenceNo", label: "Operation", width: "minmax(0, 1fr)" },
+          // The flexible columns have a floor (shareTrack): with minmax(0, …)
+          // they collapsed to nothing beside the list (Lista och kort) and the
+          // headers were drawn over each other; now the table scrolls instead.
+          { key: "kind", label: "Rapportering", width: shareTrack(140, 2) },
+          { key: "sequenceNo", label: "Operation", width: shareTrack(110) },
           { key: "quantityOk", label: "OK", width: "70px", align: "right" },
           { key: "quantityScrapped", label: "Kasserat", width: "80px", align: "right" },
           { key: "quantityReceived", label: "Inlevererat", width: "90px", align: "right" },
           { key: "hours", label: "Timmar", width: "70px", align: "right" },
-          { key: "employeeName", label: "Av", width: "minmax(0, 1fr)" },
+          { key: "employeeName", label: "Av", width: shareTrack(90) },
           { key: "id", label: "", width: "200px", align: "right" },
         ]}
         rows={reports}
