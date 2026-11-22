@@ -73,32 +73,45 @@ Längst ner finns **Speditörer** — företagets egna kundnummer hos olika sped
 
 ## Fraktinställningar
 
-**System → Frakt** (bara administratörer) styr transportbokningen, som används på [Försändelser](/hjalp/forsaljning#frakt). Transporten bokas via en förmedlare: **Sendify**, **nShift** eller **Shipmondo** (se [Förmedlare](#formedlare)). Kortet **Sendify** har fälten:
-
-- **Aktiverad** — slår på funktionen; utan den visas ingen **Boka transport**.
-- **Miljö** — **Sandlåda** (test) eller **Produktion**.
-- **API-nyckel** — skapas i Sendify under Settings → API. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
-- **Avsändarkontakt**, **Telefon** och **E-post** — avsändarens kontaktuppgifter. Adressen hämtas från [Företagsinformation](#foretagsinformation); har adressen flera rader skickas den andra raden som avsändarens adressrad 2; tom telefon eller e-post ger företagets.
-- **Påslag (%)** och **Påslag (kr)** — läggs på förmedlarens pris och bildar **Kundpris** på försändelsen.
-- **Bekräfta prisändring över (%)** — standard 5. Har priset ändrats mer än så sedan valet sparades krävs en bekräftelse vid bokning.
-- **Fraktartikel** — artikeln (normalt av typen Tjänst) som frakten faktureras som: på fakturans fraktrader, se [Frakt på fakturan](/hjalp/forsaljning#frakt-pa-fakturan), och som fraktraden **Lägg till frakt** lägger på offerten/kundordern, se [Frakt på offert och order](/hjalp/forsaljning#frakt-pa-offert-och-order). Utan fraktartikel går det att hämta priser men inte att lägga till frakten, och inga fraktrader föreslås i fakturadialogen.
-- **Spårningsintervall** — hur ofta spårningen körs automatiskt: **Varje timme**, **Var fjärde timme** eller **Dagligen**, se [Spårning](/hjalp/forsaljning#sparning). Under fältet visas **Senaste spårningskörning** (eller **Spårningen har inte körts ännu**).
-
-Spara med **Spara**. Under **Upphämtningstider** kryssas varje veckodag som har upphämtning med tider **Från**/**Till**; en dag utan kryss har ingen upphämtning. Röda dagar i helgdagslistan har aldrig upphämtning, medan en kortdag räknas som en vanlig dag. Spara med **Spara upphämtningstider**.
-
-Under **Fraktprodukter** testar **Testa anslutning** Sendify-nyckeln i fältet **API-nyckel** mot vald **Miljö** utan att spara den; är fältet tomt testas den sparade nyckeln. **Hämta från Sendify** fyller listan över fraktprodukter (**Förmedlare**, **Transportör**, **Produkt**). Listan fylls också på när priser hämtas på en försändelse.
+**System → Frakt** (bara administratörer) styr transportbokningen, som används på [Försändelser](/hjalp/forsaljning#frakt). Transporten bokas via en förmedlare: **Sendify**, **nShift** eller **Shipmondo**. Sidan visar bara inställningarna för de förmedlare som är påslagna under [Förmedlare](#formedlare), så att den inte blir längre än den behöver. Kortet [Gemensamt](#gemensamt) finns alltid, och **Upphämtningstider** och **Fraktprodukter** visas när minst en förmedlare är påslagen.
 
 ### Förmedlare
 
-Kortet **Förmedlare** har **Förvald förmedlare**. En ny försändelse bokas via den förvalda förmedlaren, om inte orderns eller kundens fraktprodukt hör till en annan förmedlare som är aktiverad. Är den förvalda inte aktiverad används den första som är det. Förmedlaren kan bytas på försändelsens utkast. Påslagen, fraktartikeln, avsändarkontakten och upphämtningstiderna ovan gäller alla förmedlare. Under fältet står vilka förmedlare som är aktiverade med sina uppgifter.
+Kortet **Förmedlare** har en kryssruta för varje förmedlare: **Sendify**, **nShift** och **Shipmondo**. En kryssruta sparas direkt och visar eller döljer förmedlarens kort nedanför. En förmedlare som slås av behåller sina sparade uppgifter och val, och de finns kvar när den slås på igen. Utan någon påslagen förmedlare visas ingen **Boka transport**; [Eget fraktsätt](/hjalp/forsaljning#eget-fraktsatt) finns ändå.
+
+**Förvald förmedlare** visas när minst en förmedlare är påslagen och sparas direkt. En ny försändelse bokas via den förvalda förmedlaren, om inte orderns eller kundens fraktprodukt hör till en annan förmedlare som är påslagen. Är den förvalda inte påslagen används den första som är det. Förmedlaren kan bytas på försändelsens utkast. Under fältet står det om en påslagen förmedlare ännu saknar sina uppgifter — den används först när de är sparade.
 
 nShift och Shipmondo är byggda efter förmedlarnas dokumentation och har ännu inte provats mot ett riktigt konto. Prova därför med **Testläge** eller **Sandlåda** innan de används skarpt.
+
+### Sendify
+
+Kortet **Sendify** har fälten:
+
+- **Miljö** — **Sandlåda** (test) eller **Produktion**.
+- **API-nyckel** — skapas i Sendify under Settings → API. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
+- **Spårningsintervall** — hur ofta spårningen körs automatiskt: **Varje timme**, **Var fjärde timme** eller **Dagligen**, se [Spårning](/hjalp/forsaljning#sparning). Under fältet visas **Senaste spårningskörning** (eller **Spårningen har inte körts ännu**).
+
+**Spara Sendify** sparar kortet. **Testa anslutning** testar nyckeln i fältet **API-nyckel** mot vald **Miljö** utan att spara den; är fältet tomt testas den sparade nyckeln. **Hämta produkter** hämtar Sendifys fraktprodukter till listan **Fraktprodukter** och använder den sparade nyckeln och miljön, så spara ändringarna först.
+
+### Gemensamt
+
+Kortet **Gemensamt** gäller alla förmedlare. När någon förmedlare är påslagen har det fälten:
+
+- **Avsändarkontakt**, **Telefon** och **E-post** — avsändarens kontaktuppgifter. Adressen hämtas från [Företagsinformation](#foretagsinformation); har adressen flera rader skickas den andra raden som avsändarens adressrad 2; tom telefon eller e-post ger företagets.
+- **Påslag (%)** och **Påslag (kr)** — läggs på förmedlarens pris och bildar **Kundpris** på försändelsen.
+- **Bekräfta prisändring över (%)** — standard 5. Har priset ändrats mer än så sedan valet sparades krävs en bekräftelse vid bokning.
+
+**Fraktartikel** finns alltid, eftersom den också gäller Eget fraktsätt: artikeln (normalt av typen Tjänst) som frakten faktureras som — på fakturans fraktrader, se [Frakt på fakturan](/hjalp/forsaljning#frakt-pa-fakturan), och som fraktraden **Lägg till frakt** lägger på offerten/kundordern, se [Frakt på offert och order](/hjalp/forsaljning#frakt-pa-offert-och-order). Utan fraktartikel går det att hämta priser men inte att lägga till frakten, och inga fraktrader föreslås i fakturadialogen. Spara med **Spara**.
+
+Under **Upphämtningstider** kryssas varje veckodag som har upphämtning med tider **Från**/**Till**; en dag utan kryss har ingen upphämtning. Röda dagar i helgdagslistan har aldrig upphämtning, medan en kortdag räknas som en vanlig dag. Spara med **Spara upphämtningstider**.
+
+**Fraktprodukter** listar alla förmedlares fraktprodukter (**Förmedlare**, **Transportör**, **Produkt**). Listan fylls med **Hämta produkter** på respektive förmedlares kort och fylls också på när priser hämtas på en försändelse.
 
 ### nShift
 
 Kortet **nShift** gäller bokning med företagets **egna avtal** hos till exempel DHL Freight, DB Schenker och PostNord via nShift Delivery (tidigare Unifaun). nShift säljer ingen frakt till egna priser, så avtalen måste finnas: kundnumren läggs på avsändaren i nShift (Underhåll → Avsändare → Transportörer). Fälten:
 
-- **Aktiverad** och **Testläge** — i testläge skickas bokningarna inte till transportören och etiketterna märks TEST.
+- **Testläge** — bokningarna skickas inte till transportören och etiketterna märks TEST.
 - **Prisfråga via API** — hämtar priset för varje tjänst. Det kräver nShift Professional och att transportörens prisinloggning finns i nShift (DHL e-ID, DB Schenkers e-tjänster). Utan prisfråga visas tjänsterna med **Pris saknas** och kundpriset skrivs för hand.
 - **Nyckel-id** och **Hemlighet** — API-nyckeln skapas i nShift under Underhåll → API-nycklar, typ Web Services (REST), och kräver funktionen APIConnect. Uppgifterna visas aldrig igen; tomma fält behåller de sparade.
 - **Avsändar-ID i nShift** — avsändarens ID (quickId) i nShift, som bär kundnumren. Förval *1*.
@@ -110,7 +123,7 @@ Kortet **nShift** gäller bokning med företagets **egna avtal** hos till exempe
 
 Kortet **Shipmondo** gäller bokning till **Shipmondos egna priser** och med företagets **egna avtal** som aktiverats i Shipmondo (Inställningar → Frakt → Egna avtal). Från Sverige har Shipmondo egna priser för bland annat DHL Freight paket och pall och DSV Road paket; egna avtal går för DHL Freight, DSV Road (tidigare DB Schenker) inklusive pall och System, och PostNord. Fälten:
 
-- **Aktiverad**, **Miljö** (**Sandlåda** eller **Produktion**) och **Shipmondos priser** — det sista styr om Shipmondos egna priser hämtas.
+- **Miljö** (**Sandlåda** eller **Produktion**) och **Shipmondos priser** — det sista styr om Shipmondos egna priser hämtas.
 - **API-användare** och **API-nyckel** — skapas i Shipmondo under Inställningar → Integrationer → API. Uppgifterna visas aldrig igen; tomma fält behåller de sparade.
 - **Egna avtal att prisfråga** — produkterna med eget avtal som erbjuds på försändelsen. Klicka först på **Hämta produkter**. Priset för ett eget avtal är transportörens, när transportören ger något; annars visas **Pris saknas** och kundpriset skrivs för hand.
 

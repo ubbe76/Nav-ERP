@@ -5,6 +5,14 @@
   color: var(--color-text-secondary);
 }
 
+/* Förmedlare: the three on/off boxes on one line. */
+.brokers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 8px 0 10px;
+}
+
 .checks {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

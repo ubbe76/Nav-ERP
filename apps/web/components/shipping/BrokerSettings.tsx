@@ -15,50 +15,73 @@ import styles from "./BrokerSettings.module.css";
 // register (the API's OWN_AGREEMENT_SUFFIX).
 const OWN = "+eget";
 
-// Förmedlare (0221): Förvald förmedlare, nShift and Shipmondo — each with
-// its own credentials (write-only: blank keeps the stored one), Testa
-// anslutning and Hämta transportörsprodukter, and the products it prices.
-export function BrokerSettings({
-  initial,
-  products,
-  onProducts,
-}: {
-  initial: FreightSettings;
-  products: FreightProduct[];
-  onProducts: (products: FreightProduct[]) => void;
-}) {
-  const [settings, setSettings] = useState(initial);
-  const [defaultBroker, setDefaultBroker] = useState<FreightBroker>(initial.defaultBroker);
-  const [defaultSaved, setDefaultSaved] = useState(false);
-  const [defaultError, setDefaultError] = useState<string | null>(null);
+// The brokers that are switched on — the order of the page's cards.
+export function brokersOn(settings: FreightSettings): FreightBroker[] {
+  return FREIGHT_BROKERS.filter((b) => (b === "sendify" ? settings.enabled : settings[b].enabled));
+}
 
-  async function saveDefault(next: FreightBroker) {
-    setDefaultBroker(next);
-    setDefaultSaved(false);
-    setDefaultError(null);
+// Förmedlare (0221): one switch per broker and Förvald förmedlare, both
+// saved at once. Only a broker that is on gets its card on the page (the
+// user 2026-11-21: "endast att inställningarna för det/de valda alternativen
+// visas så att inte sidan blir så lång"); switching one off hides its card
+// and keeps what it has stored — credentials, products and choices.
+export function BrokerChoice({ settings, onSaved }: { settings: FreightSettings; onSaved: (s: FreightSettings) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const on = brokersOn(settings);
+  // On but not usable yet: the credentials are missing.
+  const waiting = on.filter((b) => !settings.enabledBrokers.includes(b));
+  // Förvald förmedlare among those that are on (and the stored one, so the
+  // field never shows a value that is not the saved one).
+  const defaultChoices = FREIGHT_BROKERS.filter((b) => on.includes(b) || b === settings.defaultBroker);
+
+  async function patch(body: object, fallback: string) {
+    setError(null);
+    setSaved(false);
+    setBusy(true);
     try {
-      setSettings(await apiFetch<FreightSettings>("/api/v1/freight-settings", { method: "PATCH", body: JSON.stringify({ defaultBroker: next }) }));
-      setDefaultSaved(true);
+      onSaved(await apiFetch<FreightSettings>("/api/v1/freight-settings", { method: "PATCH", body: JSON.stringify(body) }));
+      setSaved(true);
     } catch (err) {
-      setDefaultError(apiErrorMessage(err, "Kunde inte spara förvald förmedlare"));
+      setError(apiErrorMessage(err, fallback));
+    } finally {
+      setBusy(false);
     }
   }
 
+  function toggle(broker: FreightBroker, enabled: boolean) {
+    void patch(broker === "sendify" ? { enabled } : { [broker]: { enabled } }, `Kunde inte ändra ${BROKER_LABELS[broker]}`);
+  }
+
   return (
-    <>
-      <div className={cardStyles.card} style={{ marginTop: 18 }}>
-        <div>
-          <div className={cardStyles.label}>Förmedlare</div>
-          <div className={cardStyles.description}>
-            En ny försändelse bokas via förvald förmedlare, om inte orderns eller kundens fraktprodukt hör till en annan. Förmedlaren
-            kan bytas på försändelsens utkast. Påslagen, fraktartikeln och upphämtningstiderna gäller alla förmedlare.
-          </div>
+    <div className={cardStyles.card}>
+      <div>
+        <div className={cardStyles.label}>Förmedlare</div>
+        <div className={cardStyles.description}>
+          Slå på de förmedlare ni bokar transport via — bara deras inställningar visas nedan. En avstängd förmedlare behåller sina
+          sparade uppgifter. Eget fraktsätt fungerar utan förmedlare.
         </div>
-        <FormError>{defaultError}</FormError>
+      </div>
+      <FormError>{error}</FormError>
+      <div className={styles.brokers} role="group" aria-label="Påslagna förmedlare">
+        {FREIGHT_BROKERS.map((b) => (
+          <label key={b} className={styles.check}>
+            <Checkbox id={`broker-${b}`} checked={on.includes(b)} disabled={busy} onChange={(e) => toggle(b, e.target.checked)} />
+            {BROKER_LABELS[b]}
+          </label>
+        ))}
+      </div>
+      {on.length > 0 && (
         <FormRow>
           <Field label="Förvald förmedlare" htmlFor="defaultBroker">
-            <Select id="defaultBroker" value={defaultBroker} onChange={(e) => saveDefault(e.target.value as FreightBroker)}>
-              {FREIGHT_BROKERS.map((b) => (
+            <Select
+              id="defaultBroker"
+              value={settings.defaultBroker}
+              disabled={busy}
+              onChange={(e) => void patch({ defaultBroker: e.target.value }, "Kunde inte spara förvald förmedlare")}
+            >
+              {defaultChoices.map((b) => (
                 <option key={b} value={b}>
                   {BROKER_LABELS[b]}
                 </option>
@@ -66,17 +89,15 @@ export function BrokerSettings({
             </Select>
           </Field>
         </FormRow>
-        <FormHint>
-          {settings.enabledBrokers.length === 0
-            ? "Ingen förmedlare är aktiverad med sina uppgifter."
-            : `Aktiverade: ${settings.enabledBrokers.map((b) => BROKER_LABELS[b]).join(", ")}.`}
-          {defaultSaved ? " Sparat." : ""}
-        </FormHint>
-      </div>
-
-      <NshiftCard settings={settings} onSaved={setSettings} products={products} onProducts={onProducts} />
-      <ShipmondoCard settings={settings} onSaved={setSettings} products={products} onProducts={onProducts} />
-    </>
+      )}
+      <FormHint>
+        {on.length > 0
+          ? "En ny försändelse bokas via förvald förmedlare, om inte orderns eller kundens fraktprodukt hör till en annan. Förmedlaren kan bytas på försändelsens utkast."
+          : "Ingen förmedlare är påslagen."}
+        {waiting.length > 0 ? ` ${waiting.map((b) => BROKER_LABELS[b]).join(" och ")} används först när ${waiting.length > 1 ? "deras" : "dess"} uppgifter är sparade.` : ""}
+        {saved ? " Sparat." : ""}
+      </FormHint>
+    </div>
   );
 }
 
@@ -170,7 +191,7 @@ function ProductChecks({
   );
 }
 
-function NshiftCard({
+export function NshiftCard({
   settings,
   onSaved,
   products,
@@ -182,7 +203,6 @@ function NshiftCard({
   onProducts: (products: FreightProduct[]) => void;
 }) {
   const n = settings.nshift;
-  const [enabled, setEnabled] = useState(n.enabled);
   const [testMode, setTestMode] = useState(n.testMode);
   const [keyId, setKeyId] = useState("");
   const [secret, setSecret] = useState("");
@@ -201,7 +221,7 @@ function NshiftCard({
       const updated = await apiFetch<FreightSettings>("/api/v1/freight-settings", {
         method: "PATCH",
         body: JSON.stringify({
-          nshift: { enabled, testMode, apiKeyId: keyId, apiSecret: secret, senderQuickId: quickId, services, priceEnquiry },
+          nshift: { testMode, apiKeyId: keyId, apiSecret: secret, senderQuickId: quickId, services, priceEnquiry },
         }),
       });
       onSaved(updated);
@@ -226,9 +246,6 @@ function NshiftCard({
     >
       <FormError>{error}</FormError>
       <FormRow>
-        <Field label="Aktiverad" htmlFor="nshiftEnabled">
-          <Toggle id="nshiftEnabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        </Field>
         <Field label="Testläge" htmlFor="nshiftTest">
           <Toggle id="nshiftTest" checked={testMode} onChange={(e) => setTestMode(e.target.checked)} />
         </Field>
@@ -282,7 +299,7 @@ function NshiftCard({
   );
 }
 
-function ShipmondoCard({
+export function ShipmondoCard({
   settings,
   onSaved,
   products,
@@ -294,7 +311,6 @@ function ShipmondoCard({
   onProducts: (products: FreightProduct[]) => void;
 }) {
   const m = settings.shipmondo;
-  const [enabled, setEnabled] = useState(m.enabled);
   const [environment, setEnvironment] = useState(m.environment);
   const [apiUser, setApiUser] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -311,7 +327,7 @@ function ShipmondoCard({
     try {
       const updated = await apiFetch<FreightSettings>("/api/v1/freight-settings", {
         method: "PATCH",
-        body: JSON.stringify({ shipmondo: { enabled, environment, apiUser, apiKey, shipmondoRates, ownAgreementProducts: own } }),
+        body: JSON.stringify({ shipmondo: { environment, apiUser, apiKey, shipmondoRates, ownAgreementProducts: own } }),
       });
       onSaved(updated);
       setApiUser("");
@@ -335,9 +351,6 @@ function ShipmondoCard({
     >
       <FormError>{error}</FormError>
       <FormRow>
-        <Field label="Aktiverad" htmlFor="shipmondoEnabled">
-          <Toggle id="shipmondoEnabled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        </Field>
         <Field label="Miljö" htmlFor="shipmondoEnvironment">
           <Select id="shipmondoEnvironment" value={environment} onChange={(e) => setEnvironment(e.target.value as "sandbox" | "production")}>
             <option value="sandbox">Sandlåda</option>
