@@ -163,8 +163,13 @@ export function createShippingRepository(db: Db) {
       return db.select().from(pickupTimes).orderBy(asc(pickupTimes.weekday));
     },
 
+    // One replace at a time: two overlapping saves (a second click on Spara)
+    // both deleted before either inserted, and the later insert hit
+    // pickup_times_pkey — a 500 (the user, 2026-11-22). Queued, the second
+    // delete sees the first one's rows and the last save wins.
     async replacePickupTimes(rows: { weekday: number; timeFrom: string; timeTo: string }[]) {
       await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('pickup_times'))`);
         await tx.delete(pickupTimes);
         if (rows.length > 0) await tx.insert(pickupTimes).values(rows);
       });
