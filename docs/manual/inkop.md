@@ -251,7 +251,13 @@ I orderhuvudet finns även kryssrutan **Frakt på vårt konto**. Kryssa i den n�
 
 ### Bekräftat leveransdatum
 
-När leverantören har bekräftat ordern fyller du i **Bekräftat leveransdatum** i orderhuvudet. Datumet gäller direkt på alla rader som inte har ett eget bekräftat datum — det är förifyllt på raderna. Ändrar du orderns datum senare behåller rader du redan har gett ett eget datum det.
+När leverantören har bekräftat ordern fyller du i **Bekräftat leveransdatum** i orderhuvudet. Datumet gäller direkt på alla rader som inte har ett eget bekräftat datum — det är förifyllt på raderna.
+
+Har några rader som inte är mottagna ett eget bekräftat datum när du sparar ett nytt datum i huvudet, frågar Nav om de ska följa orderns nya datum. Frågan anger hur många rader det gäller och deras datum.
+
+- **Uppdatera raderna** tar bort radernas egna datum, så att de följer ordern.
+- **Avbryt** låter raderna behålla sina datum. Huvudet sparas i båda fallen.
+- Rader som redan är mottagna ändras aldrig.
 
 Bekräftar leverantören rad för rad, eller kommer raderna olika dagar, använder du **Bekräfta rader…** i knappraden. Knappen finns när ordern är Bekräftad eller Delvis mottagen och har rader kvar att ta emot. Dialogen listar de raderna med restantal och önskat leveransdatum, och du fyller i leverantörens datum per rad:
 

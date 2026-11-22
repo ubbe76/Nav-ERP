@@ -983,9 +983,16 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
       return resolveDimensions(db, input, opts);
     },
 
+    // `rowsFollowConfirmed` (the user 2026-11-22: confirming the whole order
+    // left rows confirmed earlier on their own dates): the rows still to come
+    // drop their own Bekräftat leveransdatum in the same transaction and
+    // follow the order's new one. Rows first (sorted on id, FOR UPDATE), then
+    // the order — the row → order order of updateRow and the receipt.
+    // `followedRows` = the rows changed, with the date they had.
     async updatePurchaseOrderHeader(id: string, input: UpdatePurchaseOrderHeaderInput) {
-      // bumpRevision is a directive, not a column — strip it before the spread.
-      const { bumpRevision, deliveryAddress, ...fields } = input;
+      // bumpRevision and rowsFollowConfirmed are directives, not columns —
+      // strip them before the spread.
+      const { bumpRevision, deliveryAddress, rowsFollowConfirmed, ...fields } = input;
       // Leveransadress: an object writes the five snapshot columns, null
       // clears them all (the company's address again), omitted keeps them.
       const addressColumns =
@@ -998,19 +1005,49 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
               deliveryCity: deliveryAddress?.city ?? null,
               deliveryCountry: deliveryAddress?.country ?? null,
             };
-      const [row] = await db
-        .update(purchaseOrders)
-        .set({
-          ...fields,
-          ...addressColumns,
-          // The numeric column wants a string; undefined keeps the current value.
-          exchangeRate: fields.exchangeRate === undefined ? undefined : String(fields.exchangeRate),
-          revision: bumpRevision !== false ? sql`${purchaseOrders.revision} + 1` : undefined,
-          updatedAt: new Date(),
-        })
-        .where(eq(purchaseOrders.id, id))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        let followedRows: { articleNumber: string; confirmedDeliveryDate: string }[] = [];
+        if (rowsFollowConfirmed && fields.confirmedDeliveryDate) {
+          const own = await tx
+            .select({
+              id: purchaseOrderRows.id,
+              articleNumber: articles.articleNumber,
+              confirmedDeliveryDate: purchaseOrderRows.confirmedDeliveryDate,
+            })
+            .from(purchaseOrderRows)
+            .innerJoin(articles, eq(articles.id, purchaseOrderRows.articleId))
+            .where(
+              and(
+                eq(purchaseOrderRows.purchaseOrderId, id),
+                isNotNull(purchaseOrderRows.confirmedDeliveryDate),
+                lt(purchaseOrderRows.quantityReceived, purchaseOrderRows.quantityOrdered)
+              )
+            )
+            .orderBy(asc(purchaseOrderRows.id))
+            .for("update", { of: purchaseOrderRows });
+          if (own.length > 0) {
+            await tx
+              .update(purchaseOrderRows)
+              .set({ confirmedDeliveryDate: null })
+              .where(inArray(purchaseOrderRows.id, own.map((r) => r.id)));
+          }
+          followedRows = own.map((r) => ({ articleNumber: r.articleNumber, confirmedDeliveryDate: r.confirmedDeliveryDate! }));
+        }
+        const [row] = await tx
+          .update(purchaseOrders)
+          .set({
+            ...fields,
+            ...addressColumns,
+            // The numeric column wants a string; undefined keeps the current value.
+            exchangeRate: fields.exchangeRate === undefined ? undefined : String(fields.exchangeRate),
+            revision: bumpRevision !== false ? sql`${purchaseOrders.revision} + 1` : undefined,
+            updatedAt: new Date(),
+          })
+          .where(eq(purchaseOrders.id, id))
+          .returning();
+        // Orders are never deleted, so the rows above always had their order.
+        return { order: row ?? null, followedRows };
+      });
     },
 
     // `today` (Stockholm) dates the status filter Sen (late-orders.ts).

@@ -62,6 +62,8 @@ import {
   initialConfirmationEntries,
   rowConfirmationCell,
   rowConfirmationPatches,
+  rowsFollowQuestion,
+  rowsKeepingOwnConfirmedDate,
   rowWantedDate,
 } from "../../lib/purchaseRowConfirmation";
 
@@ -501,6 +503,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
         <PurchaseHeaderEditor
           key={`${purchaseHeaderSignature(order)}|${headerReset}`}
           order={order}
+          rows={rows}
           registers={registers}
           onDone={() => router.refresh()}
           onReset={() => setHeaderReset((n) => n + 1)}
@@ -872,12 +875,16 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
 
 function PurchaseHeaderEditor({
   order,
+  rows,
   registers,
   onDone,
   onReset,
   onEditAddress,
 }: {
   order: PurchaseOrder;
+  // For the question whether rows with their own Bekräftat leveransdatum
+  // follow a new one in the header.
+  rows: PurchaseOrderRow[];
   registers: TermsRegisters;
   onDone: () => void;
   onReset: () => void;
@@ -922,6 +929,12 @@ function PurchaseHeaderEditor({
   async function save(e: FormEvent) {
     e.preventDefault();
     if (!dirty || pending) return;
+    // A new Bekräftat leveransdatum: rows confirmed earlier keep their own
+    // dates unless they are told to follow (lib/purchaseRowConfirmation.ts).
+    const newConfirmed = confirmedDeliveryDate || null;
+    const keeping = rowsKeepingOwnConfirmedDate(rows, order.confirmedDeliveryDate, newConfirmed);
+    const rowsFollowConfirmed =
+      keeping.length > 0 && (await confirmDialog(rowsFollowQuestion(keeping, newConfirmed!), { confirmLabel: "Uppdatera raderna" }));
     const bumpRevision = await askBumpRevision(order.revision);
     setError(null);
     setPending(true);
@@ -930,7 +943,8 @@ function PurchaseHeaderEditor({
         method: "PATCH",
         body: JSON.stringify({
           expectedDeliveryDate: expectedDeliveryDate || null,
-          confirmedDeliveryDate: confirmedDeliveryDate || null,
+          confirmedDeliveryDate: newConfirmed,
+          ...(rowsFollowConfirmed ? { rowsFollowConfirmed: true } : {}),
           exchangeRate: Number(exchangeRate),
           yourReference: yourReference.trim() || null,
           ourReference: ourReference.trim() || null,

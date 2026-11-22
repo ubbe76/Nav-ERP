@@ -404,6 +404,10 @@ export const updatePurchaseOrderHeaderSchema = z
     expectedDeliveryDate: z.string().date().nullable().optional(),
     // Bekräftat leveransdatum — every row without its own inherits it.
     confirmedDeliveryDate: businessDateSchema.nullable().optional(),
+    // true with a confirmedDeliveryDate: the rows still to come drop their
+    // own confirmed date and follow the order's (the card asks; 2026-11-22).
+    // Ignored without a date. Received rows keep theirs.
+    rowsFollowConfirmed: z.boolean().optional(),
     note: z.string().nullable().optional(),
     // Not nullable — an order always has an exchange rate.
     exchangeRate: blankSafe(z.coerce.number().min(numericStep(6)).max(numericMax(12, 6))).optional(),
@@ -421,7 +425,7 @@ export const updatePurchaseOrderHeaderSchema = z
     bumpRevision: z.boolean().optional(),
   })
   .refine(
-    (data) => Object.keys(data).some((key) => key !== "bumpRevision"),
+    (data) => Object.keys(data).some((key) => key !== "bumpRevision" && key !== "rowsFollowConfirmed"),
     "At least one field must be provided"
   );
 export type UpdatePurchaseOrderHeaderInput = z.infer<typeof updatePurchaseOrderHeaderSchema>;

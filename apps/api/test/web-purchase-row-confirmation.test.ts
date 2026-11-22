@@ -6,6 +6,8 @@ import {
   rowConfirmationCell,
   rowConfirmationPatches,
   rowConfirmedDate,
+  rowsFollowQuestion,
+  rowsKeepingOwnConfirmedDate,
   rowWantedDate,
   type ConfirmationOrder,
   type ConfirmationRow,
@@ -82,5 +84,33 @@ describe("Bekräfta rader", () => {
 
     // A row without any Önskat keeps its entry; one with its own still fills.
     expect(fillWithWantedDates(listed, order({ expectedDeliveryDate: null }), start)).toEqual({ open: "", own: "2026-12-09", part: "" });
+  });
+});
+
+// A new Bekräftat leveransdatum in the header (the user 2026-11-22): which
+// rows keep a date of their own, and the question the card asks.
+describe("raderna och orderns nya bekräftade datum", () => {
+  it("lists the rows still to come with another own date — only when the header gets a new date", () => {
+    const rows = [
+      row("a", { confirmedDeliveryDate: "2026-11-19" }),
+      row("b"),
+      row("c", { confirmedDeliveryDate: "2026-11-26" }),
+      row("d", { confirmedDeliveryDate: "2026-11-19", quantityReceived: "10" }),
+    ];
+    expect(rowsKeepingOwnConfirmedDate(rows, null, "2026-11-26").map((r) => r.id)).toEqual(["a"]);
+    expect(rowsKeepingOwnConfirmedDate(rows, "2026-11-26", "2026-11-26")).toEqual([]);
+    expect(rowsKeepingOwnConfirmedDate(rows, "2026-11-26", null)).toEqual([]);
+  });
+
+  it("asks with the number of rows and their dates", () => {
+    expect(rowsFollowQuestion([row("a", { confirmedDeliveryDate: "2026-11-19" })], "2026-11-26")).toMatch(
+      /^En rad har ett eget bekräftat leveransdatum \(2026-11-19\)\. Ska den följa orderns nya datum 2026-11-26\?/
+    );
+    const many = [
+      row("a", { confirmedDeliveryDate: "2026-11-20" }),
+      row("b", { confirmedDeliveryDate: "2026-11-19" }),
+      row("c", { confirmedDeliveryDate: "2026-11-19" }),
+    ];
+    expect(rowsFollowQuestion(many, "2026-11-26")).toMatch(/^3 rader har ett eget bekräftat leveransdatum \(2026-11-19, 2026-11-20\)\. Ska de följa/);
   });
 });

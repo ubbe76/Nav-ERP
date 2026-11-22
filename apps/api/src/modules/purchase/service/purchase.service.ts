@@ -1281,7 +1281,7 @@ export function createPurchaseService(
     // villkor) — same status rule as row editing:
     // draft/confirmed/partially_received. The currency stays locked to the
     // snapshot taken from the supplier at creation.
-    async updatePurchaseOrderHeader(orderId: string, input: UpdatePurchaseOrderHeaderInput) {
+    async updatePurchaseOrderHeader(orderId: string, input: UpdatePurchaseOrderHeaderInput, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
       if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
@@ -1301,7 +1301,18 @@ export function createPurchaseService(
       await validateRegisterRefs(input);
       // Projekt: a new choice must be open; the order's own may stay closed.
       const { projectId } = await repo.resolveDimensions({ projectId: input.projectId }, { existing: { costCenterId: null, projectId: order.projectId } });
-      await repo.updatePurchaseOrderHeader(orderId, { ...input, projectId });
+      const { followedRows } = await repo.updatePurchaseOrderHeader(orderId, { ...input, projectId });
+      // Raderna följer orderns bekräftade datum: the supplier's dates the rows
+      // had are kept in the history (the row PATCH logs its own change).
+      if (followedRows.length > 0) {
+        await audit.log({
+          entityType: "purchase_order",
+          entityId: order.orderNumber,
+          action: "rows_follow_confirmed",
+          detail: { confirmedDeliveryDate: input.confirmedDeliveryDate, rows: followedRows },
+          userId: userId ?? null,
+        });
+      }
       return repo.findPurchaseOrderById(orderId);
     },
 

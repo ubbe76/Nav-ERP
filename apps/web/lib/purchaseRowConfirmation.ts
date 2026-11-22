@@ -90,3 +90,29 @@ export function rowConfirmationPatches(
   }
   return patches;
 }
+
+// A new Bekräftat leveransdatum in the order header (the user 2026-11-22:
+// confirming the whole order left rows confirmed earlier on their own
+// dates): the rows still to come whose own date differs from it. Only when
+// the header's date changes to a date — clearing it asks nothing. The card
+// asks whether they should follow (`rowsFollowConfirmed` on the header PATCH,
+// which clears the own date on every row still to come).
+export function rowsKeepingOwnConfirmedDate<T extends ConfirmationRow>(
+  rows: readonly T[],
+  previous: string | null,
+  next: string | null
+): T[] {
+  if (next === null || next === previous) return [];
+  return rows.filter((r) => hasRest(r) && r.confirmedDeliveryDate !== null && r.confirmedDeliveryDate !== next);
+}
+
+// The question: how many rows and which dates they keep.
+export function rowsFollowQuestion(rows: readonly ConfirmationRow[], next: string): string {
+  const dates = [...new Set(rows.map((r) => r.confirmedDeliveryDate!))].sort().join(", ");
+  const subject = rows.length === 1 ? "En rad har" : `${rows.length} rader har`;
+  const them = rows.length === 1 ? "den" : "de";
+  return (
+    `${subject} ett eget bekräftat leveransdatum (${dates}). Ska ${them} följa orderns nya datum ${next}?\n\n` +
+    `Uppdatera raderna = raderna följer ordern\nAvbryt = raderna behåller sina datum`
+  );
+}
