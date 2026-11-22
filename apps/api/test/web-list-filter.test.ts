@@ -39,7 +39,9 @@ import { SPLIT_LISTS } from "../../web/components/split/splitLists";
 // comma-separated param.
 describe("multi filter helpers", () => {
   const f = PURCHASE_ORDER_FILTER;
-  const open = f.groups![0]!;
+  // Öppna is left only on Förfrågningar (2026-11-22).
+  const q = INQUIRY_FILTER;
+  const open = q.groups![0]!;
 
   it("keeps the filter's order whatever order the values were chosen in", () => {
     let chosen = toggleFilterValue(f, [], "received");
@@ -57,14 +59,14 @@ describe("multi filter helpers", () => {
   });
 
   it("a group chooses all its statuses, and is chosen while they all are", () => {
-    const chosen = toggleFilterGroup(f, ["received"], open);
-    expect(chosen).toEqual(["draft", "confirmed", "partially_received", "received"]);
+    const chosen = toggleFilterGroup(q, ["ordered"], open);
+    expect(chosen).toEqual(["draft", "sent", "answered", "ordered"]);
     expect(groupChosen(open, chosen)).toBe("all");
-    const less = toggleFilterValue(f, chosen, "confirmed");
+    const less = toggleFilterValue(q, chosen, "sent");
     expect(groupChosen(open, less)).toBe("some");
     // Not all chosen: the group chooses the rest; all chosen: it clears them.
-    expect(toggleFilterGroup(f, less, open)).toEqual(chosen);
-    expect(toggleFilterGroup(f, chosen, open)).toEqual(["received"]);
+    expect(toggleFilterGroup(q, less, open)).toEqual(chosen);
+    expect(toggleFilterGroup(q, chosen, open)).toEqual(["ordered"]);
     expect(groupChosen(open, [])).toBe("none");
   });
 
@@ -72,10 +74,11 @@ describe("multi filter helpers", () => {
     expect(filterSummary(f, [], "Alla statusar")).toBe("Alla statusar");
     expect(filterSummary(f, ["draft"], "Alla statusar")).toBe("Utkast");
     expect(filterSummary(f, ["draft", "confirmed"], "Alla statusar")).toBe("Utkast, Bekräftad");
-    expect(filterSummary(f, ["draft", "confirmed", "partially_received"], "Alla statusar")).toBe("Öppna");
-    expect(filterSummary(f, ["draft", "confirmed", "partially_received", "late"], "Alla statusar")).toBe("Öppna, Sen");
+    expect(filterSummary(f, ["draft", "confirmed", "partially_received"], "Alla statusar")).toBe("Utkast, Bekräftad +1");
+    expect(filterSummary(f, ["draft", "late"], "Alla statusar")).toBe("Utkast, Sen");
     expect(filterSummary(f, ["draft", "received", "closed", "late"], "Alla statusar")).toBe("Utkast, Mottagen +2");
-    expect(filterSummary(f, ["draft", "confirmed", "partially_received", "received"], "Alla statusar")).toBe("Öppna, Mottagen");
+    expect(filterSummary(q, ["draft", "sent", "answered"], "Alla statusar")).toBe("Öppna");
+    expect(filterSummary(q, ["draft", "sent", "answered", "ordered"], "Alla statusar")).toBe("Öppna, Beställd");
   });
 });
 
@@ -97,6 +100,14 @@ describe("finished orders hidden by default", () => {
     expect(visibleOptions(f, false).map((o) => o.label)).toEqual(["Utkast", "Bekräftad", "Delvis mottagen"]);
     expect(visibleOptions(f, true)).toHaveLength(6);
     expect(withoutFinished(f, ["draft", "closed", "late"])).toEqual(["draft", "late"]);
+  });
+
+  it("no group that is just Alla: Öppna is gone where the finished are hidden", () => {
+    for (const filter of [SALES_ORDER_FILTER, PURCHASE_ORDER_FILTER, MANUFACTURING_ORDER_FILTER, INQUIRY_FILTER]) {
+      const visible = visibleOptions(filter, false).map((o) => o.value);
+      for (const group of filter.groups ?? []) expect([...group.values].sort()).not.toEqual([...visible].sort());
+    }
+    expect(INQUIRY_FILTER.groups!.map((g) => g.label)).toEqual(["Öppna"]);
   });
 
   it("a finished status in the address shows them by itself", () => {
