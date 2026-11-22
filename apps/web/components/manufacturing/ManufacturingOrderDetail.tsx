@@ -573,7 +573,7 @@ export function ManufacturingOrderDetail({
             { key: "status", label: "Status", width: "76px" },
             { key: "quantityCompleted", label: "Antal OK", width: "50px", align: "right" },
             { key: "quantityScrapped", label: "Kasserat", width: "60px", align: "right" },
-            { key: "actualTime", label: "Faktisk tid", width: "54px", align: "right" },
+            { key: "actualTime", label: "Faktisk tid (h)", width: "54px", align: "right" },
             { key: "id", label: "", width: canEditLines ? "110px" : "80px", align: "right" },
           ]}
           rows={operations}

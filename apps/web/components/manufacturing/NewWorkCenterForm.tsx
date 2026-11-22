@@ -3,6 +3,8 @@
 import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Select, Toggle } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
+import { DURATION_HINT, durationFromHours, hoursFromDuration } from "../../lib/duration";
 import { apiFetch } from "../../lib/api";
 import type { ProductionGroup, WeekSchedule, WorkCenter } from "../../lib/types";
 import { Form, FormHint, FormActions, FormError, FormRow } from "../ui/Form";
@@ -37,8 +39,9 @@ export function NewWorkCenterForm({
   const [capacityFactor, setCapacityFactor] = useState(
     workCenter ? String(Number(workCenter.capacityFactor)) : "1"
   );
+  // Kapacitet per dag as tt:mm; the column keeps hours.
   const [hoursPerDay, setHoursPerDay] = useState(
-    workCenter?.hoursPerDay != null ? String(Number(workCenter.hoursPerDay)) : ""
+    workCenter?.hoursPerDay != null ? durationFromHours(workCenter.hoursPerDay) : ""
   );
   const [active, setActive] = useState(workCenter?.active ?? true);
   // Monitor G5 import fields (Produktionsgruppslista Kostnader/Lista) —
@@ -68,6 +71,11 @@ export function NewWorkCenterForm({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const hoursPerDayValue = hoursPerDay.trim() === "" ? null : hoursFromDuration(hoursPerDay, workCenter?.hoursPerDay);
+    if (hoursPerDay.trim() !== "" && (hoursPerDayValue === null || hoursPerDayValue > 24)) {
+      setError(hoursPerDayValue === null ? `Kapacitet per dag: ${DURATION_HINT}` : "Kapaciteten kan vara högst 24:00 per dag.");
+      return;
+    }
     setPending(true);
     try {
       const payload = {
@@ -79,7 +87,7 @@ export function NewWorkCenterForm({
         overheadPercent: Number(overheadPercent),
         weekScheduleId: weekScheduleId || null,
         capacityFactor: Number(capacityFactor),
-        hoursPerDay: hoursPerDay.trim() === "" ? null : Number(hoursPerDay),
+        hoursPerDay: hoursPerDayValue,
         active,
         calcRate1: calcRate1.trim() === "" ? null : Number(calcRate1),
         calcRate2: calcRate2.trim() === "" ? null : Number(calcRate2),
@@ -153,7 +161,7 @@ export function NewWorkCenterForm({
         <Field label="Kalkylpris 2" htmlFor="calcRate2">
           <Input id="calcRate2" type="number" min="0" step="0.01" size="sm" value={calcRate2} onChange={(e) => setCalcRate2(e.target.value)} />
         </Field>
-        <Field label="Förvald ställtid" htmlFor="defaultSetupTime">
+        <Field label="Förvald ställtid (min)" htmlFor="defaultSetupTime">
           <Input
             id="defaultSetupTime"
             type="number"
@@ -213,17 +221,8 @@ export function NewWorkCenterForm({
 
       {/* Without a week schedule, hours per day (Monday–Friday) give the
           resource capacity — the schedule wins when both are set. */}
-      <Field label="Kapacitet (timmar per dag)" htmlFor="hoursPerDay">
-        <Input
-          id="hoursPerDay"
-          type="number"
-          min="0"
-          max="24"
-          step="any"
-          size="xs"
-          value={hoursPerDay}
-          onChange={(e) => setHoursPerDay(e.target.value)}
-        />
+      <Field label="Kapacitet per dag (tt:mm)" htmlFor="hoursPerDay">
+        <DurationInput id="hoursPerDay" placeholder="t.ex. 8:00" size="xs" value={hoursPerDay} onValueChange={setHoursPerDay} />
       </Field>
       <FormHint attached>Måndag–fredag, helgdagar avräknade. Används när resursen saknar veckoschema.</FormHint>
 

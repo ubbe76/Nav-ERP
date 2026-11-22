@@ -4,10 +4,12 @@ import { useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { stockholmToday } from "../../lib/date";
 import { defaultReportKind } from "../../lib/moSuggestions";
+import { DURATION_HINT, hoursFromDuration, parseDuration } from "../../lib/duration";
 import type { TimeKind, EmployeeDirectoryEntry, ManufacturingOrder, MOOperation } from "../../lib/types";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
 import { useCanOpenPersonal } from "../PermissionsProvider";
@@ -36,7 +38,8 @@ export function NewTimeReportForm({
   const [operationId, setOperationId] = useState("");
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [date, setDate] = useState(today());
-  const [hours, setHours] = useState("1");
+  // Tid as tt:mm (sent as hours).
+  const [hours, setHours] = useState("1:00");
   // Typ: förval Produktion with Dela tid i ställ och produktion on.
   const [kind, setKind] = useState<TimeKind | "">(defaultReportKind(timeKindSplit));
   const [note, setNote] = useState("");
@@ -99,6 +102,11 @@ export function NewTimeReportForm({
       setError("Välj anställd");
       return;
     }
+    const minutes = parseDuration(hours);
+    if (minutes === null || minutes <= 0) {
+      setError(minutes === null ? DURATION_HINT : "Ange en tid större än 0:00.");
+      return;
+    }
     setPending(true);
     try {
       await apiFetch("/api/v1/time-reports", {
@@ -107,7 +115,7 @@ export function NewTimeReportForm({
           employeeId,
           moOperationId: operationId,
           date,
-          hours: Number(hours),
+          hours: hoursFromDuration(hours),
           note: note || undefined,
           ...(timeKindSplit && kind ? { kind } : {}),
         }),
@@ -164,8 +172,8 @@ export function NewTimeReportForm({
         <Field label="Datum" htmlFor="date">
           <Input id="date" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        <Field label="Timmar" htmlFor="hours">
-          <Input id="hours" type="number" min="0" step="any" required size="sm" value={hours} onChange={(e) => setHours(e.target.value)} />
+        <Field label="Tid (tt:mm)" htmlFor="hours">
+          <DurationInput id="hours" required size="sm" value={hours} onValueChange={setHours} />
         </Field>
       </FormRow>
 

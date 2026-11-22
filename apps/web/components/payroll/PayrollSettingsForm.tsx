@@ -4,6 +4,8 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
+import { DurationInput } from "../ui/DurationInput";
+import { formatDuration, parseDuration } from "../../lib/duration";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { SystemSettings } from "../../lib/types";
@@ -24,12 +26,13 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
     settings.paxmlCodeOvertimeOffScheduleComp
   );
   const [codeAtf, setCodeAtf] = useState(settings.paxmlCodeAtf);
-  const [thresholdMinutes, setThresholdMinutes] = useState(String(settings.payrollOvertimeThresholdMinutes));
-  const [atfMinutesPerWeek, setAtfMinutesPerWeek] = useState(String(settings.atfMinutesPerWeek));
+  // The three durations are tt:mm (lib/duration.ts); the settings keep minutes.
+  const [thresholdMinutes, setThresholdMinutes] = useState(formatDuration(settings.payrollOvertimeThresholdMinutes));
+  const [atfMinutesPerWeek, setAtfMinutesPerWeek] = useState(formatDuration(settings.atfMinutesPerWeek));
   const [scheduleBalancing, setScheduleBalancing] = useState(settings.scheduleBalancing);
 
   const [reasonRequired, setReasonRequired] = useState(settings.attendanceReasonRequired);
-  const [toleranceMinutes, setToleranceMinutes] = useState(String(settings.attendanceReasonToleranceMinutes));
+  const [toleranceMinutes, setToleranceMinutes] = useState(formatDuration(settings.attendanceReasonToleranceMinutes));
   const [overtimeChoice, setOvertimeChoice] = useState(settings.terminalOvertimeChoice);
 
   const [saved, setSaved] = useState(false);
@@ -58,21 +61,21 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
     e.preventDefault();
     setSaved(false);
 
-    const minutes = thresholdMinutes.trim() === "" ? 0 : Number(thresholdMinutes);
-    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 600) {
-      setError("Övertidströskeln måste vara ett heltal 0–600 minuter");
+    const minutes = thresholdMinutes.trim() === "" ? 0 : parseDuration(thresholdMinutes);
+    if (minutes === null || minutes > 600) {
+      setError("Övertidströskeln ska vara en tid mellan 0:00 och 10:00 (tt:mm)");
       return;
     }
 
-    const atfMinutes = atfMinutesPerWeek.trim() === "" ? 0 : Number(atfMinutesPerWeek);
-    if (!Number.isInteger(atfMinutes) || atfMinutes < 0 || atfMinutes > 600) {
-      setError("ATF-intjäningen måste vara ett heltal 0–600 minuter");
+    const atfMinutes = atfMinutesPerWeek.trim() === "" ? 0 : parseDuration(atfMinutesPerWeek);
+    if (atfMinutes === null || atfMinutes > 600) {
+      setError("ATF-intjäningen ska vara en tid mellan 0:00 och 10:00 (tt:mm)");
       return;
     }
 
-    const tolerance = toleranceMinutes.trim() === "" ? 0 : Number(toleranceMinutes);
-    if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 120) {
-      setError("Marginalen måste vara ett heltal 0–120 minuter");
+    const tolerance = toleranceMinutes.trim() === "" ? 0 : parseDuration(toleranceMinutes);
+    if (tolerance === null || tolerance > 120) {
+      setError("Marginalen ska vara en tid mellan 0:00 och 2:00 (tt:mm)");
       return;
     }
 
@@ -97,11 +100,11 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       setCodeOvertimeComp(updated.paxmlCodeOvertimeComp);
       setCodeOvertimeOffScheduleComp(updated.paxmlCodeOvertimeOffScheduleComp);
       setCodeAtf(updated.paxmlCodeAtf);
-      setThresholdMinutes(String(updated.payrollOvertimeThresholdMinutes));
-      setAtfMinutesPerWeek(String(updated.atfMinutesPerWeek));
+      setThresholdMinutes(formatDuration(updated.payrollOvertimeThresholdMinutes));
+      setAtfMinutesPerWeek(formatDuration(updated.atfMinutesPerWeek));
       setScheduleBalancing(updated.scheduleBalancing);
       setReasonRequired(updated.attendanceReasonRequired);
-      setToleranceMinutes(String(updated.attendanceReasonToleranceMinutes));
+      setToleranceMinutes(formatDuration(updated.attendanceReasonToleranceMinutes));
       setOvertimeChoice(updated.terminalOvertimeChoice);
       setDirty(false);
       setSaved(true);
@@ -177,31 +180,15 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
         </FormRow>
         <FormHint attached>Tidkoderna måste matcha lönesystemets löneartstabell — stäm av med er lönekonsult.</FormHint>
 
-        <Field label="Övertidströskel (minuter per dag)" htmlFor="payrollOvertimeThresholdMinutes">
-          <Input
-            id="payrollOvertimeThresholdMinutes"
-            type="number"
-            min={0}
-            max={600}
-            size="sm"
-            value={thresholdMinutes}
-            onChange={(e) => setThresholdMinutes(e.target.value)}
-          />
+        <Field label="Övertidströskel per dag (tt:mm)" htmlFor="payrollOvertimeThresholdMinutes">
+          <DurationInput id="payrollOvertimeThresholdMinutes" placeholder="t.ex. 0:30" size="sm" value={thresholdMinutes} onValueChange={setThresholdMinutes} />
         </Field>
 
-        <Field label="ATF-intjäning (minuter per vecka)" htmlFor="atfMinutesPerWeek">
-          <Input
-            id="atfMinutesPerWeek"
-            type="number"
-            min={0}
-            max={600}
-            size="sm"
-            value={atfMinutesPerWeek}
-            onChange={(e) => setAtfMinutesPerWeek(e.target.value)}
-          />
+        <Field label="ATF-intjäning per vecka (tt:mm)" htmlFor="atfMinutesPerWeek">
+          <DurationInput id="atfMinutesPerWeek" placeholder="t.ex. 1:22" size="sm" value={atfMinutesPerWeek} onValueChange={setAtfMinutesPerWeek} />
         </Field>
         <FormHint attached>
-          Arbetstidsförkortning som tjänas in per fullgjord arbetsvecka, t.ex. 82. 0 = ATF används inte. Kan avvikas
+          Arbetstidsförkortning som tjänas in per fullgjord arbetsvecka, t.ex. 1:22. 0:00 = ATF används inte. Kan avvikas
           per anställd på personalkortet.
         </FormHint>
 
@@ -250,16 +237,8 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
           </button>
         </div>
 
-        <Field label="Marginal (minuter)" htmlFor="attendanceReasonToleranceMinutes">
-          <Input
-            id="attendanceReasonToleranceMinutes"
-            type="number"
-            min={0}
-            max={120}
-            size="sm"
-            value={toleranceMinutes}
-            onChange={(e) => setToleranceMinutes(e.target.value)}
-          />
+        <Field label="Marginal (tt:mm)" htmlFor="attendanceReasonToleranceMinutes">
+          <DurationInput id="attendanceReasonToleranceMinutes" placeholder="t.ex. 0:05" size="sm" value={toleranceMinutes} onValueChange={setToleranceMinutes} />
         </Field>
         <FormHint attached>
           Avvikelser upp till och med marginalen kräver ingen anledning. Anledningarna väljs ur registret{" "}

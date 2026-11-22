@@ -27,14 +27,14 @@ Ett veckoschema kopplar ett dagsschema till varje veckodag (måndag–söndag); 
 
 När inställningen **Tillåt ATF-uttag via schemat** är på (under **Personal & lön → Lön, PAXml & schema**, se [Lön, PAXml & schema](/hjalp/lon#lon-paxml-schema)) får veckoschemat två fält till:
 
-- **Ordinarie arbetstid per vecka (timmar)** — till exempel 40. Tomt = ingen utjämning: veckan följer då bara sina dagsscheman.
-- **ATF per vecka (minuter)** — till exempel 82. Med 0 jämnas bara inarbetningen ut.
+- **Ordinarie arbetstid per vecka (tt:mm)** — till exempel 40:00. Tomt = ingen utjämning: veckan följer då bara sina dagsscheman.
+- **ATF per vecka (tt:mm)** — till exempel 1:22. Med 0:00 jämnas bara inarbetningen ut.
 
 Båda delas lika på veckoschemats arbetsdagar — med fem arbetsdagar blir det 8 h ordinarie och 16,4 minuter ATF per arbetsdag. ATF och inarbetning räknas alltså **per arbetsdag**, och **veckans sista arbetsdag** får det som återstår av veckan. Alla andra dagar följer sina dagsscheman som vanligt. Sista arbetsdagens sluttid räknas från dagsschemats starttid, förbi dagens raster — blir dagen längre än dagsschemat fortsätter den efter dess sluttid.
 
-Formuläret visar en förhandsvisning med raden "8 h 00 min ordinarie och 16,4 min ATF per arbetsdag" och två tabeller: **En hel vecka** och **Kort vecka** med helgdag på sista arbetsdagen. Sista arbetsdagen står i fetstil. Går veckan inte ihop — sista arbetsdagen skulle bli 0 minuter eller sluta efter midnatt för någon kombination av helgdagar — visas varför, och veckoschemat går inte att spara. Samma kontroll görs när du ändrar ett dagsschema som används i ett sådant veckoschema. Listan visar **Ordinarie/vecka** och **ATF/vecka**.
+Formuläret visar en förhandsvisning med raden "8:00 ordinarie och 16,4 min ATF per arbetsdag" och två tabeller: **En hel vecka** och **Kort vecka** med helgdag på sista arbetsdagen. Sista arbetsdagen står i fetstil. Går veckan inte ihop — sista arbetsdagen skulle bli 0 minuter eller sluta efter midnatt för någon kombination av helgdagar — visas varför, och veckoschemat går inte att spara. Samma kontroll görs när du ändrar ett dagsschema som används i ett sådant veckoschema. Listan visar **Ordinarie/vecka** och **ATF/vecka**.
 
-**Exempel.** Dagsschemat MAN-TOR är 07:00–16:15 med obetalda raster 09:00–09:20 och 12:00–12:40 (8 h 15 min — 15 minuter inarbetning per dag). Dagsschemat FREDAG är 07:00–12:58 med bara rasten 09:00–09:20. Veckoschemat har MAN-TOR måndag–torsdag och FREDAG på fredag, **Ordinarie arbetstid per vecka** 40 och **ATF per vecka** 82:
+**Exempel.** Dagsschemat MAN-TOR är 07:00–16:15 med obetalda raster 09:00–09:20 och 12:00–12:40 (8 h 15 min — 15 minuter inarbetning per dag). Dagsschemat FREDAG är 07:00–12:58 med bara rasten 09:00–09:20. Veckoschemat har MAN-TOR måndag–torsdag och FREDAG på fredag, **Ordinarie arbetstid per vecka** 40:00 och **ATF per vecka** 1:22:
 
 | Vecka | Sista arbetsdagen | Slutar |
 |---|---|---|
@@ -77,12 +77,12 @@ Prioritetsordning när en dag avgörs: dagöverstyrning → helgdag → veckoöv
 
 ## ATF (arbetstidsförkortning)
 
-ATF tjänas in med ett schablonvärde i **minuter per vecka** för varje fullbordad arbetsvecka:
+ATF tjänas in med ett schablonvärde per vecka för varje fullbordad arbetsvecka:
 
-- Systemstandarden sätts under **Personal & lön → Lön, PAXml & schema** ("ATF-intjäning (minuter per vecka)"); på personalkortets **ATF**-flik kan den överstyras per anställd.
+- Systemstandarden sätts under **Personal & lön → Lön, PAXml & schema** ("ATF-intjäning per vecka (tt:mm)"); på personalkortets **ATF**-flik kan den överstyras per anställd i fältet **ATF per vecka (tt:mm)** — tomt följer systemstandarden.
 - **Intjäning från** anger från vilket datum intjäningen räknas.
 - **Uttagsläge**: **Tidbank** (uttag dras från saldot) eller **Veckouttag** (den anställde tar ut sin ATF varje vecka — ingen bank byggs upp). För ATF som tas ut som kortare arbetstid i veckoschemat, se [ATF och inarbetning i veckoschemat](#atf-och-inarbetning-i-veckoschemat).
-- Fliken visar saldot och alla transaktioner (Uttag/Justering). Uttag registreras här eller av den anställde själv i [stämpelterminalen](/hjalp/terminal); justeringar (± timmar) används för korrigeringar och kan bara registreras här på personalkortet, av en arbetsledare eller administratör med behörigheten **Personal & lön** — aldrig från terminalen. Negativt saldo tillåts men visas rött.
+- Fliken visar saldot och alla transaktioner (Uttag/Justering). Uttag registreras här eller av den anställde själv i [stämpelterminalen](/hjalp/terminal); transaktionens **Tid (tt:mm)** är positiv för ett uttag, och justeringar (t.ex. 12:00 eller -1:30) används för korrigeringar och kan bara registreras här på personalkortet, av en arbetsledare eller administratör med behörigheten **Personal & lön** — aldrig från terminalen. Negativt saldo tillåts men visas rött.
 - **Ta bort** på en transaktion frågar först ("Ta bort ATF-transaktionen? Den ingår i underlaget till lönesystemet.") — transaktionerna går med i löneunderlaget (PAXml).
 
 > Ändras intjäningstakten räknas hela historiken om med den nya takten — korrigera i så fall med en justeringstransaktion.

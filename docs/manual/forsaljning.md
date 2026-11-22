@@ -573,7 +573,7 @@ Under resultatet kan noteringar visas när något i underlaget saknas. Gäller s
 - *<dokumentnr> är försenad — räknad som tillgänglig direkt*
 - *<dokumentnr> är ett utkast — räknat som tillgång*
 - *<artikel> saknar beredning — räknad som tillgänglig direkt*
-- *Resurs <kod> saknar veckoschema och timmar per dag — kapaciteten räknas inte* (ange **Veckoschema (kapacitet)** eller **Kapacitet (timmar per dag)** på resursen)
+- *Resurs <kod> saknar veckoschema och timmar per dag — kapaciteten räknas inte* (ange **Veckoschema (kapacitet)** eller **Kapacitet per dag (tt:mm)** på resursen)
 - *Legoresurs <kod> saknar ledtid — räknad som 0 dagar*
 - *Resurs <kod> har <n> h beläggning utan datum som inte räknas*
 - *Kapaciteten räcker inte inom två år* — raden får då inget datum och ordern inget leveransdatum.
