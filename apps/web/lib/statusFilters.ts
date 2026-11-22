@@ -30,12 +30,15 @@ const LATE: FilterChoice = { value: "late", label: "Sen" };
 // (Fakturera and Samlingsfakturering find it as before).
 const FINISHED_LABEL = "Visa avslutade";
 
+// No Öppna group on the lists with Visa avslutade: with the finished statuses
+// hidden, the open ones are exactly what Alla shows, so Öppna only lit every
+// chip (the user, 2026-11-22: "Ja, ta bort Öppna"). Förfrågningar keeps it.
+
 const QUOTE_STATUSES: readonly SalesOrderStatus[] = ["quote", "ordered", "lost", "cancelled"];
 
 export const SALES_ORDER_FILTER: MultiFilter = {
   param: "status",
   options: pills(SALES_ORDER_STATUS_PILL, SALES_ORDER_REGISTER_STATUSES),
-  groups: [{ label: "Öppna", values: ["confirmed", "in_production"] }],
   narrow: [LATE],
   finished: { values: ["delivered", "invoiced", "cancelled"], label: FINISHED_LABEL },
 };
@@ -49,7 +52,6 @@ export const QUOTE_FILTER: MultiFilter = {
 export const PURCHASE_ORDER_FILTER: MultiFilter = {
   param: "status",
   options: pills(PURCHASE_ORDER_STATUS_PILL),
-  groups: [{ label: "Öppna", values: ["draft", "confirmed", "partially_received"] }],
   narrow: [LATE],
   finished: { values: ["received", "closed", "cancelled"], label: FINISHED_LABEL },
 };
@@ -63,7 +65,6 @@ export const INQUIRY_FILTER: MultiFilter = {
 export const MANUFACTURING_ORDER_FILTER: MultiFilter = {
   param: "status",
   options: pills(MANUFACTURING_ORDER_STATUS_PILL),
-  groups: [{ label: "Öppna", values: ["planned", "released", "in_progress"] }],
   // Halvfabrikat sent (pegging #9): derived like Sen.
   narrow: [LATE, { value: "component_late", label: "Halvfabrikat sent" }],
   finished: { values: ["done", "closed", "cancelled"], label: FINISHED_LABEL },
