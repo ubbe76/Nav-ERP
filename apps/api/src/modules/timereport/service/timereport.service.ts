@@ -12,11 +12,21 @@ import type {
   UpdateAttendanceSessionInput,
   UpdateEmployeeInput,
   UpdateTimeReportInput,
+  WorkStampInput,
+  CreateAttendanceSessionInput,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import type { StampReason, StampTargetState, TimeReportRepository } from "../repository/timereport.repository.js";
 import { ONE_OPEN_ATTENDANCE, ONE_OPEN_STAMP } from "../repository/timereport.repository.js";
 import { effectiveStopTime, localDateOf, stampedHours } from "../repository/stamp-close.js";
+import {
+  deleteStampInTx,
+  insertClosedStampInTx,
+  insertTimeReportInTx,
+  rewriteStampInTx,
+  type StampExpected,
+} from "../repository/stamp-correction.js";
+import { addDays, stockholmInstant } from "../../system/service/delivery-days.js";
 import type { ManufacturingService } from "../../manufacturing/service/manufacturing.service.js";
 import {
   InvalidStatusTransitionError,
@@ -207,6 +217,57 @@ export class StampWorkCenterChangedError extends Error {
   }
 }
 
+// Stämplingar (Personal & lön): a work stamp that is still going (or
+// paused) is stamped out under Pågående arbete, not corrected here.
+export class StampSessionOpenError extends Error {
+  constructor() {
+    super("The work stamp is still open — stamp it out under Pågående arbete first");
+    this.name = "StampSessionOpenError";
+  }
+}
+
+// Start before stop, stop not in the future, the pause shorter than the stint.
+export class InvalidWorkStampIntervalError extends Error {
+  constructor() {
+    super("The stop time must be after the start, not in the future, and the pause shorter than the stint");
+    this.name = "InvalidWorkStampIntervalError";
+  }
+}
+
+// The stamp changed between the read and the write (another correction, or
+// its report undone on the TO card) — nothing is written.
+export class StampSessionChangedError extends Error {
+  constructor() {
+    super("The work stamp was changed while it was being corrected");
+    this.name = "StampSessionChangedError";
+  }
+}
+
+// A stamp from before the report log (0117): its quantities sit in the
+// operation's migration row, so only its times can be corrected here.
+export class StampReportMissingError extends Error {
+  constructor() {
+    super("The stamp was reported before the report log — correct its quantities on the manufacturing order");
+    this.name = "StampReportMissingError";
+  }
+}
+
+// A lego operation is reported through its purchase order's receipt.
+export class WorkStampSubcontractError extends Error {
+  constructor() {
+    super("A subcontract operation is reported on its purchase order, not stamped");
+    this.name = "WorkStampSubcontractError";
+  }
+}
+
+// An attendance registered afterwards overlapping another of the employee's.
+export class AttendanceOverlapError extends Error {
+  constructor() {
+    super("The attendance overlaps another attendance of the employee");
+    this.name = "AttendanceOverlapError";
+  }
+}
+
 export class TimeReportNotFoundError extends Error {
   constructor(id: string) {
     super(`Time report ${id} not found`);
@@ -283,6 +344,48 @@ export function createTimeReportService(
   async function assertActiveReason(reasonId: string) {
     const reason = await repo.findAttendanceDeviationReason(reasonId);
     if (!reason || !reason.active) throw new AttendanceReasonInvalidError(reasonId);
+  }
+
+  // Stämplingar: the stamp's instants, pause and hours (stampedHours, the one
+  // implementation) and the time report's day (the stop's Stockholm day, as
+  // a stamp-out). An unchanged pause keeps the stored seconds exactly — the
+  // form shows whole minutes.
+  function workStampTimes(input: WorkStampInput, session: { pausedSeconds: string } | null) {
+    const startedAt = new Date(input.startedAt);
+    const stoppedAt = new Date(input.stoppedAt);
+    const stored = session ? Number(session.pausedSeconds) : null;
+    const pausedSeconds = stored !== null && Math.round(stored / 60) === input.pauseMinutes ? stored : input.pauseMinutes * 60;
+    if (
+      stoppedAt <= startedAt ||
+      stoppedAt.getTime() > Date.now() + 60_000 ||
+      pausedSeconds * 1000 >= stoppedAt.getTime() - startedAt.getTime()
+    ) {
+      throw new InvalidWorkStampIntervalError();
+    }
+    const hours = stampedHours({ startedAt, pausedAt: null, pausedSeconds: String(pausedSeconds) }, stoppedAt);
+    return { startedAt, stoppedAt, pausedSeconds, hours, date: localDateOf(stoppedAt) };
+  }
+
+  function stampReport(input: WorkStampInput, employeeId: string) {
+    return {
+      operationId: input.moOperationId,
+      quantityOk: input.quantityOk,
+      quantityScrapped: input.quantityScrapped,
+      scrapReason: input.scrapReason,
+      scrapReasonId: input.scrapReasonId,
+      markDone: input.markOperationDone,
+      employeeId,
+      allowMaterialShortage: input.allowMaterialShortage,
+    };
+  }
+
+  // The operation a stamp goes on: it exists and is not a lego operation
+  // (reported on its IO). The order's status is checked in the report's
+  // transaction (InvalidStatusTransitionError, as a manual time report).
+  async function assertStampTarget(moOperationId: string) {
+    const target = await repo.findStampTarget(moOperationId);
+    if (!target) throw new MOOperationNotFoundError(moOperationId);
+    if (target.workCenterType === "subcontract") throw new WorkStampSubcontractError();
   }
 
   // Radera (no history) or Anonymisera (history), decided again inside the
@@ -911,6 +1014,343 @@ export function createTimeReportService(
     // Both the old and new local dates are guarded against a locked payroll
     // period, since either side of the edit could move hours into/out of a
     // frozen basis.
+    // --- Stämplingar (Personal & lön, 2026-11-22) -------------------------
+    // One employee's Stockholm day: attendance, absence and work stamps, for
+    // correcting them in one place. Spec:
+    // private/superpowers/specs/2026-11-22-stamplingar-design.md.
+
+    async getStampDay(employeeId: string, date: string) {
+      const employee = await repo.findEmployeeById(employeeId);
+      if (!employee) throw new EmployeeNotFoundError(employeeId);
+      const from = new Date(stockholmInstant(date, "00:00"));
+      const to = new Date(stockholmInstant(addDays(date, 1), "00:00"));
+      const day = await repo.stampDay(employeeId, date, from, to);
+      const reportByTimeReport = new Map(day.reports.map((r) => [r.timeReportId, r]));
+      const scrapByReport = new Map(day.scrap.map((s) => [s.moReportId, s]));
+      return {
+        employee: { id: employee.id, employeeNumber: employee.employeeNumber, name: employee.name },
+        date,
+        periodLocked: await periodLocks.isDateLocked(date),
+        attendance: day.attendance.map((a) => ({
+          id: a.id,
+          startedAt: a.startedAt,
+          stoppedAt: a.stoppedAt,
+          startReasonId: a.startReasonId,
+          startNote: a.startNote,
+          stopReasonId: a.stopReasonId,
+          stopNote: a.stopNote,
+        })),
+        absences: day.absences,
+        stamps: day.stamps.map((stamp) => {
+          const report = stamp.timeReportId ? (reportByTimeReport.get(stamp.timeReportId) ?? null) : null;
+          const scrap = report ? scrapByReport.get(report.id) : undefined;
+          const { pausedSeconds, hours, ...rest } = stamp;
+          return {
+            ...rest,
+            hours: hours === null ? null : Number(hours),
+            pauseMinutes: Math.round(Number(pausedSeconds) / 60),
+            // Before the report log: only the times can be corrected.
+            legacy: stamp.timeReportId !== null && report === null,
+            report: report
+              ? {
+                  id: report.id,
+                  source: report.source,
+                  quantityOk: Number(report.quantityOk),
+                  quantityScrapped: Number(report.quantityScrapped),
+                  quantityReceived: Number(report.quantityReceived),
+                  markedDone: report.markedDone,
+                  scrapReasonId: scrap?.reasonId ?? null,
+                  scrapReasonName: scrap?.reasonName ?? null,
+                  scrapReason: scrap?.reason ?? null,
+                }
+              : null,
+          };
+        }),
+        manualReports: day.manual.map((r) => ({ ...r, hours: Number(r.hours) })),
+      };
+    },
+
+    // A closed work stamp as it should be. Times, pause, type and note only
+    // ⇒ the stamp and its time report change in place (the report log is
+    // untouched). Another operation or other quantities ⇒ the stamp's report
+    // is undone and a new one written in ONE transaction
+    // (manufacturing.replaceStampReport), material, goods and scrap with it.
+    async correctWorkStamp(stampId: string, input: WorkStampInput, userId: string) {
+      const session = await repo.findStampSessionById(stampId);
+      if (!session) throw new StampSessionNotFoundError(stampId);
+      if (!session.stoppedAt) throw new StampSessionOpenError();
+      const times = workStampTimes(input, session);
+      const kind = input.kind === undefined ? session.kind : input.kind;
+      const live = session.timeReportId ? await repo.findLiveStampReport(session.timeReportId) : null;
+      const oldTimeReport = session.timeReportId ? await repo.findTimeReportById(session.timeReportId) : null;
+      const legacy = session.timeReportId !== null && live === null;
+      const note = input.note === undefined ? (oldTimeReport?.note ?? null) : input.note || null;
+      const sameOperation = input.moOperationId === session.moOperationId;
+      const sameQuantities =
+        live !== null &&
+        Number(live.report.quantityOk) === input.quantityOk &&
+        Number(live.report.quantityScrapped) === input.quantityScrapped &&
+        live.report.markedDone === input.markOperationDone &&
+        (input.quantityScrapped === 0 ||
+          ((live.scrapReasonId ?? undefined) === input.scrapReasonId && (live.scrapReason ?? "") === (input.scrapReason ?? "")));
+      const noQuantities = input.quantityOk === 0 && input.quantityScrapped === 0 && !input.markOperationDone;
+      if (legacy && (!sameOperation || !noQuantities)) throw new StampReportMissingError();
+      const inPlace = oldTimeReport !== null && sameOperation && (sameQuantities || legacy);
+
+      // The time report's payroll-period rule, as its own correction: the
+      // old and the new day, unless only the type changes.
+      const onlyKind =
+        inPlace && oldTimeReport.date === times.date && Number(oldTimeReport.hours) === times.hours && (oldTimeReport.note ?? null) === note;
+      if (!onlyKind) {
+        for (const date of new Set([oldTimeReport?.date, times.date].filter((d): d is string => d !== undefined))) {
+          if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
+        }
+      }
+
+      const expected: StampExpected = {
+        id: session.id,
+        moOperationId: session.moOperationId,
+        startedAt: session.startedAt,
+        stoppedAt: session.stoppedAt,
+        pausedSeconds: session.pausedSeconds,
+        kind: session.kind,
+      };
+      const before = {
+        moOperationId: session.moOperationId,
+        startedAt: session.startedAt,
+        stoppedAt: session.stoppedAt,
+        pausedSeconds: Number(session.pausedSeconds),
+        kind: session.kind,
+        hours: oldTimeReport ? Number(oldTimeReport.hours) : null,
+        note: oldTimeReport?.note ?? null,
+        quantityOk: live ? Number(live.report.quantityOk) : null,
+        quantityScrapped: live ? Number(live.report.quantityScrapped) : null,
+        markedDone: live?.report.markedDone ?? null,
+      };
+      const after = {
+        moOperationId: input.moOperationId,
+        startedAt: times.startedAt,
+        stoppedAt: times.stoppedAt,
+        pausedSeconds: times.pausedSeconds,
+        kind,
+        hours: times.hours,
+        note,
+        quantityOk: inPlace ? before.quantityOk : input.quantityOk,
+        quantityScrapped: inPlace ? before.quantityScrapped : input.quantityScrapped,
+        markedDone: inPlace ? before.markedDone : input.markOperationDone,
+      };
+
+      if (inPlace) {
+        const ok = await repo.correctStampInPlace(
+          { ...expected, timeReportId: session.timeReportId },
+          { startedAt: times.startedAt, stoppedAt: times.stoppedAt, pausedSeconds: times.pausedSeconds, kind },
+          { date: times.date, hours: times.hours, kind, note }
+        );
+        if (!ok) throw new StampSessionChangedError();
+      } else {
+        await assertStampTarget(input.moOperationId);
+        let timeReportId = "";
+        let workCenterId: string | null = null;
+        await manufacturing.replaceStampReport(
+          {
+            undoReportId: live?.report.id ?? null,
+            report: stampReport(input, session.employeeId),
+            userId,
+          },
+          {
+            writeTimeReport: async (tx, operationWorkCenterId) => {
+              // The resource the stint was stamped on stays, unless the stamp
+              // moves to another operation (then that one's, as a stamp-in).
+              workCenterId = sameOperation && session.workCenterId ? session.workCenterId : operationWorkCenterId;
+              timeReportId = await insertTimeReportInTx(tx, {
+                employeeId: session.employeeId,
+                moOperationId: input.moOperationId,
+                date: times.date,
+                hours: times.hours,
+                kind,
+                workCenterId,
+                note,
+                createdBy: userId,
+              });
+              return timeReportId;
+            },
+            finish: async (tx) => {
+              const values = {
+                moOperationId: input.moOperationId,
+                startedAt: times.startedAt,
+                stoppedAt: times.stoppedAt,
+                pausedSeconds: times.pausedSeconds,
+                kind,
+                workCenterId,
+              };
+              if (!(await rewriteStampInTx(tx, expected, values, timeReportId))) throw new StampSessionChangedError();
+            },
+          }
+        );
+      }
+
+      await audit.log({
+        entityType: "stamp_session",
+        entityId: stampId,
+        action: "corrected",
+        detail: { employeeId: session.employeeId, reportRedone: !inPlace, before, after },
+        userId,
+      });
+      return { id: stampId, reportRedone: !inPlace };
+    },
+
+    // A work stamp registered afterwards (efterregistrering): a closed stamp,
+    // its time report and its report in one transaction.
+    async createWorkStamp(employeeId: string, input: WorkStampInput, userId: string) {
+      const employee = await repo.findEmployeeById(employeeId);
+      if (!employee) throw new EmployeeNotFoundError(employeeId);
+      const times = workStampTimes(input, null);
+      if (await periodLocks.isDateLocked(times.date)) throw new PayrollPeriodLockedError(times.date);
+      await assertStampTarget(input.moOperationId);
+      const kind = input.kind ?? null;
+      const note = input.note || null;
+      let timeReportId = "";
+      let workCenterId: string | null = null;
+      let stampId = "";
+      await manufacturing.replaceStampReport(
+        { undoReportId: null, report: stampReport(input, employeeId), userId },
+        {
+          writeTimeReport: async (tx, operationWorkCenterId) => {
+            workCenterId = operationWorkCenterId;
+            timeReportId = await insertTimeReportInTx(tx, {
+              employeeId,
+              moOperationId: input.moOperationId,
+              date: times.date,
+              hours: times.hours,
+              kind,
+              workCenterId,
+              note,
+              createdBy: userId,
+            });
+            return timeReportId;
+          },
+          finish: async (tx) => {
+            stampId = await insertClosedStampInTx(tx, {
+              employeeId,
+              moOperationId: input.moOperationId,
+              startedAt: times.startedAt,
+              stoppedAt: times.stoppedAt,
+              pausedSeconds: times.pausedSeconds,
+              kind,
+              workCenterId,
+              timeReportId,
+              createdBy: userId,
+            });
+          },
+        }
+      );
+      await audit.log({
+        entityType: "stamp_session",
+        entityId: stampId,
+        action: "created",
+        detail: {
+          employeeId,
+          moOperationId: input.moOperationId,
+          startedAt: times.startedAt,
+          stoppedAt: times.stoppedAt,
+          pausedSeconds: times.pausedSeconds,
+          kind,
+          hours: times.hours,
+          quantityOk: input.quantityOk,
+          quantityScrapped: input.quantityScrapped,
+          markedDone: input.markOperationDone,
+        },
+        userId,
+      });
+      return { id: stampId };
+    },
+
+    // Ta bort: the stamp's report undone (material back, goods out, scrap and
+    // time report gone) and the stamp deleted, in one transaction.
+    async deleteWorkStamp(stampId: string, userId: string) {
+      const session = await repo.findStampSessionById(stampId);
+      if (!session) throw new StampSessionNotFoundError(stampId);
+      if (!session.stoppedAt) throw new StampSessionOpenError();
+      const live = session.timeReportId ? await repo.findLiveStampReport(session.timeReportId) : null;
+      if (session.timeReportId !== null && live === null) throw new StampReportMissingError();
+      const oldTimeReport = session.timeReportId ? await repo.findTimeReportById(session.timeReportId) : null;
+      if (oldTimeReport && (await periodLocks.isDateLocked(oldTimeReport.date))) {
+        throw new PayrollPeriodLockedError(oldTimeReport.date);
+      }
+      const expected: StampExpected = {
+        id: session.id,
+        moOperationId: session.moOperationId,
+        startedAt: session.startedAt,
+        stoppedAt: session.stoppedAt,
+        pausedSeconds: session.pausedSeconds,
+        kind: session.kind,
+      };
+      if (live) {
+        await manufacturing.replaceStampReport(
+          { undoReportId: live.report.id, report: null, userId },
+          {
+            writeTimeReport: async () => {
+              throw new Error("A removed stamp writes no time report");
+            },
+            finish: async (tx) => {
+              if (!(await deleteStampInTx(tx, expected))) throw new StampSessionChangedError();
+            },
+          }
+        );
+      } else if (!(await repo.deleteStampWithoutReport(expected))) {
+        throw new StampSessionChangedError();
+      }
+      await audit.log({
+        entityType: "stamp_session",
+        entityId: stampId,
+        action: "deleted",
+        detail: {
+          employeeId: session.employeeId,
+          moOperationId: session.moOperationId,
+          startedAt: session.startedAt,
+          stoppedAt: session.stoppedAt,
+          hours: oldTimeReport ? Number(oldTimeReport.hours) : null,
+          quantityOk: live ? Number(live.report.quantityOk) : null,
+          quantityScrapped: live ? Number(live.report.quantityScrapped) : null,
+        },
+        userId,
+      });
+    },
+
+    // A forgotten day's attendance, registered afterwards — closed, inside
+    // open payroll periods, not overlapping the employee's other attendance.
+    async createAttendanceSession(employeeId: string, input: CreateAttendanceSessionInput, userId: string) {
+      const startedAt = new Date(input.startedAt);
+      const stoppedAt = new Date(input.stoppedAt);
+      if (stoppedAt <= startedAt || stoppedAt.getTime() > Date.now() + 60_000) throw new InvalidAttendanceIntervalError();
+      if (input.startReasonId) await assertActiveReason(input.startReasonId);
+      if (input.stopReasonId) await assertActiveReason(input.stopReasonId);
+      for (const date of new Set([localDateOf(startedAt), localDateOf(stoppedAt)])) {
+        if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
+      }
+      const values = {
+        startedAt,
+        stoppedAt,
+        startReasonId: input.startReasonId ?? null,
+        startNote: input.startNote || null,
+        stopReasonId: input.stopReasonId ?? null,
+        stopNote: input.stopNote || null,
+      };
+      const result = await repo.createClosedAttendance(employeeId, values, userId);
+      if (!result.ok) {
+        if (result.reason === "employee_not_found") throw new EmployeeNotFoundError(employeeId);
+        throw new AttendanceOverlapError();
+      }
+      await audit.log({
+        entityType: "attendance_session",
+        entityId: result.row.id,
+        action: "created",
+        detail: { employeeId, ...values },
+        userId,
+      });
+      return result.row;
+    },
+
     async updateAttendanceSession(id: string, input: UpdateAttendanceSessionInput, userId: string) {
       const existing = await repo.findAttendanceSessionById(id);
       if (!existing) throw new AttendanceSessionNotFoundError(id);

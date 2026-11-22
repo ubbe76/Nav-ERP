@@ -149,6 +149,16 @@ const MESSAGES: Record<string, MessageEntry> = {
   "stamp-session-already-stopped":
     "Stämplingen är redan utstämplad — operationen kan ha blivit klar. Rapportera antalet på tillverkningsordern.",
   "stop-time-not-allowed": "Bara arbetsledare och administratörer kan ange sluttid.",
+  // Stämplingar (Personal & lön, 2026-11-22)
+  "stamp-session-open": "Arbetet pågår fortfarande — stämpla ut det under Pågående arbete först.",
+  "invalid-work-stamp-interval":
+    "Sluttiden måste vara efter starttiden och inte i framtiden, och pausen kortare än tiden mellan dem.",
+  "stamp-session-changed":
+    "Stämplingen ändrades under tiden (till exempel ångrades rapporten på tillverkningsordern). Ladda om dagen och gör om ändringen.",
+  "stamp-report-missing":
+    "Stämplingen rapporterades innan rapportloggen fanns — bara tiderna går att ändra här. Rätta antalet på tillverkningsordern.",
+  "work-stamp-subcontract": "En legooperation rapporteras på sin inköpsorder, inte med en stämpling.",
+  "attendance-overlap": "Närvaron överlappar en annan närvaro för samma anställd.",
   "duplicate-absence": "Frånvaro med samma kod finns redan på det datumet",
   "duplicate-payroll-code": "Koden eller namnet finns redan",
   "invalid-ob-window": "Sluttiden måste vara efter starttiden (00:00 betyder midnatt)",

@@ -7,6 +7,7 @@ import {
   updateAttendanceDeviationReasonSchema,
   createObRuleSchema,
   setOvertimeDispositionSchema,
+  updateAbsenceSchema,
   updateAbsenceTypeSchema,
   updateObRuleSchema,
 } from "@navet/shared";
@@ -206,6 +207,16 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
       return handle(reply, async () =>
         reply.code(201).send(await service.createAbsence(req.params.id, input, req.user!.id))
       );
+    }
+  );
+
+  // Ändra frånvaro (Stämplingar and the personalkort, 2026-11-22).
+  app.patch<{ Params: { id: string } }>(
+    "/absences/:id",
+    { preHandler: requireRole("admin", "supervisor") },
+    async (req, reply) => {
+      const input = updateAbsenceSchema.parse(req.body);
+      return handle(reply, () => service.updateAbsence(req.params.id, input, req.user!.id));
     }
   );
 

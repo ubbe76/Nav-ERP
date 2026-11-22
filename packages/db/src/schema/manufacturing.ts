@@ -590,7 +590,9 @@ export const moOperationScrap = pgTable("mo_operation_scrap", {
 // mo_report_materials, the stamp's time report), so Ångra rapportering can
 // reverse precisely that event. An undone row stays as history.
 export const moReportKindEnum = pgEnum("mo_report_kind", ["operation", "completion", "material"]);
-export const moReportSourceEnum = pgEnum("mo_report_source", ["terminal", "card", "purchase_receipt", "migration", "auto_close"]);
+// stamp_correction (0234): a work stamp corrected or registered afterwards
+// under Personal & lön → Stämplingar (the stamp's report undone and redone).
+export const moReportSourceEnum = pgEnum("mo_report_source", ["terminal", "card", "purchase_receipt", "migration", "auto_close", "stamp_correction"]);
 
 export const moReports = pgTable(
   "mo_reports",

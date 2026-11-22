@@ -3238,7 +3238,8 @@ export interface ScrapEntry {
 export interface MOReport {
   id: string;
   kind: "operation" | "completion" | "material";
-  source: "terminal" | "card" | "purchase_receipt" | "migration" | "auto_close";
+  // stamp_correction: a work stamp corrected or registered under Personal & lön → Stämplingar.
+  source: "terminal" | "card" | "purchase_receipt" | "migration" | "auto_close" | "stamp_correction";
   moOperationId: string | null;
   sequenceNo: number | null;
   workCenterName: string | null;
@@ -3558,6 +3559,82 @@ export interface AttendanceOutInput {
 }
 
 export type TimeKind = "setup" | "run";
+
+// Stämplingar (Personal & lön, 2026-11-22): GET /employees/:id/stamp-day —
+// one employee's Stockholm day, corrected in one place.
+export interface StampDayOperation {
+  moOperationId: string;
+  sequenceNo: number;
+  operationDescription: string | null;
+  operationStatus: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  orderStatus: ManufacturingOrderStatus;
+  articleNumber: string;
+  articleName: string;
+}
+export interface StampDayReport {
+  id: string;
+  source: MOReport["source"];
+  quantityOk: number;
+  quantityScrapped: number;
+  quantityReceived: number;
+  markedDone: boolean;
+  scrapReasonId: string | null;
+  scrapReasonName: string | null;
+  scrapReason: string | null;
+}
+export interface StampDayStamp extends StampDayOperation {
+  id: string;
+  startedAt: string;
+  stoppedAt: string | null;
+  pausedAt: string | null;
+  pauseMinutes: number;
+  kind: TimeKind | null;
+  timeReportId: string | null;
+  workCenterCode: string | null;
+  workCenterName: string | null;
+  hours: number | null;
+  reportDate: string | null;
+  note: string | null;
+  // Reported before the report log: only the times can be corrected.
+  legacy: boolean;
+  report: StampDayReport | null;
+}
+export interface StampDayManualReport extends StampDayOperation {
+  id: string;
+  date: string;
+  hours: number;
+  kind: TimeKind | null;
+  note: string | null;
+}
+export interface StampDayAbsence {
+  id: string;
+  absenceTypeId: string;
+  code: string;
+  name: string;
+  date: string;
+  minutes: number;
+  note: string | null;
+}
+export interface StampDayAttendance {
+  id: string;
+  startedAt: string;
+  stoppedAt: string | null;
+  startReasonId: string | null;
+  startNote: string | null;
+  stopReasonId: string | null;
+  stopNote: string | null;
+}
+export interface StampDay {
+  employee: { id: string; employeeNumber: string; name: string };
+  date: string;
+  periodLocked: boolean;
+  attendance: StampDayAttendance[];
+  absences: StampDayAbsence[];
+  stamps: StampDayStamp[];
+  manualReports: StampDayManualReport[];
+}
 export const TIME_KIND_LABELS: Record<TimeKind, string> = { setup: "Ställ", run: "Produktion" };
 
 export interface TimeReport {
@@ -5785,6 +5862,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   payroll_period: "Löneperiod",
   payroll_attestation: "Löneattestering",
   attendance_session: "Stämpling",
+  stamp_session: "Arbetsstämpling",
   time_report: "Tidrapport",
   accounting_period: "Bokföringsperiod",
   verification: "Verifikat",
@@ -5829,6 +5907,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
+  corrected: "Rättad",
   markups_changed: "Påslag ändrade",
   invoice_customer_changed: "Fakturakund ändrad",
   vat_code_changed: "Momskod ändrad",

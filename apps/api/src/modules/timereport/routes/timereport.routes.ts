@@ -10,6 +10,9 @@ import {
   satisfiesRule,
   stampInSchema,
   stampOutSchema,
+  createAttendanceSessionSchema,
+  stampDayQuerySchema,
+  workStampSchema,
   updateAttendanceSessionSchema,
   updateEmployeeSchema,
   updateTimeReportSchema,
@@ -24,6 +27,7 @@ import {
   AttendanceSessionNotFoundError,
   AttendanceSessionOpenError,
   AttendanceStartInFutureError,
+  AttendanceOverlapError,
   DuplicateEmployeeNumberError,
   EmployeeAnonymizedError,
   EmployeeErasureBlockedError,
@@ -32,6 +36,11 @@ import {
   InactiveEmployeeError,
   InvalidAttendanceIntervalError,
   InvalidStopTimeError,
+  InvalidWorkStampIntervalError,
+  StampReportMissingError,
+  StampSessionChangedError,
+  StampSessionOpenError,
+  WorkStampSubcontractError,
   StampSessionAlreadyStoppedError,
   StampWorkCenterChangedError,
   StampSessionNotFoundError,
@@ -50,7 +59,16 @@ import { ForbiddenError } from "../../auth/middleware/permission.middleware.js";
 import { DIRECTORY_READ, MO_READ, PERSONAL, TERMINAL_READ, TERMINAL_WRITE } from "../../auth/middleware/access-rules.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { materialShortageBody } from "../../manufacturing/service/material-shortage.js";
-import { MaterialShortageError, ScrapReasonInvalidError, ScrapReasonRequiredError } from "../../manufacturing/service/manufacturing.service.js";
+import {
+  ManufacturingOrderNotFoundError,
+  MaterialShortageError,
+  MoReportAlreadyUndoneError,
+  MoReportFromPurchaseReceiptError,
+  MoReportNotFoundError,
+  MoReportStockMissingError,
+  ScrapReasonInvalidError,
+  ScrapReasonRequiredError,
+} from "../../manufacturing/service/manufacturing.service.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { timeReportExportColumns } from "../service/export-columns.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -265,6 +283,99 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       if (err instanceof MaterialShortageError) return reply.code(409).send(materialShortageBody(err));
       // Kassationsorsaken: refused in the same preflight, nothing written.
       if (err instanceof ScrapReasonRequiredError || err instanceof ScrapReasonInvalidError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // --- Stämplingar (Personal & lön, 2026-11-22) ---------------------------
+  // One employee's day — attendance, absence and work stamps — corrected in
+  // one place. Personal & lön AND admin/supervisor, as the attestation's
+  // corrections. A work stamp's correction can undo and redo its report, so
+  // the report's and the undo's refusals come back here too.
+  const STAMP_CORRECTION = { config: { access: PERSONAL }, preHandler: requireRole("admin", "supervisor") };
+  function workStampError(reply: FastifyReply, err: unknown) {
+    if (
+      err instanceof StampSessionNotFoundError ||
+      err instanceof EmployeeNotFoundError ||
+      err instanceof MOOperationNotFoundError ||
+      err instanceof ManufacturingOrderNotFoundError
+    ) {
+      return reply.code(404).send(errorBody(err));
+    }
+    if (err instanceof InvalidWorkStampIntervalError || err instanceof ScrapReasonRequiredError || err instanceof ScrapReasonInvalidError) {
+      return reply.code(400).send(errorBody(err));
+    }
+    if (err instanceof MaterialShortageError) return reply.code(409).send(materialShortageBody(err));
+    if (
+      err instanceof StampSessionOpenError ||
+      err instanceof StampSessionChangedError ||
+      err instanceof StampReportMissingError ||
+      err instanceof WorkStampSubcontractError ||
+      err instanceof PayrollPeriodLockedError ||
+      err instanceof InvalidStatusTransitionError ||
+      err instanceof LocationUnderStockCountError ||
+      err instanceof MoReportStockMissingError ||
+      err instanceof MoReportFromPurchaseReceiptError
+    ) {
+      return reply.code(409).send(errorBody(err));
+    }
+    // The stamp's report undone or gone between the read and the undo: the
+    // stamp changed underneath the correction.
+    if (err instanceof MoReportAlreadyUndoneError || err instanceof MoReportNotFoundError) {
+      return reply.code(409).send(errorBody(new StampSessionChangedError()));
+    }
+    throw err;
+  }
+
+  app.get<{ Params: { id: string } }>("/employees/:id/stamp-day", STAMP_CORRECTION, async (req, reply) => {
+    const { date } = stampDayQuerySchema.parse(req.query);
+    try {
+      return await service.getStampDay(req.params.id, date);
+    } catch (err) {
+      if (err instanceof EmployeeNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/employees/:id/stamp-sessions", STAMP_CORRECTION, async (req, reply) => {
+    const input = workStampSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.createWorkStamp(req.params.id, input, req.user!.id));
+    } catch (err) {
+      return workStampError(reply, err);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/stamp-sessions/:id", STAMP_CORRECTION, async (req, reply) => {
+    const input = workStampSchema.parse(req.body);
+    try {
+      return await service.correctWorkStamp(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return workStampError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/stamp-sessions/:id", STAMP_CORRECTION, async (req, reply) => {
+    try {
+      await service.deleteWorkStamp(req.params.id, req.user!.id);
+      return reply.code(204).send(null);
+    } catch (err) {
+      return workStampError(reply, err);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/employees/:id/attendance-sessions", STAMP_CORRECTION, async (req, reply) => {
+    const input = createAttendanceSessionSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.createAttendanceSession(req.params.id, input, req.user!.id));
+    } catch (err) {
+      if (err instanceof EmployeeNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof InvalidAttendanceIntervalError || err instanceof AttendanceReasonInvalidError) {
+        return reply.code(400).send(errorBody(err));
+      }
+      if (err instanceof AttendanceOverlapError || err instanceof PayrollPeriodLockedError) {
+        return reply.code(409).send(errorBody(err));
+      }
       throw err;
     }
   });

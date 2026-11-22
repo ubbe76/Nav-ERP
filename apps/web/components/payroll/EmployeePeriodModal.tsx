@@ -2,6 +2,7 @@
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
@@ -11,6 +12,7 @@ import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { toDateTimeLocalValue } from "../../lib/date";
+import { stampDayHref } from "../../lib/stampDay";
 import {
   MONTH_NAMES_SV,
   OVERTIME_COMPENSATION_LABELS,
@@ -476,9 +478,10 @@ function PeriodDetail({
           return (
             <div key={day.date} style={{ borderTop: "1px solid var(--color-divider)", padding: "6px 0" }}>
               <div style={{ display: "grid", gridTemplateColumns: HOUR_COLUMNS, gap: 8, alignItems: "baseline" }}>
-                <span className="num">
+                {/* Stämplingar: the day's närvaro, frånvaro and arbete, corrected in one place. */}
+                <Link className="num" href={stampDayHref(employeeId, day.date)} title="Öppna dagen i Stämplingar">
                   {day.date.slice(8)} {weekdayShort(day.date)}
-                </span>
+                </Link>
                 <span className="num">{formatHours(day.scheduledMinutes)}</span>
                 <span className="num">{formatHours(day.workedMinutes)}</span>
                 <span className="num">{formatHours(absenceMinutes)}</span>

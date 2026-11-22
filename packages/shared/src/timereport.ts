@@ -365,3 +365,45 @@ export const stampOutSchema = z
     path: ["scrapReason"],
   });
 export type StampOutInput = z.infer<typeof stampOutSchema>;
+
+// Stämplingar (Personal & lön, 2026-11-22): a supervisor corrects a closed
+// work stamp, or registers one afterwards, as the whole stamp it should be —
+// the server works out what changed. Times only (start, stop, pause, type,
+// note) ⇒ the stamp and its time report change in place; another operation
+// or other quantities ⇒ the stamp's report is undone and redone in one
+// transaction, with material, finished goods and scrap following.
+const workStampFields = {
+  moOperationId: z.string().uuid(),
+  startedAt: z.string().datetime({ offset: true }),
+  stoppedAt: z.string().datetime({ offset: true }),
+  // The stamp's paused time (gone home and back) — only the sum is stored
+  // (stamp_sessions.paused_seconds), so it is corrected as one number.
+  pauseMinutes: blankSafe(z.coerce.number().int().min(0).max(525_600)).default(0),
+  kind: timeKindSchema.nullable().optional(),
+  note: z.string().max(2000).nullable().optional(),
+  quantityOk: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).default(0),
+  quantityScrapped: blankSafe(z.coerce.number().nonnegative().max(numericMax(14, 4))).default(0),
+  scrapReason: z.string().trim().max(500).optional(),
+  scrapReasonId: z.string().uuid().optional(),
+  markOperationDone: z.boolean().default(false),
+  allowMaterialShortage: materialShortageOverrideSchema,
+};
+const scrapReasonGiven = (data: { quantityScrapped: number; scrapReason?: string; scrapReasonId?: string }) =>
+  data.quantityScrapped === 0 || data.scrapReasonId !== undefined || (data.scrapReason ?? "").length > 0;
+const scrapReasonMessage = { message: "Ange en kassationsorsak när kasserat antal är större än 0", path: ["scrapReason"] };
+
+export const workStampSchema = z.object(workStampFields).refine(scrapReasonGiven, scrapReasonMessage);
+export type WorkStampInput = z.infer<typeof workStampSchema>;
+
+// A forgotten day's attendance, registered afterwards: always closed.
+export const createAttendanceSessionSchema = z.object({
+  startedAt: z.string().datetime({ offset: true }),
+  stoppedAt: z.string().datetime({ offset: true }),
+  startReasonId: z.string().uuid().nullable().optional(),
+  startNote: z.string().trim().max(500).nullable().optional(),
+  stopReasonId: z.string().uuid().nullable().optional(),
+  stopNote: z.string().trim().max(500).nullable().optional(),
+});
+export type CreateAttendanceSessionInput = z.infer<typeof createAttendanceSessionSchema>;
+
+export const stampDayQuerySchema = z.object({ date: z.string().date() });
