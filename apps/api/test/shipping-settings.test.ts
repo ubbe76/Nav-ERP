@@ -96,6 +96,17 @@ describe("fraktinställningar", () => {
     expect(await settings.listPickupTimes()).toEqual([]);
   });
 
+  it("overlapping saves all succeed and keep one whole set (a double click on Spara)", async () => {
+    const week = [1, 2, 3, 4, 5].map((weekday) => ({ weekday, timeFrom: "07:00", timeTo: "16:00" }));
+    const short = [{ weekday: 5, timeFrom: "08:00", timeTo: "13:00" }];
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, i) => settings.replacePickupTimes({ pickupTimes: i % 2 === 0 ? week : short }, null)),
+    );
+    expect(results.map((r) => r.status)).toEqual(Array(6).fill("fulfilled"));
+    const saved = await settings.listPickupTimes();
+    expect([week, short]).toContainEqual(saved);
+  });
+
   it("skips a full-day holiday but not a short day when finding the next pickup", async () => {
     await enableFreight();
     expect((await settings.nextPickup())?.date).toBe("2030-01-07");

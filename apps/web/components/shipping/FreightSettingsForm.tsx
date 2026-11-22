@@ -71,6 +71,7 @@ export function FreightSettingsForm({
   );
   const [daysError, setDaysError] = useState<string | null>(null);
   const [daysSaved, setDaysSaved] = useState(false);
+  const [daysBusy, setDaysBusy] = useState(false);
 
   const [products, setProducts] = useState(initialProducts);
   const [notice, setNotice] = useState<string | null>(null);
@@ -139,6 +140,7 @@ export function FreightSettingsForm({
   async function saveDays() {
     setDaysError(null);
     setDaysSaved(false);
+    setDaysBusy(true);
     try {
       await apiFetch<PickupTime[]>("/api/v1/freight-settings/pickup-times", {
         method: "PUT",
@@ -149,6 +151,8 @@ export function FreightSettingsForm({
       setDaysSaved(true);
     } catch (err) {
       setDaysError(apiErrorMessage(err, "Kunde inte spara upphämtningstiderna"));
+    } finally {
+      setDaysBusy(false);
     }
   }
 
@@ -335,7 +339,7 @@ export function FreightSettingsForm({
             </FormRow>
           ))}
           <FormActions>
-            <Button type="button" variant="primary" onClick={saveDays}>
+            <Button type="button" variant="primary" onClick={saveDays} disabled={daysBusy}>
               Spara upphämtningstider
             </Button>
             {daysSaved && <span className={cardStyles.saved}>Sparat</span>}
