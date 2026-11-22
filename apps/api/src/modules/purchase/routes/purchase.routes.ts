@@ -502,7 +502,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
   app.patch<{ Params: { id: string } }>("/purchase-orders/:id", async (req, reply) => {
     const input = updatePurchaseOrderHeaderSchema.parse(req.body);
     try {
-      return await service.updatePurchaseOrderHeader(req.params.id, input);
+      return await service.updatePurchaseOrderHeader(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof PurchaseOrderNotFoundError || err instanceof RegisterEntryNotFoundError || err instanceof ProjectNotFoundError) {
         return reply.code(404).send(errorBody(err));

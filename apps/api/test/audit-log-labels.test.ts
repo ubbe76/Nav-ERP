@@ -60,6 +60,8 @@ describe("händelseloggens etiketter", () => {
     // Stämplingar: a work stamp corrected, registered afterwards or removed (2026-11-22).
     ["entity", "stamp_session"],
     ["action", "corrected"],
+    // Inköpsorder: the rows follow the order's new Bekräftat leveransdatum (2026-11-22).
+    ["action", "rows_follow_confirmed"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

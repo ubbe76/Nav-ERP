@@ -1,4 +1,12 @@
-import { createArticleSchema, createDeliveryAddressSchema, createPurchaseOrderSchema, createStockLocationSchema, createSupplierSchema, sendDocumentEmailSchema } from "@navet/shared";
+import {
+  createArticleSchema,
+  createDeliveryAddressSchema,
+  createPurchaseOrderSchema,
+  createStockLocationSchema,
+  createSupplierSchema,
+  sendDocumentEmailSchema,
+  updatePurchaseOrderHeaderSchema,
+} from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, numberSeries, systemSettings, vatCodes } from "@navet/db";
@@ -1690,6 +1698,61 @@ describe("purchase service — önskat leveransdatum", () => {
     const csvRow = (await purchaseService.listPurchaseOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows[0]!;
     expect(column.value({ ...csvRow, supplierConfirmation: "partial" })).toBe("Delvis");
     expect(column.value(csvRow)).toBeNull();
+  });
+
+  it("a new Bekräftat leveransdatum on the order: the rows still to come follow it when asked, received rows keep theirs", async () => {
+    // The user 2026-11-22: rows confirmed with Bekräfta rader stayed on their
+    // own dates when the whole order was confirmed for another day.
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const location = await makeLocation();
+    const [a, b, c] = await Promise.all(["A", "B", "C"].map((k) => makeArticle(`ART-RF-${k}-${crypto.randomUUID()}`)));
+    const order = await purchaseService.createPurchaseOrder(
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" }),
+      user.id
+    );
+    const rowA = await purchaseService.addRow(order.id, { articleId: a!.id, quantity: 2, unitPrice: 1, confirmedDeliveryDate: "2030-03-12" });
+    const rowB = await purchaseService.addRow(order.id, { articleId: b!.id, quantity: 2, unitPrice: 1 });
+    const rowC = await purchaseService.addRow(order.id, { articleId: c!.id, quantity: 2, unitPrice: 1, confirmedDeliveryDate: "2030-03-12" });
+    await purchaseService.confirm(order.id);
+    // Row C is received in full: its date is history.
+    await purchaseService.receiveGoods(order.id, rowC.id, { locationId: location.id, quantity: 2 }, user.id);
+    const ownDates = async () =>
+      Object.fromEntries((await purchaseService.listRows(order.id)).map((r) => [r.id, r.confirmedDeliveryDate]));
+
+    // Without the directive the rows keep their own dates, as before.
+    await purchaseService.updatePurchaseOrderHeader(order.id, parsed(updatePurchaseOrderHeaderSchema, { confirmedDeliveryDate: "2030-03-19" }), user.id);
+    expect(await ownDates()).toEqual({ [rowA.id]: "2030-03-12", [rowB.id]: null, [rowC.id]: "2030-03-12" });
+
+    // Clearing the order's date never moves the rows, directive or not.
+    await purchaseService.updatePurchaseOrderHeader(
+      order.id,
+      parsed(updatePurchaseOrderHeaderSchema, { confirmedDeliveryDate: null, rowsFollowConfirmed: true }),
+      user.id
+    );
+    expect((await ownDates())[rowA.id]).toBe("2030-03-12");
+
+    const revisionBefore = (await purchaseService.getPurchaseOrder(order.id))!.revision;
+    const updated = await purchaseService.updatePurchaseOrderHeader(
+      order.id,
+      parsed(updatePurchaseOrderHeaderSchema, { confirmedDeliveryDate: "2030-03-26", rowsFollowConfirmed: true, bumpRevision: false }),
+      user.id
+    );
+    expect(updated?.confirmedDeliveryDate).toBe("2030-03-26");
+    expect(updated?.revision).toBe(revisionBefore);
+    expect(await ownDates()).toEqual({ [rowA.id]: null, [rowB.id]: null, [rowC.id]: "2030-03-12" });
+
+    const logged = await db.execute<{ detail: unknown; user_id: string | null }>(
+      sql`SELECT detail, user_id FROM audit_log WHERE entity_type = 'purchase_order' AND entity_id = ${order.orderNumber} AND action = 'rows_follow_confirmed'`
+    );
+    expect([...logged]).toEqual([
+      {
+        detail: { confirmedDeliveryDate: "2030-03-26", rows: [{ articleNumber: a!.articleNumber, confirmedDeliveryDate: "2030-03-12" }] },
+        user_id: user.id,
+      },
+    ]);
+    // A directive alone is not a change of the header.
+    expect(updatePurchaseOrderHeaderSchema.safeParse({ rowsFollowConfirmed: true }).success).toBe(false);
   });
 
   it("PATCH persists a lego row's ställpris (it used to be dropped)", async () => {
