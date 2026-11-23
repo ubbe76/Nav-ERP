@@ -1,7 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
-import { useUnsavedGuard } from "../../lib/unsavedGuard";
+import { hasUnsavedDrafts, useUnsavedGuard } from "../../lib/unsavedGuard";
 import { notify } from "../../lib/notice";
 import { usePlaceLabels } from "../stock/WarehouseMode";
 import { useMemo, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -389,6 +389,13 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
         danger: true,
       }))
     ) {
+      return;
+    }
+    // Bekräfta fills Bekräftat leveransdatum from the SAVED Önskat (the
+    // server's confirm), and the header editor starts over on the new date —
+    // an unsaved header would be confirmed on the old date and then lost.
+    if (action === "confirm" && hasUnsavedDrafts()) {
+      setActionError("Spara eller ångra ändringarna först — Bekräfta fyller i bekräftat leveransdatum ur det sparade önskade datumet.");
       return;
     }
     setActionError(null);

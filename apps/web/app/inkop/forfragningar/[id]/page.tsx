@@ -32,7 +32,7 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
   return (
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list="/inkop/forfragningar" selectedId={params.id}>
+      <SplitView list="/inkop/forfragningar" selectedId={params.id} renderedAt={Date.now()}>
         <InquiryDetail
           inquiry={inquiry}
           rows={rows}

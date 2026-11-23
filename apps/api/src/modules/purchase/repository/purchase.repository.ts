@@ -1154,6 +1154,78 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
       return { rows, total: totalRows[0]!.total };
     },
 
+    // Bekräfta (the user 2026-11-23: "Klickar man Bekräfta ska orderraderna
+    // (om man inte manuellt redan fyllt i) markeras som bekräftade enligt
+    // önskat datum"): draft → confirmed, and what has no Bekräftat
+    // leveransdatum yet gets its Önskat — the order's own on the header (the
+    // rows without dates of their own follow it), a row's own on the row
+    // when it differs. A confirmed date already filled in is kept: the
+    // order's covers every row without one of its own, so then no row is
+    // touched. Rows first (sorted on id, FOR UPDATE), then the order — the
+    // row → order order of updateRow and the receipt. Null when the order
+    // has left draft meanwhile. No revision: the confirmed date is the
+    // supplier's and not on the PDF. Sending the order by mail (draft →
+    // confirmed in sendPurchaseOrderEmail) fills nothing — the supplier has
+    // not answered yet.
+    async confirmOrder(id: string) {
+      return db.transaction(async (tx) => {
+        const rows = await tx
+          .select({
+            id: purchaseOrderRows.id,
+            articleNumber: articles.articleNumber,
+            expectedDeliveryDate: purchaseOrderRows.expectedDeliveryDate,
+            confirmedDeliveryDate: purchaseOrderRows.confirmedDeliveryDate,
+            quantityOrdered: purchaseOrderRows.quantityOrdered,
+            quantityReceived: purchaseOrderRows.quantityReceived,
+          })
+          .from(purchaseOrderRows)
+          .innerJoin(articles, eq(articles.id, purchaseOrderRows.articleId))
+          .where(eq(purchaseOrderRows.purchaseOrderId, id))
+          .orderBy(asc(purchaseOrderRows.id))
+          .for("update", { of: purchaseOrderRows });
+        const [order] = await tx
+          .select({
+            status: purchaseOrders.status,
+            expectedDeliveryDate: purchaseOrders.expectedDeliveryDate,
+            confirmedDeliveryDate: purchaseOrders.confirmedDeliveryDate,
+          })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, id))
+          .for("update");
+        if (!order || order.status !== "draft") return null;
+
+        const orderDate = order.confirmedDeliveryDate === null ? order.expectedDeliveryDate : null;
+        const confirmedRows =
+          order.confirmedDeliveryDate !== null
+            ? []
+            : rows.filter(
+                (r) =>
+                  r.confirmedDeliveryDate === null &&
+                  r.expectedDeliveryDate !== null &&
+                  r.expectedDeliveryDate !== orderDate &&
+                  Number(r.quantityReceived) < Number(r.quantityOrdered)
+              );
+        if (confirmedRows.length > 0) {
+          await tx
+            .update(purchaseOrderRows)
+            .set({ confirmedDeliveryDate: sql`${purchaseOrderRows.expectedDeliveryDate}` })
+            .where(inArray(purchaseOrderRows.id, confirmedRows.map((r) => r.id)));
+        }
+        const [updated] = await tx
+          .update(purchaseOrders)
+          .set({ status: "confirmed", ...(orderDate !== null ? { confirmedDeliveryDate: orderDate } : {}), updatedAt: new Date() })
+          .where(eq(purchaseOrders.id, id))
+          .returning();
+        return {
+          order: updated!,
+          confirmedDates: {
+            order: orderDate,
+            rows: confirmedRows.map((r) => ({ articleNumber: r.articleNumber, confirmedDeliveryDate: r.expectedDeliveryDate! })),
+          },
+        };
+      });
+    },
+
     // fromStatuses: only from one of those (null when the order has moved
     // on) — Makulera, which must not overwrite a receipt that committed
     // between its check and this UPDATE (the UPDATE waits for the receipt's

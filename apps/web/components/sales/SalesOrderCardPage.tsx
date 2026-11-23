@@ -135,7 +135,7 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   return (
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list={route === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} selectedId={params.id}>
+      <SplitView list={route === "quote" ? "/forsaljning/offerter" : "/forsaljning/ordrar"} selectedId={params.id} renderedAt={Date.now()}>
         <SalesOrderDetail
           order={order}
           rows={rows}

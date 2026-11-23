@@ -25,7 +25,7 @@ export default async function ArticleSummaryPage(props: { params: Promise<{ id: 
 
   return (
     <AppShell>
-      <SplitView list="/artiklar/register" selectedId={params.id}>
+      <SplitView list="/artiklar/register" selectedId={params.id} renderedAt={Date.now()}>
         <ArticleSummary article={article} balances={balancesPage?.rows ?? null} overview={overview} />
       </SplitView>
     </AppShell>

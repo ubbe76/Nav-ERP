@@ -31,7 +31,7 @@ export default async function SupplierInvoiceDetailPage(props: { params: Promise
   return (
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list="/inkop/leverantorsfakturor" selectedId={params.id}>
+      <SplitView list="/inkop/leverantorsfakturor" selectedId={params.id} renderedAt={Date.now()}>
         <div className={shellStyles.topbar}>
           <div>
             <div className={shellStyles.title}>{invoice.registrationNumber}</div>
