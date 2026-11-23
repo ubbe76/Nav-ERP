@@ -79,10 +79,12 @@ interface PurchaseOrderDetailProps {
 }
 
 // The status steps (Programramen steg 3); Avbruten stands outside the flow.
+// Skickad (2026-11-23) is the mailed Utkast — a step on every order, also
+// one confirmed without being mailed.
 // The last receipt closes the order (Stängd automatiskt, 2026-11-21), so
 // Mottagen is a step only on an order that holds it (an older one, or one
 // set by Ändra status manuellt — Stäng order closes it).
-const PURCHASE_STEPS = ["draft", "confirmed", "partially_received", "received", "closed"] as const;
+const PURCHASE_STEPS = ["draft", "sent", "confirmed", "partially_received", "received", "closed"] as const;
 
 function purchaseSteps(order: PurchaseOrder) {
   const pill = PURCHASE_ORDER_STATUS_PILL[order.status];
@@ -112,7 +114,8 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
   // Rows stay editable until the order is fully received/closed/cancelled;
   // per-row guards (quantity ≥ received, no delete with receipts) are
   // enforced by the API and mirrored in the UI below.
-  const rowsEditable = order.status === "draft" || order.status === "confirmed" || order.status === "partially_received";
+  const rowsEditable =
+    order.status === "draft" || order.status === "sent" || order.status === "confirmed" || order.status === "partially_received";
   // Kvalitet: Avvikelse per orderrad on an order that has been placed — a
   // button of its own on a row that cannot be edited any more, an item in the
   // row's ⋯ menu otherwise (RowDeviationLink hides itself without Kvalitet).
@@ -427,7 +430,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
           />
         }
       >
-        {order.status === "draft" && (
+        {(order.status === "draft" || order.status === "sent") && (
           <Button type="button" variant="primary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => runAction("confirm")}>
             {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
           </Button>
@@ -439,11 +442,12 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
           </Link>
         )}
 
-        {(order.status === "confirmed" || order.status === "partially_received") && (
+        {(order.status === "sent" || order.status === "confirmed" || order.status === "partially_received") && (
           <>
             {/* The supplier's Bekräftat leveransdatum row by row — only once
                 the order is placed (an Utkast has its own Bekräfta, the
-                status). */}
+                status; a Skickad order has both). Goods can come on a
+                Skickad order too (PURCHASE_ORDER_RECEIVABLE_STATUSES). */}
             {receivable.length > 0 && (
               <Button type="button" variant="secondary" disabled={rowEditOpen} title={rowEditTitle} onClick={() => setModal("confirmRows")}>
                 Bekräfta rader…
@@ -460,7 +464,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
           </>
         )}
 
-        {(order.status === "draft" || order.status === "confirmed") && canInkop && (
+        {(order.status === "draft" || order.status === "sent" || order.status === "confirmed") && canInkop && (
           <Button type="button" variant="secondary" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => setModal("changeSupplier")}>
             Byt leverantör…
           </Button>
@@ -472,7 +476,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers, pageTit
           </Button>
         )}
 
-        {(order.status === "draft" || order.status === "confirmed") && (
+        {(order.status === "draft" || order.status === "sent" || order.status === "confirmed") && (
           <Button type="button" variant="danger" disabled={actionPending !== null || rowEditOpen} title={rowEditTitle} onClick={() => runAction("cancel")}>
             {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
           </Button>

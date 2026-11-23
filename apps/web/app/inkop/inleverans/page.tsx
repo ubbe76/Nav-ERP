@@ -17,7 +17,7 @@ export default async function GoodsReceiptPage(props: { searchParams: Promise<{ 
   // ordrar" table below the picker so the routine works without knowing the
   // order number.
   const openOrders = await apiGet<Paged<PurchaseOrder>>(
-    "/api/v1/purchase-orders?status=confirmed,partially_received&withOpenRows=true&limit=1000",
+    "/api/v1/purchase-orders?status=sent,confirmed,partially_received&withOpenRows=true&limit=1000",
     cookieHeader
   );
 

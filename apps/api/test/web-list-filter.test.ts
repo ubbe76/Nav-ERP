@@ -88,8 +88,8 @@ describe("finished orders hidden by default", () => {
   const f = PURCHASE_ORDER_FILTER;
 
   it("Alla asks for every status but the finished ones; Sen still narrows", () => {
-    expect(effectiveFilterValue(f, [], false)).toBe("draft,confirmed,partially_received");
-    expect(effectiveFilterValue(f, ["late"], false)).toBe("draft,confirmed,partially_received,late");
+    expect(effectiveFilterValue(f, [], false)).toBe("draft,sent,confirmed,partially_received");
+    expect(effectiveFilterValue(f, ["late"], false)).toBe("draft,sent,confirmed,partially_received,late");
     expect(effectiveFilterValue(f, ["draft", "late"], false)).toBe("draft,late");
     // Ticked: as chosen, Alla = no filter.
     expect(effectiveFilterValue(f, [], true)).toBe("");
@@ -97,8 +97,8 @@ describe("finished orders hidden by default", () => {
   });
 
   it("the chips and the menu leave the finished statuses out until shown", () => {
-    expect(visibleOptions(f, false).map((o) => o.label)).toEqual(["Utkast", "Bekräftad", "Delvis mottagen"]);
-    expect(visibleOptions(f, true)).toHaveLength(6);
+    expect(visibleOptions(f, false).map((o) => o.label)).toEqual(["Utkast", "Skickad", "Bekräftad", "Delvis mottagen"]);
+    expect(visibleOptions(f, true)).toHaveLength(7);
     expect(withoutFinished(f, ["draft", "closed", "late"])).toEqual(["draft", "late"]);
   });
 

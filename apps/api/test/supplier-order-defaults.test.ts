@@ -315,7 +315,8 @@ describe("mottagaren när en inköpsorder skickas", () => {
 
     const res = await call("POST", `/purchase-orders/${order.id}/send-email`, mail);
     expect(res.statusCode).toBe(200);
-    expect(res.json().status).toBe("confirmed");
+    // The mail makes an Utkast Skickad, never Bekräftad (Bekräfta does).
+    expect(res.json().status).toBe("sent");
     expect(sent).toEqual([{ to: "order@example.com", cc: undefined, subject: "Inköpsorder" }]);
   });
 
@@ -393,7 +394,8 @@ describe("Kopia", () => {
     const failed = await call("POST", `/purchase-orders/${order.id}/send-email`, { ...mail, cc: ["sara@example.com"] });
     expect(failed.statusCode).toBe(502);
     expect(sent).toEqual([]);
-    // A failed send keeps the order a draft and logs the copy.
+    // The failed send logs the copy; the order stays a draft until a mail
+    // has gone.
     expect((await orderRow(order.id)).status).toBe("draft");
     const [entry] = await db.select().from(emailLog);
     expect(entry).toMatchObject({ status: "failed", recipient: "order@example.com", cc: ["sara@example.com"] });
@@ -404,7 +406,8 @@ describe("Kopia", () => {
     const resent = await call("POST", `/email-log/${entry!.id}/resend`);
     expect(resent.statusCode).toBe(200);
     expect(sent).toEqual([{ to: "order@example.com", cc: ["sara@example.com"], subject: "Inköpsorder" }]);
-    expect((await orderRow(order.id)).status).toBe("confirmed");
+    // Skicka om goes the same way: the mail has gone, so Skickad.
+    expect((await orderRow(order.id)).status).toBe("sent");
     const rows = await db.select().from(emailLog);
     expect(rows.map((r) => [r.status, r.cc])).toEqual(
       expect.arrayContaining([

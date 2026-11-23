@@ -627,7 +627,7 @@ export function ManufacturingOrderDetail({
                         // operation, linking to the routine.
                         ...(canInkop && row.workCenterType === "subcontract"
                           ? (purchasesOf(row.id)?.purchaseOrders ?? [])
-                              .filter((po) => ["draft", "confirmed", "partially_received"].includes(po.status))
+                              .filter((po) => ["draft", "sent", "confirmed", "partially_received"].includes(po.status))
                               .map((po) => ({ label: `Avsändning ${po.orderNumber}`, href: `/inkop/avsandning?order=${po.purchaseOrderId}` }))
                           : []),
                         { label: "Pallkort", onSelect: openPalletCard },

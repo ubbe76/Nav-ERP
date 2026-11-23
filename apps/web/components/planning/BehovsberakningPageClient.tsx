@@ -775,8 +775,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           )}
           {result.purchaseOrders.length > 0 && (
             <FormHint style={{ marginTop: 10 }}>
-              Inköpsordrarna skapas som <strong>Utkast</strong> — att mejla en order skickar den och sätter den
-              samtidigt till <strong>Bekräftad</strong>.
+              Inköpsordrarna skapas som <strong>Utkast</strong> och blir <strong>Skickad</strong> när de mejlas —{" "}
+              <strong>Bekräfta</strong> ordern på kortet när leverantörens ordererkännande har kommit.
             </FormHint>
           )}
           {result.warnings.length > 0 && (

@@ -22,7 +22,8 @@ import {
 } from "@navet/shared";
 import { resolveSupplierPrice, type PriceBreak } from "./supplier-price.js";
 
-export const SUPPLIER_CHANGE_STATUSES: readonly PurchaseOrderStatus[] = ["draft", "confirmed"];
+// Skickad (2026-11-23) like Bekräftad: the old supplier has the order.
+export const SUPPLIER_CHANGE_STATUSES: readonly PurchaseOrderStatus[] = ["draft", "sent", "confirmed"];
 
 export interface SupplierChangeFacts {
   order: {
@@ -154,7 +155,7 @@ export function planSupplierChange(facts: SupplierChangeFacts, newRate: number):
     orderId: order.id,
     orderNumber: order.orderNumber,
     status: order.status,
-    revertsToDraft: order.status === "confirmed",
+    revertsToDraft: order.status === "sent" || order.status === "confirmed",
     // Not part of what `expected` is compared with: every confirmed date is
     // cleared under the locks whatever it is by then (the audit row has them).
     clearsConfirmedDates: order.confirmedDeliveryDate !== null || facts.rows.some((r) => r.confirmedDeliveryDate !== null),

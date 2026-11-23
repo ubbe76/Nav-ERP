@@ -842,20 +842,81 @@ describe("purchase service — document email", () => {
     expect(log.rows[0]?.error).toContain("SMTP connection refused");
   });
 
-  it("emails a draft purchase order and confirms it; resends don't re-transition", async () => {
+  // The user 2026-11-23: "Ett inköp ska inte få status bekräftat förrän man
+  // själv sätter det" — Bekräftad is the supplier's ordererkännande, which
+  // only Bekräfta records. The mail leaves the status alone.
+  it("emails a draft purchase order: Skickad, never Bekräftad — only Bekräfta confirms", async () => {
+    // The user 2026-11-23: "Ändra status till Skickad när e-posten är
+    // skickad. Annars vet man ju inte om man skickat inköpsordern." — and
+    // "Ett inköp ska inte få status bekräftat förrän man själv sätter det."
     const { order } = await makeOrderWithRow(3);
     await purchaseService.updatePurchaseOrderHeader(order.id, { expectedDeliveryDate: "2030-05-06" });
 
-    const confirmed = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
-    expect(confirmed?.status).toBe("confirmed");
-    // Sent is not answered: unlike Bekräfta, the mail fills no Bekräftat
-    // leveransdatum from Önskat.
-    expect(confirmed?.confirmedDeliveryDate).toBeNull();
+    const sent = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
+    expect(sent?.status).toBe("sent");
+    expect(sent?.confirmedDeliveryDate).toBeNull();
     expect(sentMails[0]?.attachments?.[0]?.filename).toBe(`${order.orderNumber}.pdf`);
+    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("sent");
 
     const resent = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
-    expect(resent?.status).toBe("confirmed");
+    expect(resent?.status).toBe("sent");
     expect(sentMails).toHaveLength(2);
+
+    // Still open: the header and rows can be changed.
+    await purchaseService.updatePurchaseOrderHeader(order.id, { note: "Ändrad efter utskicket" });
+
+    // Bekräfta when the ordererkännande has come, as for an order never mailed.
+    const confirmed = await purchaseService.confirm(order.id);
+    expect(confirmed.status).toBe("confirmed");
+    expect(confirmed.confirmedDeliveryDate).toBe("2030-05-06");
+
+    const afterConfirm = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
+    expect(afterConfirm?.status).toBe("confirmed");
+  });
+
+  it("receives goods on a Skickad order; undoing every receipt gives Skickad back, not Bekräftad", async () => {
+    const { order, row, location, user } = await makeOrderWithRow(4);
+    await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
+
+    const received = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 1 }, user.id);
+    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("partially_received");
+
+    // No Bekräftat leveransdatum anywhere: the supplier never confirmed.
+    await purchaseService.undoReceipt(order.id, received.receiptId, user.id);
+    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("sent");
+  });
+
+  it("undoing every receipt on a confirmed order gives Bekräftad back", async () => {
+    const { order, row, location, user } = await makeOrderWithRow(4);
+    await purchaseService.updatePurchaseOrderHeader(order.id, { expectedDeliveryDate: "2030-05-06" });
+    await purchaseService.confirm(order.id);
+
+    const received = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 1 }, user.id);
+    await purchaseService.undoReceipt(order.id, received.receiptId, user.id);
+    expect((await purchaseService.getPurchaseOrder(order.id))?.status).toBe("confirmed");
+  });
+
+  it("an Utkast is not received — it is confirmed (or mailed) first", async () => {
+    const { order, row, location, user } = await makeOrderWithRow(2);
+    await expect(
+      purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 1 }, user.id)
+    ).rejects.toThrow(InvalidStatusTransitionError);
+  });
+
+  it("Ändra status manuellt stamps confirmed_at on Bekräftad and clears it on Utkast/Skickad", async () => {
+    const { order } = await makeOrderWithRow(1);
+    const confirmed = await purchaseService.setStatus(order.id, "confirmed");
+    expect(confirmed?.confirmedAt).not.toBeNull();
+    const back = await purchaseService.setStatus(order.id, "sent");
+    expect(back?.status).toBe("sent");
+    expect(back?.confirmedAt).toBeNull();
+  });
+
+  it("cancels a Skickad order", async () => {
+    const { order } = await makeOrderWithRow(2);
+    await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
+    const cancelled = await purchaseService.cancel(order.id);
+    expect(cancelled.status).toBe("cancelled");
   });
 
   it("refuses to email a cancelled purchase order", async () => {

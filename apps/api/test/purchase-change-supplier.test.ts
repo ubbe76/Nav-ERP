@@ -310,6 +310,7 @@ describe("status and what the order takes from the new supplier", () => {
     const a = await article("PL-2");
     const { order: io } = await order(old.id, [{ articleId: a.id, quantity: 1, unitPrice: 10 }], { confirm: true });
     expect((await stored(io.id)).order).toMatchObject({ yourReference: "Gunnar Gammal", freightPaidByUs: true });
+    expect((await stored(io.id)).order.confirmedAt).not.toBeNull();
 
     const p = await preview(io.id, next.id);
     expect(p.json()).toMatchObject({ status: "confirmed", revertsToDraft: true, blockers: [] });
@@ -317,11 +318,27 @@ describe("status and what the order takes from the new supplier", () => {
     expect(res.statusCode).toBe(200);
     // The new supplier has no huvudkontakt and no frakt-förval: both cleared.
     expect((await stored(io.id)).order).toMatchObject({ supplierId: next.id, status: "draft", yourReference: null, freightPaidByUs: false });
+    // No longer confirmed: an Ångra inleverans later would not give Bekräftad back.
+    expect((await stored(io.id)).order.confirmedAt).toBeNull();
     const [log] = await db.select().from(auditLog).where(eq(auditLog.action, "supplier_changed"));
     expect(log!.detail).toMatchObject({ before: { status: "confirmed" }, after: { status: "draft" } });
 
     expect((await call("POST", `/purchase-orders/${io.id}/confirm`)).statusCode).toBe(200);
     expect((await stored(io.id)).order.status).toBe("confirmed");
+  });
+
+  it("takes a Skickad order back to draft — the old supplier has it and must be told", async () => {
+    const old = await supplier("Gamla AB");
+    const next = await supplier("Nya AB");
+    const a = await article("PL-3");
+    const { order: io } = await order(old.id, [{ articleId: a.id, quantity: 1, unitPrice: 10 }]);
+    // Skickad = the mailed Utkast (2026-11-23).
+    await db.update(purchaseOrders).set({ status: "sent" }).where(eq(purchaseOrders.id, io.id));
+
+    const p = await preview(io.id, next.id);
+    expect(p.json()).toMatchObject({ status: "sent", revertsToDraft: true, blockers: [] });
+    expect((await change(io.id, next.id)).statusCode).toBe(200);
+    expect((await stored(io.id)).order).toMatchObject({ supplierId: next.id, status: "draft" });
   });
 
   it("clears Bekräftat leveransdatum on the order and the rows (the old supplier's promise) and leaves Önskat", async () => {

@@ -53,7 +53,9 @@ import { formatStockholmDate, stockholmToday } from "../../lib/date";
 import type { ReceiptPrintEntry } from "../../lib/receiptPrint";
 import { useReceiptPrint } from "./useReceiptPrint";
 
-const RECEIVABLE: PurchaseOrderStatus[] = ["confirmed", "partially_received"];
+// Mirrors PURCHASE_ORDER_RECEIVABLE_STATUSES (shared purchase.ts): a Skickad
+// order can be received, an Utkast is confirmed first.
+const RECEIVABLE: PurchaseOrderStatus[] = ["sent", "confirmed", "partially_received"];
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
 
 type ArticleMatch = Extract<ScanMatch, { kind: "article" }>;

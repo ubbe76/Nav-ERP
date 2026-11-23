@@ -132,6 +132,20 @@ describe("purchase supply", () => {
     expect(rowFor(rows, "a").projected).toBe(50);
   });
 
+  it("counts a Skickad order as ordinary supply — it has gone to the supplier", () => {
+    // Skickad (2026-11-23): before, the mail made the order Bekräftad, which
+    // counted the same; only the unsent Utkast nets in its own bucket.
+    const rows = computeRequirements(
+      calcInput({
+        articles: [art({ articleId: "a" })],
+        purchaseRows: [{ articleId: "a", orderStatus: "sent", quantityOrdered: 30, quantityReceived: 0 }],
+      })
+    );
+    expect(rowFor(rows, "a").supplyPo).toBe(30);
+    expect(rowFor(rows, "a").supplyPoDraft).toBe(0);
+    expect(rowFor(rows, "a").projected).toBe(30);
+  });
+
   it("ignores received, closed and cancelled orders", () => {
     const rows = computeRequirements(
       calcInput({

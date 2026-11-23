@@ -21,7 +21,7 @@ export interface ConfirmationRow {
 
 // The statuses the list derives a confirmation for (a whitelist, like every
 // status set): there is still something to come.
-const OPEN_STATUSES: ReadonlySet<string> = new Set(["draft", "confirmed", "partially_received"]);
+const OPEN_STATUSES: ReadonlySet<string> = new Set(["draft", "sent", "confirmed", "partially_received"]);
 
 export function hasRest(row: ConfirmationRow): boolean {
   return Number(row.quantityReceived) < Number(row.quantityOrdered);

@@ -1646,6 +1646,20 @@
       "when": 1795343311081,
       "tag": "0234_stamp_correction_report_source",
       "breakpoints": true
+    },
+    {
+      "idx": 235,
+      "version": "7",
+      "when": 1795457207190,
+      "tag": "0235_io_status_skickad",
+      "breakpoints": true
+    },
+    {
+      "idx": 236,
+      "version": "7",
+      "when": 1795457670449,
+      "tag": "0236_io_confirmed_at",
+      "breakpoints": true
     }
   ]
 }

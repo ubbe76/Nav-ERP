@@ -73,6 +73,8 @@ import {
   type UpdatePurchaseOrderRowInput,
   type UpdateSupplierInput,
   round4,
+  PURCHASE_ORDER_OPEN_STATUSES,
+  PURCHASE_ORDER_RECEIVABLE_STATUSES,
 } from "@navet/shared";
 import { purchaseOrderLate } from "../../planning/repository/late-orders.js";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
@@ -159,7 +161,7 @@ export type PurchaseRowMutationResult =
 
 // Rows are editable in these statuses only — re-checked under the order lock
 // by every row write (the service's own check reads unlocked).
-const ROW_EDITABLE_STATUSES: readonly PurchaseOrderStatus[] = ["draft", "confirmed", "partially_received"];
+const ROW_EDITABLE_STATUSES = PURCHASE_ORDER_OPEN_STATUSES;
 
 // Locks the order header (after the row, the row → order order of the
 // receipt) and returns its status, null when the order is gone.
@@ -245,7 +247,12 @@ async function recomputePartiallyReceived(tx: Tx, orderId: string): Promise<Purc
 
 // Receipt (and its undo): the order status follows what the rows hold —
 // everything received ⇒ closed, something ⇒ partially received, nothing
-// (every receipt undone) ⇒ back to confirmed. Stängd automatiskt
+// (every receipt undone) ⇒ back to confirmed when the order was confirmed
+// (confirmed_at), otherwise Skickad — a Skickad order can be received
+// (2026-11-23), and undoing its receipts must not make it Bekräftad ("Ett
+// inköp ska inte få status bekräftat förrän man själv sätter det"). Not
+// the Bekräftat leveransdatum: Bekräfta on an order without Önskat fills
+// none. Stängd automatiskt
 // (2026-11-21, the user: "När allt är inlevererat på en order ska den
 // automatiskt stängas"): the last receipt closes the order — Mottagen is
 // no longer reached by a receipt (old orders and Ändra status manuellt can
@@ -256,7 +263,14 @@ async function recomputeReceiptStatus(tx: Tx, orderId: string): Promise<Purchase
   const allReceived =
     allRows.length > 0 && allRows.every((r) => Number(r.quantityReceived) >= Number(r.quantityOrdered));
   const anyReceived = allRows.some((r) => Number(r.quantityReceived) > 0);
-  const status: PurchaseOrderStatus = allReceived ? "closed" : anyReceived ? "partially_received" : "confirmed";
+  let status: PurchaseOrderStatus = allReceived ? "closed" : "partially_received";
+  if (!anyReceived) {
+    const [order] = await tx
+      .select({ confirmedAt: purchaseOrders.confirmedAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, orderId));
+    status = order?.confirmedAt != null ? "confirmed" : "sent";
+  }
   await tx.update(purchaseOrders).set({ status, updatedAt: new Date() }).where(eq(purchaseOrders.id, orderId));
   return status;
 }
@@ -1061,10 +1075,10 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
       // leveransdatum (order-dates.md). Over the rows still to come, each
       // confirmed by its own date or the order's: all ⇒ confirmed, some ⇒
       // partial, none ⇒ none; no open row ⇒ the order's own date. Only on an
-      // open order (Utkast — not sent, so normally none —, Bekräftad, Delvis
-      // mottagen); null once received, closed or cancelled. Derived, never
-      // stored.
-      const supplierConfirmationSql = sql<SupplierConfirmation | null>`case when ${purchaseOrders.status} in ('draft', 'confirmed', 'partially_received') then (select case when count(*) = 0 then (case when ${purchaseOrders.confirmedDeliveryDate} is null then 'none' else 'confirmed' end) when bool_and(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}) is not null) then 'confirmed' when bool_or(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}) is not null) then 'partial' else 'none' end from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered) end`;
+      // open order (PURCHASE_ORDER_OPEN_STATUSES: Utkast and Skickad — not
+      // confirmed, so normally none —, Bekräftad, Delvis mottagen); null once
+      // received, closed or cancelled. Derived, never stored.
+      const supplierConfirmationSql = sql<SupplierConfirmation | null>`case when ${inArray(purchaseOrders.status, [...PURCHASE_ORDER_OPEN_STATUSES])} then (select case when count(*) = 0 then (case when ${purchaseOrders.confirmedDeliveryDate} is null then 'none' else 'confirmed' end) when bool_and(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}) is not null) then 'confirmed' when bool_or(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}) is not null) then 'partial' else 'none' end from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered) end`;
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -1163,10 +1177,10 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
     // order's covers every row without one of its own, so then no row is
     // touched. Rows first (sorted on id, FOR UPDATE), then the order — the
     // row → order order of updateRow and the receipt. Null when the order
-    // has left draft meanwhile. No revision: the confirmed date is the
+    // has left draft/sent meanwhile. No revision: the confirmed date is the
     // supplier's and not on the PDF. Sending the order by mail (draft →
-    // confirmed in sendPurchaseOrderEmail) fills nothing — the supplier has
-    // not answered yet.
+    // sent in sendPurchaseOrderEmail) fills nothing — the supplier has not
+    // answered yet.
     async confirmOrder(id: string) {
       return db.transaction(async (tx) => {
         const rows = await tx
@@ -1192,7 +1206,7 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
           .from(purchaseOrders)
           .where(eq(purchaseOrders.id, id))
           .for("update");
-        if (!order || order.status !== "draft") return null;
+        if (!order || (order.status !== "draft" && order.status !== "sent")) return null;
 
         const orderDate = order.confirmedDeliveryDate === null ? order.expectedDeliveryDate : null;
         const confirmedRows =
@@ -1213,7 +1227,12 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
         }
         const [updated] = await tx
           .update(purchaseOrders)
-          .set({ status: "confirmed", ...(orderDate !== null ? { confirmedDeliveryDate: orderDate } : {}), updatedAt: new Date() })
+          .set({
+            status: "confirmed",
+            confirmedAt: new Date(),
+            ...(orderDate !== null ? { confirmedDeliveryDate: orderDate } : {}),
+            updatedAt: new Date(),
+          })
           .where(eq(purchaseOrders.id, id))
           .returning();
         return {
@@ -1229,11 +1248,19 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
     // fromStatuses: only from one of those (null when the order has moved
     // on) — Makulera, which must not overwrite a receipt that committed
     // between its check and this UPDATE (the UPDATE waits for the receipt's
-    // order lock and then re-checks the WHERE).
+    // order lock and then re-checks the WHERE). confirmed_at follows the
+    // status (Ändra status manuellt): Bekräftad stamps it unless it is
+    // there, Utkast/Skickad clear it, every other status leaves it.
     async updateStatus(id: string, status: PurchaseOrderStatus, fromStatuses?: readonly PurchaseOrderStatus[]) {
+      const confirmedAt =
+        status === "confirmed"
+          ? sql`coalesce(${purchaseOrders.confirmedAt}, now())`
+          : status === "draft" || status === "sent"
+            ? null
+            : undefined;
       const [row] = await db
         .update(purchaseOrders)
-        .set({ status, updatedAt: new Date() })
+        .set({ status, confirmedAt, updatedAt: new Date() })
         .where(
           fromStatuses
             ? and(eq(purchaseOrders.id, id), inArray(purchaseOrders.status, [...fromStatuses]))
@@ -1505,7 +1532,7 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
       return db.transaction(async (tx) => {
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
         if (!order) return { ok: false, reason: "order_not_found" };
-        if (order.status !== "confirmed" && order.status !== "partially_received") {
+        if (!PURCHASE_ORDER_RECEIVABLE_STATUSES.includes(order.status)) {
           return { ok: false, reason: "invalid_status" };
         }
 
@@ -1528,7 +1555,7 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
           .from(purchaseOrders)
           .where(eq(purchaseOrders.id, orderId))
           .for("update");
-        if (!locked || (locked.status !== "confirmed" && locked.status !== "partially_received")) {
+        if (!locked || !PURCHASE_ORDER_RECEIVABLE_STATUSES.includes(locked.status)) {
           return { ok: false, reason: "invalid_status" };
         }
 
@@ -1967,7 +1994,7 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
         }
         const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
         if (!order) return { ok: false, reason: "order_not_found" };
-        if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
+        if (!PURCHASE_ORDER_OPEN_STATUSES.includes(order.status)) {
           return { ok: false, reason: "invalid_status" };
         }
         const [dispatch] = await tx

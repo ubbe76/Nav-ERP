@@ -9,7 +9,9 @@ import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.
 // today. A fully delivered/received order falls out because no row has rest;
 // quotes are never late. Leaf file: schema imports only.
 export const LATE_SALES_ORDER_STATUSES = ["confirmed", "in_production"] as const;
-export const LATE_PURCHASE_ORDER_STATUSES = ["draft", "confirmed", "partially_received"] as const;
+// The open inköpsorder (shared PURCHASE_ORDER_OPEN_STATUSES — this leaf file
+// keeps its own literal; a Skickad order is late like the others).
+export const LATE_PURCHASE_ORDER_STATUSES = ["draft", "sent", "confirmed", "partially_received"] as const;
 
 // The row condition, for a query that has the row joined to its order.
 export function salesRowLate(today: string): SQL {
