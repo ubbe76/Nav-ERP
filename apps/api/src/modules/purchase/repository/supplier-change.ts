@@ -285,7 +285,8 @@ export async function changeOrderSupplier(
       .set({ confirmedDeliveryDate: null })
       .where(and(eq(purchaseOrderRows.purchaseOrderId, orderId), isNotNull(purchaseOrderRows.confirmedDeliveryDate)));
     // As a new order to this supplier: currency, terms and the förval. A
-    // confirmed order goes back to draft; the revision is bumped once.
+    // Skickad or Bekräftad order goes back to draft (no longer confirmed:
+    // confirmed_at cleared); the revision is bumped once.
     const [updated] = await tx
       .update(purchaseOrders)
       .set({
@@ -299,6 +300,7 @@ export async function changeOrderSupplier(
         yourReference: facts.defaults.yourReference,
         confirmedDeliveryDate: null,
         status: "draft",
+        confirmedAt: null,
         revision: sql`${purchaseOrders.revision} + 1`,
         updatedAt: new Date(),
       })

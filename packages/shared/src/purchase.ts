@@ -14,6 +14,7 @@ import { documentLanguageSchema } from "./document-language.js";
 
 export const purchaseOrderStatusSchema = z.enum([
   "draft",
+  "sent",
   "confirmed",
   "partially_received",
   "received",
@@ -21,6 +22,16 @@ export const purchaseOrderStatusSchema = z.enum([
   "cancelled",
 ]);
 export type PurchaseOrderStatus = z.infer<typeof purchaseOrderStatusSchema>;
+
+// The open orders: header and rows editable, supply in the planning, late
+// alerts, Bekräftad av leverantör, Avsändning lego and the order register's
+// "open". Skickad (sent, 2026-11-23) is open like Utkast and Bekräftad.
+export const PURCHASE_ORDER_OPEN_STATUSES: readonly PurchaseOrderStatus[] = ["draft", "sent", "confirmed", "partially_received"];
+// Goods can be received on these: a Skickad order too (goods may come
+// without an ordererkännande, and a mailed order could be received before
+// 2026-11-23, when the mail made it Bekräftad) — an Utkast has not been
+// ordered and is confirmed first.
+export const PURCHASE_ORDER_RECEIVABLE_STATUSES: readonly PurchaseOrderStatus[] = ["sent", "confirmed", "partially_received"];
 
 // Bekräftad av leverantör on the IO list (listPurchaseOrders derives it from
 // the Bekräftat leveransdatum of the rows still to come): all ⇒ confirmed,
@@ -297,7 +308,7 @@ export interface SupplierChangePreview {
   orderId: string;
   orderNumber: string;
   status: PurchaseOrderStatus;
-  // A confirmed order goes back to Utkast — the old supplier must be told.
+  // A Skickad or Bekräftad order goes back to Utkast — the old supplier must be told.
   revertsToDraft: boolean;
   // Bekräftat leveransdatum was the old supplier's promise: the order's and
   // the rows' are cleared by the change. True when there is one to clear;

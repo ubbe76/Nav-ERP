@@ -44,6 +44,7 @@ export type SalesOrderStatus =
   | "ordered";
 export type PurchaseOrderStatus =
   | "draft"
+  | "sent"
   | "confirmed"
   | "partially_received"
   | "received"
@@ -356,7 +357,11 @@ export interface RequirementRow {
 // not exist) but has no material rows yet, so its component demand comes from
 // an in-memory BOM explosion instead (see below).
 export const DEMAND_SALES_STATUSES: ReadonlySet<SalesOrderStatus> = new Set(["confirmed", "in_production"]);
+// Skickad (2026-11-23) is ordinary supply: the order has gone to the
+// supplier (before 2026-11-23 the mail made it Bekräftad, which counted the
+// same) — only the unsent Utkast nets in its own bucket (supplyPoDraft).
 export const SUPPLY_PO_STATUSES: ReadonlySet<PurchaseOrderStatus> = new Set([
+  "sent",
   "confirmed",
   "partially_received",
 ]);

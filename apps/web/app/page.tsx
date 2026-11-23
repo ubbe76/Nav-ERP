@@ -93,7 +93,7 @@ export default async function OverviewPage() {
     openDeviationsPage,
   ] = await Promise.all([
     has("flow")
-      ? apiGet<Paged<PurchaseOrder>>("/api/v1/purchase-orders?status=draft,confirmed,partially_received&limit=1", cookieHeader)
+      ? apiGet<Paged<PurchaseOrder>>("/api/v1/purchase-orders?status=draft,sent,confirmed,partially_received&limit=1", cookieHeader)
       : null,
     has("flow")
       ? apiGet<Paged<SalesOrder>>("/api/v1/sales-orders?status=quote,confirmed,in_production,delivered&limit=1", cookieHeader)
@@ -128,9 +128,9 @@ export default async function OverviewPage() {
     has("arrivals")
       ? orNull(
           apiGet<Paged<PurchaseOrder>>(
-            // Utkast too: an order due this week that is not sent yet is
-            // what the card's status shows.
-            `/api/v1/purchase-orders?status=draft,confirmed,partially_received&deliveryTo=${weekEnd}&sort=delivery&limit=${OVERVIEW_CARD_ROWS}`,
+            // Utkast and Skickad too: an order due this week that is not
+            // sent or not confirmed yet is what the card's status shows.
+            `/api/v1/purchase-orders?status=draft,sent,confirmed,partially_received&deliveryTo=${weekEnd}&sort=delivery&limit=${OVERVIEW_CARD_ROWS}`,
             cookieHeader
           )
         )

@@ -13,7 +13,7 @@ Orderförteckningen för kundorder tar bara med kundordrar, aldrig offerter. Det
 Urvalet:
 
 - **Datum avser** — **Orderdatum** (dagen ordern skapades) eller **Leveransdatum**, med **Från** och **Till**. Leveransdatum är radens eget datum, annars orderns; på inköpsordrar går **Bekräftat leveransdatum** före **Önskat leveransdatum**, samma regel som planeringen använder. Tomma datum = inget datumurval.
-- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Bekräftad och Under tillverkning för kundordrar; Utkast, Bekräftad och Delvis mottagen för inköpsordrar), **Varugrupp**, **Artikelkod** och **Artikel**.
+- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Bekräftad och Under tillverkning för kundordrar; Utkast, Skickad, Bekräftad och Delvis mottagen för inköpsordrar), **Varugrupp**, **Artikelkod** och **Artikel**.
 - **Bara rader med rest** — bara rader som inte är fullt levererade eller mottagna.
 
 Urvalet gäller **orderraderna**: leveransdatum, artikel, varugrupp, artikelkod och rest väljer rader, och en order visas med de rader som kom med — dess ordervärde och restvärde summerar bara dem. Ordrar utan rader visas inte.

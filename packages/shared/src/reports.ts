@@ -158,7 +158,7 @@ export const SALES_ORDER_REGISTER_STATUSES = [
   "cancelled",
 ] as const satisfies readonly SalesOrderStatus[];
 export const SALES_ORDER_OPEN_STATUSES = ["confirmed", "in_production"] as const satisfies readonly SalesOrderStatus[];
-export const PURCHASE_ORDER_OPEN_STATUSES = ["draft", "confirmed", "partially_received"] as const;
+// PURCHASE_ORDER_OPEN_STATUSES lives in purchase.ts (the purchase module's rules read it too).
 
 export const salesOrderRegisterQuerySchema = orderRegisterQuerySchema(SALES_ORDER_REGISTER_STATUSES);
 export type SalesOrderRegisterQuery = z.infer<typeof salesOrderRegisterQuerySchema>;

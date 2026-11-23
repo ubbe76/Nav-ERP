@@ -19,7 +19,7 @@ export default async function DispatchPage(props: {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
 
   const openOrders = await apiGet<Paged<PurchaseOrder>>(
-    "/api/v1/purchase-orders?kind=lego&status=draft,confirmed,partially_received&limit=1000",
+    "/api/v1/purchase-orders?kind=lego&status=draft,sent,confirmed,partially_received&limit=1000",
     cookieHeader,
   );
 

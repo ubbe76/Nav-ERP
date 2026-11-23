@@ -14,6 +14,8 @@ import {
   type ExtraDescriptionDocument,
   type SupplierPaymentDetails,
   round4,
+  PURCHASE_ORDER_OPEN_STATUSES,
+  PURCHASE_ORDER_RECEIVABLE_STATUSES,
 } from "@navet/shared";
 import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type {
@@ -1278,13 +1280,13 @@ export function createPurchaseService(
     },
 
     // Header fields (leveransdatum, notering, växelkurs, Er/Vår referens,
-    // villkor) — same status rule as row editing:
-    // draft/confirmed/partially_received. The currency stays locked to the
+    // villkor) — same status rule as row editing, the open orders
+    // (PURCHASE_ORDER_OPEN_STATUSES). The currency stays locked to the
     // snapshot taken from the supplier at creation.
     async updatePurchaseOrderHeader(orderId: string, input: UpdatePurchaseOrderHeaderInput, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
-      if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
+      if (!PURCHASE_ORDER_OPEN_STATUSES.includes(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
       // Valuta: SEK ⇔ 1. Re-sending the stored rate (the card saves the whole
@@ -1720,7 +1722,7 @@ export function createPurchaseService(
     async addRow(purchaseOrderId: string, input: CreatePurchaseOrderRowInput, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(purchaseOrderId);
       if (!order) throw new PurchaseOrderNotFoundError(purchaseOrderId);
-      if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
+      if (!PURCHASE_ORDER_OPEN_STATUSES.includes(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
       const resolved = await resolveRowInput(input);
@@ -1766,7 +1768,7 @@ export function createPurchaseService(
     async updateRow(purchaseOrderId: string, rowId: string, input: UpdatePurchaseOrderRowInput, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(purchaseOrderId);
       if (!order) throw new PurchaseOrderNotFoundError(purchaseOrderId);
-      if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
+      if (!PURCHASE_ORDER_OPEN_STATUSES.includes(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change rows on an order in status "${order.status}"`);
       }
 
@@ -1844,7 +1846,7 @@ export function createPurchaseService(
     async deleteRow(purchaseOrderId: string, rowId: string, bumpRevision = true, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(purchaseOrderId);
       if (!order) throw new PurchaseOrderNotFoundError(purchaseOrderId);
-      if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
+      if (!PURCHASE_ORDER_OPEN_STATUSES.includes(order.status)) {
         throw new InvalidStatusTransitionError(`Cannot change rows on an order in status "${order.status}"`);
       }
       const existing = await repo.findRowById(rowId);
@@ -1880,7 +1882,7 @@ export function createPurchaseService(
     async confirm(orderId: string, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
-      if (order.status !== "draft") {
+      if (order.status !== "draft" && order.status !== "sent") {
         throw new InvalidStatusTransitionError(`Cannot confirm an order in status "${order.status}"`);
       }
       // Bekräfta fills Bekräftat leveransdatum from Önskat where nothing is
@@ -1922,9 +1924,15 @@ export function createPurchaseService(
       return { filename: `inkopsordrar-${orderIds.length}-st.pdf`, content: await mergePdfs(documents) };
     },
 
-    // Emails the order as a PDF attachment. Sending a draft to the supplier
-    // is the act of ordering, so it transitions draft → confirmed — only
-    // when SMTP succeeded. Later statuses are plain resends.
+    // Emails the order as a PDF attachment. A sent Utkast becomes Skickad
+    // (the user 2026-11-23: "Ändra status till Skickad när e-posten är
+    // skickad. Annars vet man ju inte om man skickat inköpsordern.") — only
+    // once the mail has gone, like the inquiry's draft → sent. It never
+    // becomes Bekräftad here ("Ett inköp ska inte få status bekräftat förrän
+    // man själv sätter det": Bekräftad means the supplier's ordererkännande
+    // has confirmed the dates, which only Bekräfta records); before
+    // 2026-11-23, mailing a draft made it confirmed. A later status is left
+    // as it is.
     // Lego rows' drawings are ALWAYS attached (the subcontractor cannot work
     // without them): the article's own drawings when the operation says
     // "use article drawings", otherwise the file uploaded on the operation.
@@ -1966,23 +1974,25 @@ export function createPurchaseService(
         attachDrawings: input.attachDrawings,
         sender: mailSender(senderId, documentLanguageOf(order.supplierLanguage)),
       });
-      // The mail has gone: an order that left draft meanwhile (cancelled,
-      // confirmed by someone else) keeps its status and is returned re-read.
+      // The mail has gone: a status that moved meanwhile (cancelled,
+      // confirmed by someone else) is no error and is left as it is — the
+      // order is returned as it now stands.
       if (order.status === "draft") {
-        return (await repo.updateStatus(orderId, "confirmed", ["draft"])) ?? (await repo.findPurchaseOrderById(orderId)) ?? order;
+        const sent = await repo.updateStatus(orderId, "sent", ["draft"]);
+        if (sent) return sent;
       }
-      return order;
+      return (await repo.findPurchaseOrderById(orderId)) ?? order;
     },
 
     async cancel(orderId: string, userId?: string | null) {
       const order = await repo.findPurchaseOrderById(orderId);
       if (!order) throw new PurchaseOrderNotFoundError(orderId);
-      if (order.status !== "draft" && order.status !== "confirmed") {
+      if (order.status !== "draft" && order.status !== "sent" && order.status !== "confirmed") {
         throw new InvalidStatusTransitionError(
           `Cannot cancel an order in status "${order.status}" — goods have already been received`
         );
       }
-      const updated = await repo.updateStatus(orderId, "cancelled", ["draft", "confirmed"]);
+      const updated = await repo.updateStatus(orderId, "cancelled", ["draft", "sent", "confirmed"]);
       if (!updated) {
         throw new InvalidStatusTransitionError("Cannot cancel the order — goods have been received on it meanwhile");
       }
@@ -2053,7 +2063,7 @@ export function createPurchaseService(
       }
       if (existingRow?.purchaseOrderId === orderId && existingRow.moOperationId !== null) {
         const order = await repo.findPurchaseOrderById(orderId);
-        const openForReceipt = order?.status === "confirmed" || order?.status === "partially_received";
+        const openForReceipt = order !== null && PURCHASE_ORDER_RECEIVABLE_STATUSES.includes(order.status);
         const withinLimit =
           purchaseOverReceiptPercent === null ||
           Number(existingRow.quantityReceived) + input.quantity <=
@@ -2166,7 +2176,7 @@ export function createPurchaseService(
         case "row_not_found":
           throw new PurchaseOrderRowNotFoundError(rowId);
         case "invalid_status":
-          throw new InvalidStatusTransitionError("Goods can only be received against a confirmed or partially received order");
+          throw new InvalidStatusTransitionError("Goods can only be received against a sent, confirmed or partially received order");
         case "over_receipt":
           throw new OverReceiptError({
             allowedPercent: purchaseOverReceiptPercent ?? 0,

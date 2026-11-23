@@ -144,9 +144,10 @@ export interface RequirementsLoad extends RequirementsInput {
 
 // Statuses worth loading at all — the pure calc owns the semantics, these
 // filters only keep finished/cancelled history out of the transfer. Draft
-// IOs ARE loaded (they net as their own supply bucket).
+// IOs ARE loaded (they net as their own supply bucket), Skickad ones count
+// as ordinary supply (requirements-calc SUPPLY_PO_STATUSES).
 const OPEN_SALES: SalesOrderStatus[] = ["confirmed", "in_production"];
-const OPEN_PO: PurchaseOrderStatus[] = ["draft", "confirmed", "partially_received"];
+const OPEN_PO: PurchaseOrderStatus[] = ["draft", "sent", "confirmed", "partially_received"];
 const OPEN_MO: ManufacturingOrderStatus[] = ["planned", "released", "in_progress"];
 // Inquiry (förfrågan) statuses that still represent a live RFQ — cancelled
 // and ordered inquiries are done deals (or superseded by the IO) and are
@@ -500,8 +501,8 @@ export function createPlanningRepository(db: Db) {
             // Lego rows (mo_operation_id set) are OPERATION demand, never
             // article supply — the goods come home via the MO's mo_receipt,
             // and the MO already counts as supply (supplyMo). Counting the
-            // lego IO too would double the units. Applies to draft and
-            // confirmed alike (OPEN_PO covers both).
+            // lego IO too would double the units. Applies to every open
+            // status alike (OPEN_PO).
             .where(and(inArray(purchaseOrders.status, OPEN_PO), isNull(purchaseOrderRows.moOperationId))),
           db
             .select({

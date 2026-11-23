@@ -62,6 +62,7 @@ export const INQUIRY_CSV_COLUMNS: CsvColumn<InquiryRow>[] = [
 
 export const PURCHASE_ORDER_STATUS_LABELS: Record<(typeof purchaseOrderStatusEnum.enumValues)[number], string> = {
   draft: "Utkast",
+  sent: "Skickad",
   confirmed: "Bekräftad",
   partially_received: "Delvis mottagen",
   received: "Mottagen",

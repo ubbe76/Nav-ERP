@@ -31,6 +31,7 @@ import { formatStockholmDate } from "../../lib/date";
 
 const OPEN: PurchaseOrderStatus[] = [
   "draft",
+  "sent",
   "confirmed",
   "partially_received",
 ];
@@ -179,7 +180,7 @@ export function DispatchPageClient({
         <Field label="Inköpsorder" htmlFor="dispatchOrder">
           <SearchPicker
             id="dispatchOrder"
-            endpoint="/api/v1/purchase-orders?kind=lego&status=draft,confirmed,partially_received"
+            endpoint="/api/v1/purchase-orders?kind=lego&status=draft,sent,confirmed,partially_received"
             value={order}
             onChange={selectOrder}
             formatLabel={(o) => `${o.orderNumber} — ${o.supplierName}`}

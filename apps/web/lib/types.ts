@@ -1087,6 +1087,7 @@ export interface SupplierDeliveryAddress {
 
 export type PurchaseOrderStatus =
   | "draft"
+  | "sent"
   | "confirmed"
   | "partially_received"
   | "received"
@@ -1099,6 +1100,7 @@ export type SupplierConfirmation = "confirmed" | "partial" | "none";
 // Maps to StatusPill's fixed status/color set (see components/ui/StatusPill.tsx).
 export const PURCHASE_ORDER_STATUS_PILL: Record<PurchaseOrderStatus, { status: "running" | "delayed" | "stopped" | "done" | "draft"; label: string }> = {
   draft: { status: "draft", label: "Utkast" },
+  sent: { status: "running", label: "Skickad" },
   confirmed: { status: "running", label: "Bekräftad" },
   partially_received: { status: "delayed", label: "Delvis mottagen" },
   received: { status: "done", label: "Mottagen" },

@@ -31,6 +31,9 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", [
   "draft",
+  // Skickad (0235, 2026-11-23): the order has been emailed to the supplier,
+  // who has not confirmed it yet — only Bekräfta sets confirmed.
+  "sent",
   "confirmed",
   "partially_received",
   "received",
@@ -207,6 +210,11 @@ export const purchaseOrders = pgTable("purchase_orders", {
   paymentTermId: uuid("payment_term_id").references(() => paymentTerms.id, { onDelete: "restrict" }),
   carrierId: uuid("carrier_id").references(() => carriers.id, { onDelete: "restrict" }),
   status: purchaseOrderStatusEnum("status").notNull().default("draft"),
+  // When the order was confirmed (Bekräfta, or Ändra status manuellt to
+  // Bekräftad), 0236; null while Utkast/Skickad and after Byt leverantör.
+  // Ångra inleverans reads it when nothing is received any more: back to
+  // Bekräftad, or Skickad for an order received without being confirmed.
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   // When true the company pays the freight, so our own carrier customer number
   // (company_carriers) for the chosen carrier is printed on the PO document.
   freightPaidByUs: boolean("freight_paid_by_us").notNull().default(false),
