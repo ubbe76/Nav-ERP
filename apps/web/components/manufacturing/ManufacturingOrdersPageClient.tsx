@@ -178,13 +178,16 @@ export function ManufacturingOrdersPageClient({
         />
       ),
     },
-    { key: "orderNumber", label: "Ordernummer", width: "130px" },
-    { key: "articleNumber", label: "Artikel", width: "minmax(160px, 1fr)" },
-    { key: "quantity", label: "Antal", width: "90px", align: "right" as const },
-    { key: "dueDate", label: "Färdigt", width: "110px" },
-    { key: "planned", label: "Planerad", width: "150px" },
-    { key: "status", label: "Status", width: "120px" },
-    { key: "actions", label: "Åtgärder", width: "210px", align: "right" as const },
+    // As tight as the contents allow, so the table fits beside the module
+    // panel at 1280 px (about 900 px for the table); Artikel takes the rest.
+    // The planned cell and the actions wrap (Frisläpp above Makulera order).
+    { key: "orderNumber", label: "Ordernummer", width: "96px" },
+    { key: "articleNumber", label: "Artikel", width: "minmax(150px, 1fr)" },
+    { key: "quantity", label: "Antal", width: "60px", align: "right" as const },
+    { key: "dueDate", label: "Färdigt", width: "90px" },
+    { key: "planned", label: "Planerad", width: "124px" },
+    { key: "status", label: "Status", width: "96px" },
+    { key: "actions", label: "Åtgärder", width: "130px", align: "right" as const },
   ].filter((c) => !readOnly || (c.key !== "actions" && c.key !== "select")));
 
   return (

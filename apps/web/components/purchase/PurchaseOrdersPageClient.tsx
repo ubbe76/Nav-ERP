@@ -34,12 +34,15 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
 
   const finishedHidden = useFinishedHidden(PURCHASE_ORDER_FILTER);
   const view = useListColumns([
-    { key: "orderNumber", label: "Ordernummer", width: "140px" },
-    { key: "supplierName", label: "Leverantör", width: "1fr" },
-    { key: "status", label: "Status", width: "160px" },
-    { key: "currency", label: "Valuta", width: "90px" },
-    { key: "expectedDeliveryDate", label: "Leveransdatum", width: "170px" },
-    { key: "supplierConfirmation", label: "Bekräftad av leverantör", width: "215px" },
+    // As tight as the contents allow, so the table fits beside the module
+    // panel at 1280 px; Leverantör takes the rest. The long heading of
+    // Bekräftad av leverantör wraps over its Ja/Delvis/Nej.
+    { key: "orderNumber", label: "Ordernummer", width: "100px" },
+    { key: "supplierName", label: "Leverantör", width: "minmax(140px, 1fr)" },
+    { key: "status", label: "Status", width: "130px" },
+    { key: "currency", label: "Valuta", width: "60px" },
+    { key: "expectedDeliveryDate", label: "Leveransdatum", width: "110px" },
+    { key: "supplierConfirmation", label: "Bekräftad av leverantör", width: "130px" },
   ]);
 
   return (

@@ -3,6 +3,11 @@
    the head row is hidden and every row stacks with its own labels. */
 .panel {
   --report-cols: minmax(0, 1fr) 7.5rem 6rem 6rem 6rem 6.5rem;
+  /* The rows stack by the card's own width, not the window's: beside the
+     narrow list (Lista och kort) the card is 500–700 px on a laptop, and
+     the five fixed columns squeezed the operation names to nothing and
+     pushed Förbruka out past the window. */
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -176,7 +181,9 @@
   flex: 0 0 auto;
 }
 
-@media (max-width: 640px) {
+/* Wide layout: the five fixed columns + gaps are ~570 px, and the operation
+   name needs ~180 px beside them (plus the material indent). */
+@container (max-width: 760px) {
   .inlineField {
     flex-wrap: wrap;
     width: 100%;

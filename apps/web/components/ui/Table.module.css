@@ -238,6 +238,54 @@
   color: var(--color-text-muted);
 }
 
+/* Lås första kolumnen (2026-11-23): when the table scrolls sideways (it is
+   its own scroll container) the first column stays at the left edge and the
+   rest slides under it. The phone's stacked cards don't scroll — desktop
+   only. The row typed into the table is left out: its first cell may span
+   two columns (the article picker). z-index 1 keeps the pinned cell above
+   later cells that are positioned (the header cells, row menus); the
+   pinned cell's own popovers (the article picker) live in the top layer. */
+@media (min-width: 641px) {
+  .table[data-sticky-first] > .headerRow > .headerCell:first-child,
+  .table[data-sticky-first] > .row > .cell:first-child,
+  .table[data-sticky-first] > .footerRow > .cell:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+  /* Opaque, or the scrolled cells show through. Zero specificity (:where),
+     so hover, a highlighted row and keyboard focus still tint the cell. */
+  :where(.table[data-sticky-first]) > :where(.headerRow, .row, .footerRow) > :where(:first-child) {
+    background-color: var(--color-surface);
+  }
+  /* A line at the pinned column's right edge once the table is scrolled —
+     driven by the table's own horizontal scroll (inactive when there is
+     nothing to scroll), where the browser supports scroll timelines. */
+  @supports (animation-timeline: scroll()) {
+    .table[data-sticky-first] > .headerRow > .headerCell:first-child::after,
+    .table[data-sticky-first] > .row > .cell:first-child::after,
+    .table[data-sticky-first] > .footerRow > .cell:first-child::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 1px;
+      background: var(--color-border);
+      opacity: 0;
+      pointer-events: none;
+      animation: sticky-edge linear both;
+      animation-timeline: scroll(nearest inline);
+      animation-range: 0 12px;
+    }
+  }
+}
+@keyframes sticky-edge {
+  to {
+    opacity: 1;
+  }
+}
+
 /* Täthet (Nav som program, punkt 6): Kompakt on the app frame tightens the
    rows; the phone's stacked cards keep their own spacing. */
 @media (min-width: 641px) {

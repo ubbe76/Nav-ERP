@@ -96,6 +96,12 @@ export function Table<T extends { id: string }>({
 }: TableProps<T>) {
   const gridTemplate = columns.map((c, i) => trackWidth(c.width, i, columns.length)).join(" ");
   const skeleton = loading && rows.length === 0;
+  // Lås första kolumnen (user's choice 2026-11-23): a table wider than its
+  // card scrolls sideways with the first column held at the left edge, like
+  // a spreadsheet — the order cards beside the narrow list are 580–740 px on
+  // a laptop. Not when the first column is unlabelled (a select checkbox):
+  // a pinned checkbox says nothing about the row.
+  const stickyFirst = columns.length > 1 && columns[0]!.label.trim() !== "";
 
   return (
     // data-table / data-row: the keyboard shortcuts' handles (KeyboardShortcuts —
@@ -104,6 +110,7 @@ export function Table<T extends { id: string }>({
       className={styles.table}
       style={{ gridTemplateColumns: gridTemplate }}
       data-table=""
+      data-sticky-first={stickyFirst || undefined}
       aria-busy={skeleton || undefined}
     >
       <div className={styles.headerRow}>
