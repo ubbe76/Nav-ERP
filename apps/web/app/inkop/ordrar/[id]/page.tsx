@@ -48,7 +48,7 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   return (
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list="/inkop/ordrar" selectedId={params.id}>
+      <SplitView list="/inkop/ordrar" selectedId={params.id} renderedAt={Date.now()}>
         <PurchaseOrderDetail
           order={order}
           rows={rows}

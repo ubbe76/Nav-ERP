@@ -49,7 +49,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
   return (
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list="/kunder" selectedId={params.id}>
+      <SplitView list="/kunder" selectedId={params.id} renderedAt={Date.now()}>
         <div className={shellStyles.topbar}>
           <div>
             <div className={shellStyles.title}>{customer.name}</div>

@@ -844,9 +844,13 @@ describe("purchase service — document email", () => {
 
   it("emails a draft purchase order and confirms it; resends don't re-transition", async () => {
     const { order } = await makeOrderWithRow(3);
+    await purchaseService.updatePurchaseOrderHeader(order.id, { expectedDeliveryDate: "2030-05-06" });
 
     const confirmed = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
     expect(confirmed?.status).toBe("confirmed");
+    // Sent is not answered: unlike Bekräfta, the mail fills no Bekräftat
+    // leveransdatum from Önskat.
+    expect(confirmed?.confirmedDeliveryDate).toBeNull();
     expect(sentMails[0]?.attachments?.[0]?.filename).toBe(`${order.orderNumber}.pdf`);
 
     const resent = await purchaseService.sendPurchaseOrderEmail(order.id, parsed(sendDocumentEmailSchema, sendInput));
@@ -1673,7 +1677,11 @@ describe("purchase service — önskat leveransdatum", () => {
     // Utkast: not sent yet, so not confirmed either.
     expect(await confirmationOf()).toBe("none");
 
+    // Bekräfta with nothing filled in: the order's Önskat becomes its
+    // Bekräftat (the user 2026-11-23), so both rows count as confirmed.
     await purchaseService.confirm(order.id);
+    expect(await confirmationOf()).toBe("confirmed");
+    await purchaseService.updatePurchaseOrderHeader(order.id, { confirmedDeliveryDate: null });
     expect(await confirmationOf()).toBe("none");
 
     // One row with its own date, the other without.
@@ -1698,6 +1706,72 @@ describe("purchase service — önskat leveransdatum", () => {
     const csvRow = (await purchaseService.listPurchaseOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows[0]!;
     expect(column.value({ ...csvRow, supplierConfirmation: "partial" })).toBe("Delvis");
     expect(column.value(csvRow)).toBeNull();
+  });
+
+  it("Bekräfta fills Bekräftat leveransdatum from Önskat where nothing is filled in", async () => {
+    // The user 2026-11-23: "Klickar man Bekräfta ska orderraderna (om man
+    // inte manuellt redan fyllt i) markeras som bekräftade enligt önskat datum."
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const [a, b, c, d] = await Promise.all(["A", "B", "C", "D"].map((k) => makeArticle(`ART-BK-${k}-${crypto.randomUUID()}`)));
+    const order = await purchaseService.createPurchaseOrder(
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" }),
+      user.id
+    );
+    // A follows the order; B has its own Önskat; C its own Bekräftat too
+    // (filled in by hand); D's own Önskat is the order's.
+    const rowA = await purchaseService.addRow(order.id, { articleId: a!.id, quantity: 1, unitPrice: 1 });
+    const rowB = await purchaseService.addRow(order.id, { articleId: b!.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-03-20" });
+    const rowC = await purchaseService.addRow(order.id, {
+      articleId: c!.id,
+      quantity: 1,
+      unitPrice: 1,
+      expectedDeliveryDate: "2030-03-20",
+      confirmedDeliveryDate: "2030-03-27",
+    });
+    const rowD = await purchaseService.addRow(order.id, { articleId: d!.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-03-04" });
+    const revisionBefore = (await purchaseService.getPurchaseOrder(order.id))!.revision;
+
+    const confirmed = await purchaseService.confirm(order.id, user.id);
+    expect(confirmed.status).toBe("confirmed");
+    expect(confirmed.confirmedDeliveryDate).toBe("2030-03-04");
+    expect(confirmed.revision).toBe(revisionBefore);
+    const ownDates = Object.fromEntries((await purchaseService.listRows(order.id)).map((r) => [r.id, r.confirmedDeliveryDate]));
+    expect(ownDates).toEqual({ [rowA.id]: null, [rowB.id]: "2030-03-20", [rowC.id]: "2030-03-27", [rowD.id]: null });
+    const listed = (await purchaseService.listPurchaseOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows.find((o) => o.id === order.id)!;
+    expect(listed.supplierConfirmation).toBe("confirmed");
+    const logged = await db.execute<{ detail: unknown; user_id: string | null }>(
+      sql`SELECT detail, user_id FROM audit_log WHERE entity_type = 'purchase_order' AND entity_id = ${order.orderNumber} AND action = 'confirmed'`
+    );
+    expect([...logged]).toEqual([
+      {
+        detail: { confirmedDeliveryDate: "2030-03-04", rows: [{ articleNumber: b!.articleNumber, confirmedDeliveryDate: "2030-03-20" }] },
+        user_id: user.id,
+      },
+    ]);
+
+    // The order's Bekräftat filled in by hand covers every row without one
+    // of its own: nothing is touched.
+    const manual = await purchaseService.createPurchaseOrder(
+      parsed(createPurchaseOrderSchema, { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" }),
+      user.id
+    );
+    const manualRow = await purchaseService.addRow(manual.id, { articleId: b!.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-03-20" });
+    await purchaseService.updatePurchaseOrderHeader(manual.id, { confirmedDeliveryDate: "2030-04-01" });
+    expect((await purchaseService.confirm(manual.id)).confirmedDeliveryDate).toBe("2030-04-01");
+    expect((await purchaseService.listRows(manual.id)).find((r) => r.id === manualRow.id)!.confirmedDeliveryDate).toBeNull();
+
+    // No Önskat on the order: only a row with its own is confirmed.
+    const undated = await purchaseService.createPurchaseOrder(parsed(createPurchaseOrderSchema, { supplierId: supplier.id }), user.id);
+    await purchaseService.addRow(undated.id, { articleId: a!.id, quantity: 1, unitPrice: 1 });
+    const datedRow = await purchaseService.addRow(undated.id, { articleId: b!.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-03-20" });
+    expect((await purchaseService.confirm(undated.id)).confirmedDeliveryDate).toBeNull();
+    expect((await purchaseService.listRows(undated.id)).find((r) => r.id === datedRow.id)!.confirmedDeliveryDate).toBe("2030-03-20");
+    const undatedListed = (await purchaseService.listPurchaseOrders({ search: undated.orderNumber, limit: 10, offset: 0 })).rows.find((o) => o.id === undated.id)!;
+    expect(undatedListed.supplierConfirmation).toBe("partial");
+
+    // Only from Utkast, as before.
+    await expect(purchaseService.confirm(order.id)).rejects.toThrow(InvalidStatusTransitionError);
   });
 
   it("a new Bekräftat leveransdatum on the order: the rows still to come follow it when asked, received rows keep theirs", async () => {

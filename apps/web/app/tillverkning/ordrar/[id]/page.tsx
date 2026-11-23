@@ -62,7 +62,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
   return (
     <AppShell>
       {/* Lista och kort: the function's narrow list beside the card. */}
-      <SplitView list="/tillverkning/ordrar" selectedId={params.id}>
+      <SplitView list="/tillverkning/ordrar" selectedId={params.id} renderedAt={Date.now()}>
         <div className={shellStyles.topbar}>
           <div>
             <div className={shellStyles.title}>{order.orderNumber}</div>

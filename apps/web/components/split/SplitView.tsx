@@ -45,10 +45,24 @@ interface Cached {
 // Per browser tab and list; gone on a reload (the list is read again).
 const cache = new Map<string, Cached>();
 
-export function SplitView({ list, selectedId, children }: { list: string; selectedId?: string; children: ReactNode }) {
+// renderedAt: when the server drew the card page (Date.now() there). A save
+// on the card ends in router.refresh(), which draws the page again with a new
+// one — the list then reads its rows again, so a new status or Bekräftad av
+// leverantör shows beside the card too, not only after the next card.
+export function SplitView({
+  list,
+  selectedId,
+  renderedAt,
+  children,
+}: {
+  list: string;
+  selectedId?: string;
+  renderedAt?: number;
+  children: ReactNode;
+}) {
   return (
     <div className={styles.split} data-split-view="" data-selected={selectedId ? "" : undefined}>
-      <SplitList list={list} selectedId={selectedId} />
+      <SplitList list={list} selectedId={selectedId} renderedAt={renderedAt} />
       <div className={styles.detail}>{children}</div>
     </div>
   );
@@ -59,7 +73,7 @@ export function SplitEmpty({ list }: { list: string }) {
   return <div className={styles.empty}>Välj {config?.noun ?? "en rad"} i listan.</div>;
 }
 
-function SplitList({ list, selectedId }: { list: string; selectedId?: string }) {
+function SplitList({ list, selectedId, renderedAt }: { list: string; selectedId?: string; renderedAt?: number }) {
   const config = SPLIT_LISTS[list]!;
   const saved = cache.get(list);
   const [search, setSearch] = useState(saved?.search ?? "");
@@ -156,6 +170,15 @@ function SplitList({ list, selectedId }: { list: string; selectedId?: string }) 
     const timer = setTimeout(() => void load(0, Math.min(keep, 200), !wasFirst), wasFirst || !search ? 0 : 250);
     return () => clearTimeout(timer);
   }, [search, chosenKey, load]);
+
+  // The card page drawn again (a save on the card): the rows shown read again
+  // in the background, as on a new card. The first draw is the effect above.
+  const drawnAt = useRef(renderedAt);
+  useEffect(() => {
+    if (renderedAt === undefined || renderedAt === drawnAt.current) return;
+    drawnAt.current = renderedAt;
+    void load(0, Math.min(Math.max(PAGE, state.current.rows.length), 200));
+  }, [renderedAt, load]);
 
   // More rows as the end comes into view. The list scrolls on its own beside
   // a card; on a narrow screen it is part of the page (overflow visible), and

@@ -1883,15 +1883,25 @@ export function createPurchaseService(
       if (order.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot confirm an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(orderId, "confirmed", ["draft"]);
-      if (!updated) throw new InvalidStatusTransitionError("Cannot confirm the order — its status changed meanwhile");
+      // Bekräfta fills Bekräftat leveransdatum from Önskat where nothing is
+      // filled in (repo confirmOrder); the history keeps what it filled.
+      const result = await repo.confirmOrder(orderId);
+      if (!result) throw new InvalidStatusTransitionError("Cannot confirm the order — its status changed meanwhile");
+      const { confirmedDates } = result;
+      const filled = confirmedDates.order !== null || confirmedDates.rows.length > 0;
       await audit.log({
         entityType: "purchase_order",
         entityId: order.orderNumber,
         action: "confirmed",
+        detail: filled
+          ? {
+              ...(confirmedDates.order !== null ? { confirmedDeliveryDate: confirmedDates.order } : {}),
+              ...(confirmedDates.rows.length > 0 ? { rows: confirmedDates.rows } : {}),
+            }
+          : undefined,
         userId: userId ?? null,
       });
-      return updated;
+      return result.order;
     },
 
     async getPurchaseOrderPdf(orderId: string) {
