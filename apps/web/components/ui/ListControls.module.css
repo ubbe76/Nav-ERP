@@ -7,12 +7,16 @@
 }
 
 .search {
-  flex: 1 1 220px;
+  flex: 1 1 180px;
   max-width: 340px;
 }
 
+/* Floors, not widths: a select is as wide as its longest option. Kept low so
+   a list with several filters (Inköpsordrar: status, Visa avslutade,
+   ordertyp, Exportera, Kolumner, Visa som lista) fits on one row beside the
+   module panel at 1440 px. */
 .filter {
-  min-width: 170px;
+  min-width: 150px;
 }
 
 .selectWrap {
@@ -51,7 +55,7 @@
    panel like the column chooser's. */
 .multi {
   position: relative;
-  min-width: 170px;
+  min-width: 150px;
   max-width: 260px;
 }
 .multiTrigger {

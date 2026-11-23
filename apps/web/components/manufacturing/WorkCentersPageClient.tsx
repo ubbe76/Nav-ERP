@@ -173,18 +173,21 @@ export function WorkCentersPageClient({
 
       <Table<WorkCenter>
         columns={[
-          { key: "code", label: "Nr", width: "60px" },
-          { key: "name", label: "Namn", width: "minmax(120px, 1fr)" },
-          { key: "type", label: "Typ", width: "80px" },
-          // Narrow enough to fit beside the module panel at 1440 px (about
-          // 1 060 px for the table): wider, the last column with Ändra was
-          // scrolled out of the card.
-          { key: "productionGroupId", label: "Produktionsgrupp", width: "130px" },
-          { key: "weekScheduleId", label: "Kapacitet", width: "125px" },
-          { key: "hourlyRate", label: "Timkostnad", width: "100px", align: "right" },
-          { key: "overheadPercent", label: "TO-påslag", width: "85px", align: "right" },
-          { key: "active", label: "Status", width: "80px" },
-          { key: "id", label: "", width: "140px", align: "right" },
+          // As tight as the contents allow, so the table fits beside the
+          // module panel at 1280 px (about 900 px for the table): wider, the
+          // last column with Ändra was scrolled out of the card. Kapacitet
+          // widens while a row is edited (its schedule select and two
+          // inputs), and the action column is max-content with Spara above
+          // Avbryt, as on the order cards.
+          { key: "code", label: "Nr", width: "50px" },
+          { key: "name", label: "Namn", width: "minmax(100px, 1fr)" },
+          { key: "type", label: "Typ", width: "64px" },
+          { key: "productionGroupId", label: "Produktionsgrupp", width: "134px" },
+          { key: "weekScheduleId", label: "Kapacitet", width: editingId !== null ? "125px" : "100px" },
+          { key: "hourlyRate", label: "Timkostnad", width: "90px", align: "right" },
+          { key: "overheadPercent", label: "TO-påslag", width: "75px", align: "right" },
+          { key: "active", label: "Status", width: "64px" },
+          { key: "id", label: "", width: "max-content", align: "right" },
         ]}
         rows={workCenters}
         renderCell={(workCenter, key) => {
@@ -327,7 +330,7 @@ export function WorkCentersPageClient({
               );
             case "id":
               return isEditing ? (
-                <span style={{ display: "inline-flex", gap: 6 }}>
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "stretch", gap: 6 }}>
                   <Button type="button" size="small" variant="primary" disabled={pending} onClick={() => saveEdit(workCenter)}>
                     {pending ? "Sparar…" : "Spara"}
                   </Button>

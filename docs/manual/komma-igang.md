@@ -215,6 +215,7 @@ Kundorder, Offerter, Inköpsorder, Förfrågningar, Tillverkningsordrar, Fakturo
 - **+** överst i listan skapar ett nytt dokument, som **+ Ny kundorder**.
 - **Visa som tabell** (knappen med rutnätet överst i listan) visar i stället den breda tabellen med alla kolumner, **Kolumner** och **Exportera**. **Visa som lista** i tabellens verktygsrad går tillbaka. Valet gäller den listan och sparas i webbläsaren. Tabellen visar samma sökning och samma filterval som listan hade. Öppnar du listan med ett filter, en sökning eller en genväg som **+ Ny kundorder**, till exempel från en favorit, visas tabellen.
 - På **mobilen** och i smala fönster visas listan eller dokumentet, inte båda.
+- Är en tabell på dokumentet bredare än kortet — till exempel radlistan på en kundorder bredvid listan på en bärbar dator — rullar den i sidled, och **första kolumnen** (artikelnumret, sekvensnumret) står kvar till vänster medan resten rullar, som i ett kalkylark. Det gäller alla tabeller i Nav utom på mobilen. Vill du se hela tabellen på en gång kan du fälla ihop modulpanelen med modulens ikon eller med **«** överst i panelen.
 - I **Artikelregistret** visar högersidan en **sammanfattning** av artikeln: **I lager**, **Disponibelt** (i lager minus de öppna behoven), **Inkommande**, **Standardpris** med lagervärdet till standardpris, saldot per lagerplats (med **Flytta** till [Lagerflytt](/hjalp/lager#lagerflytt)) och de närmaste behoven och inleveranserna. **Öppna artikelkort** visar hela kortet med alla flikar, utan listan.
 
 ### Dokumentkorten
