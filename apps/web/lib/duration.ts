@@ -7,7 +7,17 @@
 // two decimals — so the forms convert at the edge.
 import { round2 } from "./format";
 
-export const DURATION_HINT = "Skriv tiden som tt:mm, t.ex. 1:30 — eller bara minuter, t.ex. 90.";
+export const DURATION_HINT = "Skriv tiden som tt:mm, t.ex. 1:30 eller 1,30 — eller bara minuter, t.ex. 90.";
+
+// The example a field shows on a touch screen, where it opens the decimal
+// keypad: no colon there, only the comma (user's choice 2026-11-24 — the
+// iPhone keypad had no colon and nothing said the comma works). A clock
+// example ("t.ex. 8:00") or the bare "tt:mm" gets the comma; any other text
+// (a system default shown as a value) is left as it is.
+export function keypadPlaceholder(placeholder: string): string {
+  if (placeholder.trim() === "tt:mm") return "t.ex. 1,30";
+  return placeholder.replace(/^t\.ex\. (\d+):([0-5]\d)$/, "t.ex. $1,$2");
+}
 
 const BODY = String.raw`(?:\d{1,6}|\d{0,4}[:.,][0-5]\d)`;
 

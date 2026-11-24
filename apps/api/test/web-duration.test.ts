@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DURATION_HINT, durationFromHours, durationPattern, formatDuration, hoursFromDuration, parseDuration, readAbsenceMinutes } from "../../web/lib/duration";
+import { DURATION_HINT, durationFromHours, durationPattern, formatDuration, hoursFromDuration, keypadPlaceholder, parseDuration, readAbsenceMinutes } from "../../web/lib/duration";
 
 // Tidsfälten som tt:mm (2026-11-22, användarens val): t:mm, or a bare
 // number of minutes.
@@ -67,6 +67,20 @@ describe("tidsfälten (tt:mm)", () => {
     expect(hoursFromDuration("0:01", "0.01")).toBe(0.01);
     expect(hoursFromDuration("1", "0.01")).toBe(0.01);
     expect(hoursFromDuration("0:02", "0.01")).toBe(0.03);
+  });
+
+  it("a touch screen's example shows the comma its keypad has, and reads the same", () => {
+    expect(keypadPlaceholder("tt:mm")).toBe("t.ex. 1,30");
+    expect(keypadPlaceholder("t.ex. 1:30")).toBe("t.ex. 1,30");
+    expect(keypadPlaceholder("t.ex. 40:00")).toBe("t.ex. 40,00");
+    expect(keypadPlaceholder("t.ex. 0:05")).toBe("t.ex. 0,05");
+    // A value shown as a default is not an example to rewrite.
+    expect(keypadPlaceholder("Systemstandard: 1:22")).toBe("Systemstandard: 1:22");
+    for (const example of ["1:30", "40:00", "0:05", "8:00"]) {
+      const comma = keypadPlaceholder(`t.ex. ${example}`).replace("t.ex. ", "");
+      expect(parseDuration(comma)).toBe(parseDuration(example));
+    }
+    expect(DURATION_HINT).toContain("1,30");
   });
 
   it("an absence is 0:01–24:00", () => {
