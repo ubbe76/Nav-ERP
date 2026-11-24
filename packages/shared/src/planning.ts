@@ -41,6 +41,16 @@ export const listRequirementsQuerySchema = listQuerySchema.extend({
 });
 export type ListRequirementsQuery = z.infer<typeof listRequirementsQuerySchema>;
 
+// GET /articles/:id/overview: planned=true adds the behovsberäkning's derived
+// demand (one row per proposal it comes from) and the article's own proposals
+// — the Behovsberäkning page's panel asks for it.
+export const articleOverviewQuerySchema = z.object({
+  planned: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === "true"),
+});
+
 // ABC-klassning (#10, etapp 2): GET /planning/abc — the list pattern over a
 // classification that is computed for the whole selection at every read
 // (the cumulative share needs the total), then filtered and paged in

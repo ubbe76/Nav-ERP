@@ -707,6 +707,7 @@ export function createPlanningRepository(db: Db) {
           active: articles.active,
           unitCode: units.code,
           reorderPoint: articles.reorderPoint,
+          safetyStock: articles.safetyStock,
           orderQuantity: articles.orderQuantity,
           rounding: articles.rounding,
           // Prognos (#10): the service builds the forecast rows for a
@@ -877,6 +878,7 @@ export function createPlanningRepository(db: Db) {
             active: article.active,
             unitCode: article.unitCode,
             reorderPoint: article.reorderPoint === null ? null : Number(article.reorderPoint),
+            safetyStock: article.safetyStock === null ? null : Number(article.safetyStock),
             orderQuantity: article.orderQuantity === null ? null : Number(article.orderQuantity),
             rounding: article.rounding === null ? null : Number(article.rounding),
             forecastControlled: article.forecastControlled,

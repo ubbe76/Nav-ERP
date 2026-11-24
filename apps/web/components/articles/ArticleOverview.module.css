@@ -238,6 +238,51 @@
   font-weight: 600;
 }
 
+/* Visa förslag — the planned view's switch, at the end of the article line. */
+.plannedToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.plannedNote {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+}
+
+/* Proposals and their material are not orders yet. */
+.plannedKind {
+  font-style: italic;
+  color: var(--color-text-secondary);
+}
+
+/* The article the material is for — re-targets the overview. */
+.parentButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.parentButton:hover {
+  color: var(--accent-fg);
+}
+
+/* A quantity typed on the Behovsberäkning page (the title says the proposed one). */
+.typedQuantity {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 /* Phone: a bottom sheet instead of a floating window. The inline left/top is
    suppressed by the panel component when this query matches. */
 @media (max-width: 640px) {

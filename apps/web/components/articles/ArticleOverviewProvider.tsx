@@ -15,6 +15,18 @@ interface ArticleOverviewContextValue {
   // Antal field), so an open panel follows along and a closed one stays shut.
   follow: (articleId: string) => void;
   close: () => void;
+  // The Behovsberäkning page registers its run and typed quantities here
+  // (null when it unmounts); the overview then shows the planned view.
+  setPlanning: (planning: ArticleOverviewPlanning | null) => void;
+}
+
+// What the Behovsberäkning page shares with the overview (user's goal
+// 2026-11-24: see the demand a proposal is ordered against): which run it
+// shows — the overview refetches when it changes — and the quantities typed
+// into Förslag/Antal per proposal key (lib/articleOverviewPlanned.ts).
+export interface ArticleOverviewPlanning {
+  computedAt: string | null;
+  typed: ReadonlyMap<string, number>;
 }
 
 const noop = () => {};
@@ -26,23 +38,35 @@ const ArticleOverviewContext = createContext<ArticleOverviewContextValue>({
   show: noop,
   follow: noop,
   close: noop,
+  setPlanning: noop,
 });
+
+// Its own context: the typed quantities change on every keystroke, and only
+// the overview content reads them — the row buttons stay put.
+const ArticleOverviewPlanningContext = createContext<ArticleOverviewPlanning | null>(null);
 
 export function useArticleOverview() {
   return useContext(ArticleOverviewContext);
 }
 
+export function useArticleOverviewPlanning() {
+  return useContext(ArticleOverviewPlanningContext);
+}
+
 export function ArticleOverviewProvider({ children }: { children: ReactNode }) {
   const [articleId, setArticleId] = useState<string | null>(null);
+  const [planning, setPlanning] = useState<ArticleOverviewPlanning | null>(null);
   const show = useCallback((id: string) => setArticleId(id), []);
   const follow = useCallback((id: string) => setArticleId((open) => (open === null ? null : id)), []);
   const close = useCallback(() => setArticleId(null), []);
-  const value = useMemo(() => ({ articleId, show, follow, close }), [articleId, show, follow, close]);
+  const value = useMemo(() => ({ articleId, show, follow, close, setPlanning }), [articleId, show, follow, close]);
 
   return (
     <ArticleOverviewContext.Provider value={value}>
-      {children}
-      <ArticleOverviewPanel />
+      <ArticleOverviewPlanningContext.Provider value={planning}>
+        {children}
+        <ArticleOverviewPanel />
+      </ArticleOverviewPlanningContext.Provider>
     </ArticleOverviewContext.Provider>
   );
 }

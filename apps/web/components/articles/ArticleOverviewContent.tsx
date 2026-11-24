@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArticlePicker, type ArticlePickerValue } from "../ui/ArticlePicker";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { FormError } from "../ui/Form";
+import { Checkbox } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { articleFileHref } from "../../lib/articleFiles";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { useCanOpen } from "../PermissionsProvider";
+import { useArticleOverviewPlanning } from "./ArticleOverviewProvider";
+import { withTypedQuantities, type PlannedDisplayRow } from "../../lib/articleOverviewPlanned";
 import { ARTICLE_TYPE_LABELS, OVERVIEW_KIND_LABELS, type ArticleFile, type ArticleOverview, type ArticleOverviewRow } from "../../lib/types";
 import styles from "./ArticleOverview.module.css";
 
@@ -23,7 +26,7 @@ interface ArticleOverviewContentProps {
 
 // The first row is the current stock, so the running balance column reads
 // top-down from where it starts.
-type DisplayRow = ArticleOverviewRow | { id: "onhand"; kind: "onhand" };
+type DisplayRow = PlannedDisplayRow | { id: "onhand"; kind: "onhand" };
 
 // Sized to fit the floating panel's body (~840 px) without a horizontal
 // scroller — the panel width in ArticleOverview.module.css follows this.
@@ -56,6 +59,13 @@ function num(n: number): string {
   return n.toLocaleString("sv-SE", { maximumFractionDigits: 4 });
 }
 
+// "08:12:03" — when the behovsberäkning computed the planned rows.
+function timeOf(iso: string): string {
+  return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Stockholm" });
+}
+
+const isPlannedRow = (row: ArticleOverviewRow) => row.kind === "proposal" || row.kind === "derived_demand";
+
 // Shared by the /artiklar/oversikt page and the floating panel: the search
 // field, the article header and the date-ordered row list with its running
 // balance (Monitor G5's planeringsbild). Data is fetched here, keyed on the
@@ -70,6 +80,14 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
   // field doesn't blank while the overview loads) and from the response
   // (so a button-opened panel shows the article it was opened for).
   const [picked, setPicked] = useState<ArticlePickerValue | null>(null);
+  // Visa förslag: the planned view (the behovsberäkning's proposals and
+  // their material). On by default where the Behovsberäkning page shares
+  // its run, off elsewhere; the box overrides either way.
+  const planning = useArticleOverviewPlanning();
+  const [plannedChoice, setPlannedChoice] = useState<boolean | null>(null);
+  const planned = plannedChoice ?? planning !== null;
+  // A new run on the page (Uppdatera, Skapa ordrar) refetches the planned view.
+  const plannedRun = planned ? (planning?.computedAt ?? "") : null;
 
   useEffect(() => {
     if (!articleId) {
@@ -83,7 +101,7 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
     setLoading(true);
     setError(null);
     Promise.all([
-      apiFetch<ArticleOverview>(`/api/v1/articles/${articleId}/overview`),
+      apiFetch<ArticleOverview>(`/api/v1/articles/${articleId}/overview${plannedRun !== null ? "?planned=true" : ""}`),
       // A failing files request must not discard a good overview.
       apiFetch<ArticleFile[]>(`/api/v1/articles/${articleId}/files`).catch(() => [] as ArticleFile[]),
     ])
@@ -106,9 +124,16 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
     return () => {
       cancelled = true;
     };
-  }, [articleId]);
+  }, [articleId, plannedRun]);
 
-  const rows: DisplayRow[] = data ? [{ id: "onhand", kind: "onhand" }, ...data.rows] : [];
+  // The quantities typed on the Behovsberäkning page replace the proposals'
+  // (and rescale their material); the running balance follows.
+  const typed = planning?.typed;
+  const shownRows = useMemo<PlannedDisplayRow[]>(
+    () => (data ? (data.planned && typed ? withTypedQuantities(data.onHand, data.rows, typed).rows : data.rows) : []),
+    [data, typed]
+  );
+  const rows: DisplayRow[] = data ? [{ id: "onhand", kind: "onhand" }, ...shownRows] : [];
   const unit = data?.article.unitCode ?? "";
 
   return (
@@ -150,6 +175,10 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
             {data.article.isPhantom && <StatusPill status="draft" label="Fantom" compact />}
             {!data.article.active && <StatusPill status="draft" label="Inaktiv" compact />}
             {loading && <span className={styles.loading}>Hämtar…</span>}
+            <label className={styles.plannedToggle} title="Behovsberäkningens orderförslag och materialet till dem">
+              <Checkbox checked={planned} onChange={(e) => setPlannedChoice(e.target.checked)} />
+              Visa förslag
+            </label>
           </div>
 
           <div className={styles.headerFields}>
@@ -168,6 +197,12 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
               <div className={styles.label}>Beställningspunkt</div>
               <div className={`${styles.value} num`}>
                 {data.article.reorderPoint === null ? "—" : num(data.article.reorderPoint)}
+              </div>
+            </div>
+            <div>
+              <div className={styles.label}>Säkerhetslager</div>
+              <div className={`${styles.value} num`}>
+                {data.article.safetyStock == null ? "—" : num(data.article.safetyStock)}
               </div>
             </div>
             <div>
@@ -221,6 +256,13 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
             </div>
           </div>
 
+          {data.planned && (
+            <p className={styles.plannedNote}>
+              Med behovsberäkningens förslag, beräknade {timeOf(data.planned.computedAt)}
+              {typed && typed.size > 0 ? " — med antalen du skrivit in" : ""}.
+            </p>
+          )}
+
           <Table<DisplayRow>
             columns={COLUMNS}
             rows={rows}
@@ -244,7 +286,7 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
                 case "date":
                   return row.date ?? <span className={styles.muted}>Saknar datum</span>;
                 case "kind":
-                  return OVERVIEW_KIND_LABELS[row.kind];
+                  return isPlannedRow(row) ? <span className={styles.plannedKind}>{OVERVIEW_KIND_LABELS[row.kind]}</span> : OVERVIEW_KIND_LABELS[row.kind];
                 case "document": {
                   const href = hrefFor(row);
                   return (
@@ -264,13 +306,51 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
                           <StatusPill status="draft" label="Utkast" compact />
                         </>
                       )}
+                      {row.proposal?.late && (
+                        <>
+                          {" "}
+                          <StatusPill status="stopped" label="Passerat" compact />
+                        </>
+                      )}
                     </>
                   );
                 }
-                case "partner":
+                case "partner": {
+                  // The article the material is for: re-targets the overview, so
+                  // the demand can be followed up to the customer order.
+                  const parentId = row.parentArticleId;
+                  if (parentId && row.partner) {
+                    return (
+                      <button
+                        type="button"
+                        className={styles.parentButton}
+                        title="Visa översikten för artikeln"
+                        onClick={() => onChangeArticle(parentId)}
+                      >
+                        {row.partner}
+                      </button>
+                    );
+                  }
                   return row.partner ?? "—";
-                case "quantity":
-                  return <span className={row.quantity < 0 ? styles.demand : styles.supply}>{row.quantity > 0 ? `+${num(row.quantity)}` : num(row.quantity)}</span>;
+                }
+                case "quantity": {
+                  const text = row.quantity > 0 ? `+${num(row.quantity)}` : num(row.quantity);
+                  const cls = row.quantity < 0 ? styles.demand : styles.supply;
+                  if (row.proposedQuantity === undefined) return <span className={cls}>{text}</span>;
+                  const proposed = Math.abs(row.proposedQuantity);
+                  return (
+                    <span
+                      className={`${cls} ${styles.typedQuantity}`}
+                      title={
+                        row.kind === "proposal"
+                          ? `Antalet du skrivit in i behovsberäkningen — föreslaget ${num(proposed)}`
+                          : `Räknat på antalet du skrivit in för förslaget — föreslaget ${num(proposed)}`
+                      }
+                    >
+                      {text}
+                    </span>
+                  );
+                }
                 case "balance":
                   return <span className={row.balance < 0 ? styles.negative : ""}>{num(row.balance)}</span>;
                 default:

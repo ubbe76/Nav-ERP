@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   applyDeliveryTimeSchema,
   articleForecastUpdateSchema,
+  articleOverviewQuerySchema,
   capacityQuerySchema,
   componentMovesSchema,
   createPlanningOrdersSchema,
@@ -125,9 +126,12 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
   // Artikelöversikt — per-article subresource served from the module that
   // owns the data (precedent: /articles/:id/suppliers in purchase,
   // /articles/:id/routing in manufacturing). Read-only and fully derived.
+  // ?planned=true adds the behovsberäkning's derived demand and proposals
+  // (no prices — the same read rule as the firm overview).
   app.get<{ Params: { id: string } }>("/articles/:id/overview", { config: { access: OVERVIEW_READ } }, async (req, reply) => {
+    const { planned } = articleOverviewQuerySchema.parse(req.query);
     try {
-      return await service.getArticleOverview(req.params.id);
+      return await service.getArticleOverview(req.params.id, { planned });
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
