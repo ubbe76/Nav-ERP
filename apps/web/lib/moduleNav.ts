@@ -313,6 +313,11 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
         description: "Helskärmsvy för verkstaden: personal stämplar in och ut på order, närvaro och ATF.",
       },
       {
+        href: "/tillverkning/rapportera",
+        title: "Rapportera",
+        description: "Rapportera tid och antal på en operation i taget utan att stämpla, t.ex. från en arbetslapp.",
+      },
+      {
         href: "/tillverkning/pagaende",
         title: "Pågående arbete",
         description: "Vem som är instämplad på vilken order just nu, och vem som är på plats utan arbete.",

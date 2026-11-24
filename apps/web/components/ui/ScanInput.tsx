@@ -136,8 +136,9 @@ export function ScanPanel({
 }
 
 // Mounted only while the dialog is open (Modal unmounts its children), so the
-// camera starts on open and the cleanup stops every track on close.
-function CameraScanner({ onDecoded }: { onDecoded: (code: string) => void }) {
+// camera starts on open and the cleanup stops every track on close. Exported
+// for a routine whose field is a search, not a scan field (Rapportera).
+export function CameraScanner({ onDecoded }: { onDecoded: (code: string) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
   // Latest callback without restarting the camera when the parent re-renders.
