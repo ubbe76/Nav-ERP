@@ -253,6 +253,7 @@ Fält där du rapporterar eller anger en tid fylls i som timmar och minuter, **t
 
 - Ett tal utan kolon är **minuter**: `90` blir 1:30 och `8` blir 0:08.
 - Punkt och komma fungerar också mellan timmar och minuter (`7.30`, `7,30`), men minuterna skrivs alltid med två siffror, så `4,5` godtas inte.
+- På mobilen och surfplattan öppnar tidsfälten sifferknappsatsen, som inte har något kolon. Skriv kommat i stället, `1,30`. Exemplet i fältet visar det, t.ex. *t.ex. 1,30*.
 - När du lämnar fältet skrivs tiden om till tt:mm, så att du ser hur den har lästs innan du sparar.
 
 Ställtid, stycktid och cykeltid i beredningen har kvar sina enheter (min, sek eller st/h), som står vid fälten. Listor och summor visar tiden som tidigare, i timmar med decimaler.
