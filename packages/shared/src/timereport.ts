@@ -395,6 +395,30 @@ const scrapReasonMessage = { message: "Ange en kassationsorsak när kasserat ant
 export const workStampSchema = z.object(workStampFields).refine(scrapReasonGiven, scrapReasonMessage);
 export type WorkStampInput = z.infer<typeof workStampSchema>;
 
+// Rapportera (Tillverkning → Rapportera, 2026-11-24, the user's choices: time
+// and quantities together, one operation at a time): one manual report of an
+// operation — the employee's time on a day as a manual time report (no stamp)
+// and the quantities, written in ONE transaction; Ångra rapportering on the
+// TO card takes both back. Time is required (hours with two decimals, as a
+// manual time report); the quantities may be 0/0 (time only).
+export const operationReportSchema = z
+  .object({
+    moOperationId: z.string().uuid(),
+    employeeId: z.string().uuid(),
+    date: z.string().date(),
+    hours: blankSafe(z.coerce.number().min(numericStep(2)).max(numericMax(10, 2))),
+    kind: timeKindSchema.nullable().optional(),
+    note: z.string().max(2000).optional(),
+    quantityOk: workStampFields.quantityOk,
+    quantityScrapped: workStampFields.quantityScrapped,
+    scrapReason: workStampFields.scrapReason,
+    scrapReasonId: workStampFields.scrapReasonId,
+    markOperationDone: workStampFields.markOperationDone,
+    allowMaterialShortage: materialShortageOverrideSchema,
+  })
+  .refine(scrapReasonGiven, scrapReasonMessage);
+export type OperationReportInput = z.infer<typeof operationReportSchema>;
+
 // A forgotten day's attendance, registered afterwards: always closed.
 export const createAttendanceSessionSchema = z.object({
   startedAt: z.string().datetime({ offset: true }),

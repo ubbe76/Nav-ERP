@@ -13,6 +13,7 @@ import {
   createAttendanceSessionSchema,
   stampDayQuerySchema,
   workStampSchema,
+  operationReportSchema,
   updateAttendanceSessionSchema,
   updateEmployeeSchema,
   updateTimeReportSchema,
@@ -211,6 +212,23 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
         return reply.code(400).send(errorBody(err));
       }
       throw err;
+    }
+  });
+
+  // Rapportera (Tillverkning → Rapportera, 2026-11-24): an operation's time
+  // and quantities in one go (see createOperationReport). The module's write
+  // rule (tillverkning), as a manual time report. The report's refusals are
+  // Stämplingar's, except that the employee and operation are in the body —
+  // unknown ones are a bad request, as on POST /time-reports.
+  app.post("/operation-reports", async (req, reply) => {
+    const input = operationReportSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.createOperationReport(input, req.user!.id));
+    } catch (err) {
+      if (err instanceof EmployeeNotFoundError || err instanceof MOOperationNotFoundError || err instanceof ManufacturingOrderNotFoundError) {
+        return reply.code(400).send(errorBody(err));
+      }
+      return workStampError(reply, err);
     }
   });
 

@@ -2014,6 +2014,8 @@ export function createManufacturingService(
     // module's time report and stamp written inside it through the link.
     // The scrap reason is checked before anything is written; Materialbrist
     // as on the TO card (allowMaterialShortage after a 409 in "warn").
+    // Tillverkning → Rapportera uses the same path with nothing to undo and
+    // no stamp (source manual_report, timereport createOperationReport).
     async replaceStampReport(
       input: {
         undoReportId: string | null;
@@ -2028,6 +2030,8 @@ export function createManufacturingService(
           allowMaterialShortage?: boolean;
         } | null;
         userId: string;
+        // Tillverkning → Rapportera's manual report (see the repository).
+        source?: "stamp_correction" | "manual_report";
       },
       link: StampReportLink
     ) {
@@ -2037,7 +2041,10 @@ export function createManufacturingService(
         await assertScrapReason(rest);
         report = { ...rest, materialShortage: await materialShortageCheck(allowMaterialShortage) };
       }
-      const result = await repo.replaceStampReport({ undoReportId: input.undoReportId, report, userId: input.userId }, link);
+      const result = await repo.replaceStampReport(
+        { undoReportId: input.undoReportId, report, userId: input.userId, source: input.source },
+        link
+      );
       if (!result.ok) {
         if (result.stage === "undo") assertReportUndone(result.result, input.undoReportId ?? "");
         else {

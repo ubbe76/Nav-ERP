@@ -1,0 +1,33 @@
+/* Rapportera: the search (scanner or typing), Kamera, the resource filter and
+   the sort on one row that wraps on a phone. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

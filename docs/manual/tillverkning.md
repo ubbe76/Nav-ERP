@@ -7,7 +7,7 @@ Tillverkningsmodulen i Nav|ERP driver tillverkningsordrar (TO) genom flödet fri
 Menyvalet **Tillverkning** öppnar modulens sida, där alla tillverkningsfunktioner ligger grupperade i ett rutnät:
 
 - **Ordrar** — **Tillverkningsordrar**.
-- **Verkstad** — **Stämpelterminal**, **Pågående arbete** och **Tidrapporter**.
+- **Verkstad** — **Stämpelterminal**, **Rapportera**, **Pågående arbete** och **Tidrapporter**.
 - **Planering** — **Behovsberäkning**, **Beläggning**, **Körplan** och **Scheman**.
 - **Resurser** — **Resurser** och **Produktionsgrupper**.
 
@@ -281,7 +281,7 @@ En order blir **Klar** så snart hela antalet är inlevererat — även om tidig
 
 ### Rapporteringar och Ångra
 
-Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand), **Slutför order**, **Automatisk utstämpling** — tiden för någon som stämplades ut när operationen eller ordern blev klar (se [Pågående arbete](#pagaende-arbete)); den kan ångras som en vanlig utstämpling — och **Rättad stämpling**, en stämpling som rättats eller lagts till i efterhand under [Personal & lön → Stämplingar](/hjalp/lon#stamplingar). Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs, med lagerplats. En **tjänst** i strukturen bokas som förbrukad utan lagerplats och utan att något dras från lagret — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper) — men räknas i efterkalkylen och i produkter i arbete som annat material.
+Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand), **Slutför order**, **Automatisk utstämpling** — tiden för någon som stämplades ut när operationen eller ordern blev klar (se [Pågående arbete](#pagaende-arbete)); den kan ångras som en vanlig utstämpling — **Rättad stämpling**, en stämpling som rättats eller lagts till i efterhand under [Personal & lön → Stämplingar](/hjalp/lon#stamplingar), och **Manuell rapport**, tid och antal som rapporterats under [Tillverkning → Rapportera](#rapportera). Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs, med lagerplats. En **tjänst** i strukturen bokas som förbrukad utan lagerplats och utan att något dras från lagret — [tjänster lagerförs inte](/hjalp/artiklar#artikeltyper) — men räknas i efterkalkylen och i produkter i arbete som annat material.
 
 Direkt efter **Slutför** på en operation i kortet **Rapportera** visar Nav en notis nere till höger, t.ex. *Rapporterat 5 OK på 10 — Laserskärning.* För administratörer och arbetsledare har den **Ångra**, som backar just den rapporteringen utan någon extra fråga. Samma sak gäller de andra raderna i kortet:
 
@@ -642,6 +642,26 @@ Med rättigheten Tillverkning har varje **planerad** operation i en dagsgrupp kn
 **Skriv ut** öppnar utskriftsdialogen för körplanen, med samma resurs och samma **T.o.m.** som på sidan. Knappen visas när en resurs är vald.
 
 Från [stämpelterminalen](/hjalp/terminal) finns en länk **Körplan** för den valda stationen.
+
+## Rapportera
+
+**Tillverkning → Rapportera** är till för att rapportera tillverkning för hand, en operation i taget, t.ex. från en arbetslapp. Tiden och antalen rapporteras tillsammans, utan att någon stämplar.
+
+Sidan listar de operationer som går att rapportera: väntande operationer på frisläppta och pågående tillverkningsordrar, samma operationer som i stämpelterminalen. Legooperationer är inte med, eftersom de rapporteras på sin inköpsorder. Listan visar **TO**, **Artikel**, **Operation**, **Resurs**, **Planerad** (planerad startdag), **Klart / Kvar** och **Redo**, och sorteras på planerad dag eller på färdigdatum. Välj en resurs i listan **Alla resurser** för att bara se dess operationer.
+
+Sök på TO-nummer, artikel, resurs eller material i sökfältet. Fältet tar också emot en handskanner: skanna TO-numret på pallkortet eller utskriften, och om sökningen bara lämnar en operation öppnas den direkt (samma sak när du trycker Enter). På en telefon skannar du med **Kamera**.
+
+**Rapportera** på raden öppnar en dialog med artikel, resurs och Planerat / Klart / Kvar:
+
+- **Anställd** och **Datum** (förvalt i dag) står kvar till nästa rapport, så att en hel dags lappar för samma person går fort.
+- **Tid (tt:mm)** är den anställdes tid på operationen och krävs. Fältet är förifyllt med det som återstår av operationens planerade tid: ställtid plus stycktid gånger orderns antal, minus den tid som redan rapporterats på operationen. Det är samma förslag som i **Rapportera tid** på tillverkningsordern. Med **Dela tid i ställ och produktion** på finns också **Typ**, förvalt **Produktion**, och förslaget gäller då bara den typen (ställtiden för **Ställ**, stycktiden för **Produktion**). Är allt planerat redan rapporterat är fältet tomt.
+- **Antal OK** är förifyllt med det som återstår (**Kvar**) när rutan **Rapportering** under **Rest som förslag i antalsfältet** i [System → Inställningar](/hjalp/system#installningar) är markerad, vilket den är från början. Annars är fältet tomt. **Kasserat** kräver en orsak, som i kortet Rapportera på tillverkningsordern.
+- **Operationen är klar** kryssas i av sig själv när antalet OK når orderns antal. Kryssa i den för att klarmarkera med färre (resten görs inte), eller ta bort krysset för att låta operationen vara öppen.
+- **Anteckning** följer med tidrapporten.
+
+**Rapportera** i dialogen skapar tidrapporten och rapporterar antalen i ett svep. Material som är kopplat till operationen dras automatiskt för antal OK + kasserat, och antal OK på den sista operationen levereras in i lager, precis som när [en operation avrapporteras](#avrapportera-operation). Saknas material gäller inställningen för [materialbrist](#materialbrist-vid-rapportering). Tiden kan inte rapporteras på en dag i en låst löneperiod.
+
+Efter rapporten visar sidan vad som rapporterades, t.ex. *Rapporterat på TO-1001 op 10: 1:30 för Anna Exempel, 5 st OK.*, och sökfältet är markerat för nästa lapp. Administratörer och arbetsledare har **Ångra** i notisen. Rapporten syns som **Manuell rapport** under [Rapporteringar](#rapporteringar-och-angra) på tillverkningsordern och kan ångras där också. Ångra tar bort både tiden och antalen. Tiden syns under [Tidrapporter](#tidrapporter) med källan **Manuell**.
 
 ## Pågående arbete
 

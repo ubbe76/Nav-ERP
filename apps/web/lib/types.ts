@@ -3241,7 +3241,8 @@ export interface MOReport {
   id: string;
   kind: "operation" | "completion" | "material";
   // stamp_correction: a work stamp corrected or registered under Personal & lön → Stämplingar.
-  source: "terminal" | "card" | "purchase_receipt" | "migration" | "auto_close" | "stamp_correction";
+  // manual_report: time and quantities reported under Tillverkning → Rapportera.
+  source: "terminal" | "card" | "purchase_receipt" | "migration" | "auto_close" | "stamp_correction" | "manual_report";
   moOperationId: string | null;
   sequenceNo: number | null;
   workCenterName: string | null;

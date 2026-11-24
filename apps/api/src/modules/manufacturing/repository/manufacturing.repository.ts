@@ -142,7 +142,7 @@ export interface ConsumedMaterialLine {
 }
 
 // Where a reporting event came from (mo_reports.source).
-export type ReportSource = "terminal" | "card" | "purchase_receipt" | "auto_close" | "stamp_correction";
+export type ReportSource = "terminal" | "card" | "purchase_receipt" | "auto_close" | "stamp_correction" | "manual_report";
 
 export type UndoReportResult =
   | {
@@ -1227,6 +1227,10 @@ export interface ReplaceStampReportInput {
     materialShortage?: MaterialShortageCheck;
   } | null;
   userId: string;
+  // The new report's source: a stamp corrected or registered afterwards
+  // (default), or Tillverkning → Rapportera — nothing to undo, a manual
+  // time report and no stamp (the link's finish writes nothing).
+  source?: "stamp_correction" | "manual_report";
 }
 
 export type ReplaceStampReportResult =
@@ -1332,7 +1336,7 @@ async function replaceStampReportInTx(
       ...quantities,
       actualTime,
       createdBy: input.userId,
-      source: "stamp_correction",
+      source: input.source ?? "stamp_correction",
       timeReportId,
       materialShortage,
     });
@@ -1353,7 +1357,7 @@ async function replaceStampReportInTx(
       manufacturingOrderId: newOperation.manufacturingOrderId,
       moOperationId: operationId,
       kind: "operation",
-      source: "stamp_correction",
+      source: input.source ?? "stamp_correction",
       timeReportId,
       employeeId: quantities.employeeId,
       createdBy: input.userId,

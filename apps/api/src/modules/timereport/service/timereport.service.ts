@@ -14,6 +14,7 @@ import type {
   UpdateTimeReportInput,
   WorkStampInput,
   CreateAttendanceSessionInput,
+  OperationReportInput,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import type { StampReason, StampTargetState, TimeReportRepository } from "../repository/timereport.repository.js";
@@ -1197,6 +1198,56 @@ export function createTimeReportService(
         userId,
       });
       return { id: stampId, reportRedone: !inPlace };
+    },
+
+    // Rapportera (Tillverkning → Rapportera, 2026-11-24): an operation's time
+    // and quantities reported by hand in one go — a manual time report (no
+    // stamp) and its report in ONE transaction, the Stämplingar path with
+    // nothing to undo and source manual_report, so Ångra rapportering on the
+    // TO card takes both back. The checks are a manual time report's (the
+    // employee exists, the day's payroll period is open — the order's status
+    // in the report's transaction) plus Lägg till arbete's: not a lego
+    // operation (reported on its IO). The time report gets the operation's
+    // resource, read under the report's lock on the operation.
+    async createOperationReport(input: OperationReportInput, userId: string) {
+      if (!(await repo.findEmployeeById(input.employeeId))) throw new EmployeeNotFoundError(input.employeeId);
+      if (await periodLocks.isDateLocked(input.date)) throw new PayrollPeriodLockedError(input.date);
+      await assertStampTarget(input.moOperationId);
+      let timeReportId = "";
+      const result = await manufacturing.replaceStampReport(
+        {
+          undoReportId: null,
+          report: {
+            operationId: input.moOperationId,
+            quantityOk: input.quantityOk,
+            quantityScrapped: input.quantityScrapped,
+            scrapReason: input.scrapReason,
+            scrapReasonId: input.scrapReasonId,
+            markDone: input.markOperationDone,
+            employeeId: input.employeeId,
+            allowMaterialShortage: input.allowMaterialShortage,
+          },
+          userId,
+          source: "manual_report",
+        },
+        {
+          writeTimeReport: async (tx, operationWorkCenterId) => {
+            timeReportId = await insertTimeReportInTx(tx, {
+              employeeId: input.employeeId,
+              moOperationId: input.moOperationId,
+              date: input.date,
+              hours: input.hours,
+              kind: input.kind ?? null,
+              workCenterId: operationWorkCenterId,
+              note: input.note || null,
+              createdBy: userId,
+            });
+            return timeReportId;
+          },
+          finish: async () => {},
+        }
+      );
+      return { ...result, timeReportId };
     },
 
     // A work stamp registered afterwards (efterregistrering): a closed stamp,
