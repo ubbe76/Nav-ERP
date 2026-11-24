@@ -289,6 +289,21 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   const [legoSubmitError, setLegoSubmitError] = useState<string | null>(null);
   const [inquiryResult, setInquiryResult] = useState<LegoInquiryResult | null>(null);
 
+  // The Uppdatera button is a new run (user's choice 2026-11-24: "börja om
+  // helt", as if the routine were reopened — its tab otherwise keeps the
+  // last run's cards). The created orders/inquiries and the copy notice go;
+  // the choices still follow the merge in the fetch effect. The automatic
+  // reload after Skapa ordrar/förfrågan calls reload() and keeps the cards,
+  // so the new orders can still be mailed and printed.
+  const startOver = () => {
+    setResult(null);
+    setSentOrderIds([]);
+    setInquiryResult(null);
+    setCopyNotice(null);
+    setCopyError(null);
+    reload();
+  };
+
   useEffect(() => {
     if (!mailTarget) return;
     let cancelled = false;
@@ -705,7 +720,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               Beräknad {formatComputedAt(computedAt)}
             </span>
           )}
-          <Button type="button" variant="ghost" size="small" disabled={loading} onClick={reload}>
+          <Button type="button" variant="ghost" size="small" disabled={loading} onClick={startOver}>
             Uppdatera
           </Button>
         </span>
