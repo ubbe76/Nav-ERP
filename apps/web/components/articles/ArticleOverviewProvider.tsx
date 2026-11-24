@@ -10,6 +10,10 @@ import { ArticleOverviewPanel } from "./ArticleOverviewPanel";
 interface ArticleOverviewContextValue {
   articleId: string | null;
   show: (articleId: string) => void;
+  // Re-targets the panel only while it is open — a page calls it for the row
+  // the user works in (Behovsberäkning: a click in the row or focus in its
+  // Antal field), so an open panel follows along and a closed one stays shut.
+  follow: (articleId: string) => void;
   close: () => void;
 }
 
@@ -20,6 +24,7 @@ const noop = () => {};
 const ArticleOverviewContext = createContext<ArticleOverviewContextValue>({
   articleId: null,
   show: noop,
+  follow: noop,
   close: noop,
 });
 
@@ -30,8 +35,9 @@ export function useArticleOverview() {
 export function ArticleOverviewProvider({ children }: { children: ReactNode }) {
   const [articleId, setArticleId] = useState<string | null>(null);
   const show = useCallback((id: string) => setArticleId(id), []);
+  const follow = useCallback((id: string) => setArticleId((open) => (open === null ? null : id)), []);
   const close = useCallback(() => setArticleId(null), []);
-  const value = useMemo(() => ({ articleId, show, close }), [articleId, show, close]);
+  const value = useMemo(() => ({ articleId, show, follow, close }), [articleId, show, follow, close]);
 
   return (
     <ArticleOverviewContext.Provider value={value}>

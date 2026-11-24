@@ -44,6 +44,10 @@ interface TableProps<T extends { id: string }> {
   // "Hämtar …" line. Only while there are no rows to show yet.
   loading?: boolean;
   loadingRows?: number;
+  // The row the user is working in: a click anywhere in it or focus moving
+  // into one of its fields (React's onFocus bubbles). Behovsberäkning points
+  // the open Artikelöversikt panel at the row's article with it.
+  onRowFocus?: (row: T) => void;
 }
 
 // Placeholder widths, varied so the rows don't read as a solid block.
@@ -93,6 +97,7 @@ export function Table<T extends { id: string }>({
   reorderableKeys,
   loading = false,
   loadingRows = 5,
+  onRowFocus,
 }: TableProps<T>) {
   const gridTemplate = columns.map((c, i) => trackWidth(c.width, i, columns.length)).join(" ");
   const skeleton = loading && rows.length === 0;
@@ -145,7 +150,14 @@ export function Table<T extends { id: string }>({
       {skeleton && <span className={styles.srOnly}>Hämtar …</span>}
       {rows.length === 0 && !skeleton && !entryRow && <div className={styles.empty}>{emptyText}</div>}
       {rows.map((row) => (
-        <div className={styles.row} key={row.id} data-row="" data-highlighted={row.id === highlightedRowId || undefined}>
+        <div
+          className={styles.row}
+          key={row.id}
+          data-row=""
+          data-highlighted={row.id === highlightedRowId || undefined}
+          onClick={onRowFocus ? () => onRowFocus(row) : undefined}
+          onFocus={onRowFocus ? () => onRowFocus(row) : undefined}
+        >
           {columns.map((col) => (
             <div key={col.key} className={styles.cell} data-align={col.align ?? "left"} data-label={col.label}>
               {renderCell(row, col.key)}
