@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { mergeUntouched, reconcileWithRecomputed } from "../../lib/rowStateMerge";
 import { GatedLink } from "../ui/GatedLink";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
+import { useArticleOverview } from "../articles/ArticleOverviewProvider";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
@@ -454,6 +455,12 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     });
   }
 
+  // An open Artikelöversikt panel follows the row the user works in — a click
+  // in the row or focus in its Antal field (user's request 2026-11-24). The
+  // row's icon still opens the panel; a closed panel stays closed.
+  const { follow: followArticle } = useArticleOverview();
+  const followRow = (row: DisplayRow) => followArticle(row.articleId);
+
   // Preview text for the confirmation dialog — the actual grouping (one
   // draft purchase order per primary supplier) happens server-side. Dedupe
   // by supplierId, not name — names aren't guaranteed unique.
@@ -840,6 +847,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         rows={articleRows}
         loading={loading}
         emptyText="Inga artiklar matchar filtren"
+        onRowFocus={followRow}
         renderCell={(row, key) => {
           const state = rowStates[row.id] ?? makeRowState(row);
           const demandForecast = row.demandForecast ?? 0;
@@ -1021,6 +1029,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               { key: "proposal", label: "Antal", width: "110px", align: "right" },
             ]}
             rows={configuredRows}
+            onRowFocus={followRow}
             renderCell={(row, key) => {
               const state = rowStates[row.id] ?? makeRowState(row);
               const rowDisabled = !isSelectable(row);

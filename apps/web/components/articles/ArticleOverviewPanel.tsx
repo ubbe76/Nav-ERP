@@ -6,17 +6,28 @@ import { ArticleOverviewContent } from "./ArticleOverviewContent";
 import { useArticleOverview } from "./ArticleOverviewProvider";
 import styles from "./ArticleOverview.module.css";
 
-// Where the panel was last dragged to — per browser, like the sidebar's
-// collapsed state (Nav.tsx). Wrapped in try/catch everywhere: storage can be
-// unavailable (private mode, blocked site data) and the panel must still work.
+// Where the panel was last dragged to and how big it was made — per browser,
+// like the sidebar's collapsed state (Nav.tsx). Wrapped in try/catch
+// everywhere: storage can be unavailable (private mode, blocked site data)
+// and the panel must still work.
 const POSITION_KEY = "nav-erp-article-overview-pos";
+const SIZE_KEY = "nav-erp-article-overview-size";
 const EDGE = 8;
 // Keep at least the header on screen so a panel can always be grabbed back.
 const MIN_VISIBLE = 48;
+// The smallest panel that still shows the picker and a few rows (the row
+// list scrolls sideways inside the body below its ~810 px).
+const MIN_WIDTH = 420;
+const MIN_HEIGHT = 220;
 
 interface Position {
   left: number;
   top: number;
+}
+
+interface Size {
+  width: number;
+  height: number;
 }
 
 function clampPosition(pos: Position, width: number): Position {
@@ -28,32 +39,43 @@ function clampPosition(pos: Position, width: number): Position {
   };
 }
 
-function readStoredPosition(): Position | null {
-  try {
-    const raw = localStorage.getItem(POSITION_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      typeof (parsed as Position).left === "number" &&
-      typeof (parsed as Position).top === "number" &&
-      Number.isFinite((parsed as Position).left) &&
-      Number.isFinite((parsed as Position).top)
-    ) {
-      return { left: (parsed as Position).left, top: (parsed as Position).top };
-    }
-  } catch {
-    // Unavailable or corrupt storage — fall back to the default corner.
-  }
-  return null;
+// The panel's bottom-right corner stays inside the window: the size is
+// capped by the room right of and below the panel's top-left corner.
+function clampSize(size: Size, pos: Position | null): Size {
+  const roomWidth = window.innerWidth - (pos ? pos.left : EDGE) - EDGE;
+  const roomHeight = window.innerHeight - (pos ? pos.top : EDGE) - EDGE;
+  return {
+    width: Math.round(Math.min(Math.max(size.width, MIN_WIDTH), Math.max(MIN_WIDTH, roomWidth))),
+    height: Math.round(Math.min(Math.max(size.height, MIN_HEIGHT), Math.max(MIN_HEIGHT, roomHeight))),
+  };
 }
 
-function storePosition(pos: Position) {
+// A stored { left, top } or { width, height } — null when missing, corrupt or
+// storage is unavailable (the panel then uses its CSS default).
+function readStored<K extends string>(key: string, fields: readonly K[]): Record<K, number> | null {
   try {
-    localStorage.setItem(POSITION_KEY, JSON.stringify(pos));
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const out = {} as Record<K, number>;
+    for (const field of fields) {
+      const value = (parsed as Record<string, unknown>)[field];
+      if (typeof value !== "number" || !Number.isFinite(value)) return null;
+      out[field] = value;
+    }
+    return out;
   } catch {
-    // Not persisting is fine; the panel still moves for this page view.
+    // Unavailable or corrupt storage — fall back to the CSS default.
+    return null;
+  }
+}
+
+function store(key: string, value: Position | Size) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Not persisting is fine; the panel still moves/resizes for this page view.
   }
 }
 
@@ -84,14 +106,23 @@ function PanelFrame({
   // null = no stored/dragged position yet → the CSS default corner applies.
   const [pos, setPos] = useState<Position | null>(null);
   const posRef = useRef<Position | null>(null);
+  // null = never resized → the CSS default size (880 px wide, at most 70vh).
+  const [size, setSize] = useState<Size | null>(null);
+  const sizeRef = useRef<Size | null>(null);
   // Phone layout: bottom sheet, no dragging (CSS media query does the layout;
   // this flag only stops the inline left/top from overriding it).
   const [narrow, setNarrow] = useState(false);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const resizeRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const applyPosition = useCallback((next: Position | null) => {
     posRef.current = next;
     setPos(next);
+  }, []);
+
+  const applySize = useCallback((next: Size | null) => {
+    sizeRef.current = next;
+    setSize(next);
   }, []);
 
   useEffect(() => {
@@ -102,22 +133,31 @@ function PanelFrame({
     return () => media.removeEventListener("change", sync);
   }, []);
 
-  // Restore the last position once mounted (needs the panel's width to clamp).
+  // Restore the last position and size once mounted (the position needs the
+  // panel's width to clamp). A size only comes with a position — resizing
+  // always pins the panel's top-left corner first.
   useEffect(() => {
-    const stored = readStoredPosition();
-    if (!stored || !panelRef.current) return;
-    applyPosition(clampPosition(stored, panelRef.current.offsetWidth));
-  }, [applyPosition]);
+    if (!panelRef.current || window.matchMedia("(max-width: 640px)").matches) return;
+    const storedPos = readStored(POSITION_KEY, ["left", "top"] as const);
+    if (!storedPos) return;
+    const storedSize = readStored(SIZE_KEY, ["width", "height"] as const);
+    const width = storedSize ? Math.min(Math.max(storedSize.width, MIN_WIDTH), window.innerWidth - 2 * EDGE) : panelRef.current.offsetWidth;
+    const nextPos = clampPosition(storedPos, width);
+    applyPosition(nextPos);
+    if (storedSize) applySize(clampSize(storedSize, nextPos));
+  }, [applyPosition, applySize]);
 
   // A window that shrinks must not leave the panel stranded off-screen.
   useEffect(() => {
     const onResize = () => {
       if (!posRef.current || !panelRef.current) return;
-      applyPosition(clampPosition(posRef.current, panelRef.current.offsetWidth));
+      const nextPos = clampPosition(posRef.current, sizeRef.current?.width ?? panelRef.current.offsetWidth);
+      applyPosition(nextPos);
+      if (sizeRef.current) applySize(clampSize(sizeRef.current, nextPos));
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [applyPosition]);
+  }, [applyPosition, applySize]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -164,10 +204,48 @@ function PanelFrame({
     if (!dragRef.current) return;
     dragRef.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    if (posRef.current) storePosition(posRef.current);
+    if (posRef.current) store(POSITION_KEY, posRef.current);
   }
 
-  const style = pos && !narrow ? { left: pos.left, top: pos.top, right: "auto", bottom: "auto" } : undefined;
+  // The grip in the bottom-right corner (user's request 2026-11-24: keep the
+  // panel open beside the Behovsberäkning list — at 880 px it covered the
+  // rows). Resizing pins the top-left corner, so a panel still sitting in its
+  // CSS corner (right/bottom) gets its current place as left/top first.
+  function onResizeDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (narrow || e.button !== 0 || !panelRef.current) return;
+    e.preventDefault();
+    const rect = panelRef.current.getBoundingClientRect();
+    if (!posRef.current) applyPosition({ left: Math.round(rect.left), top: Math.round(rect.top) });
+    resizeRef.current = { x: e.clientX, y: e.clientY, width: rect.width, height: rect.height };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onResizeMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const start = resizeRef.current;
+    if (!start) return;
+    applySize(
+      clampSize({ width: start.width + e.clientX - start.x, height: start.height + e.clientY - start.y }, posRef.current)
+    );
+  }
+
+  function onResizeUp(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    if (posRef.current) store(POSITION_KEY, posRef.current);
+    if (sizeRef.current) store(SIZE_KEY, sizeRef.current);
+  }
+
+  const style =
+    narrow || !pos
+      ? undefined
+      : {
+          left: pos.left,
+          top: pos.top,
+          right: "auto",
+          bottom: "auto",
+          ...(size ? { width: size.width, height: size.height, maxHeight: "none" } : {}),
+        };
 
   return (
     <div
@@ -195,6 +273,15 @@ function PanelFrame({
         </button>
       </div>
       <div className={styles.body}>{children}</div>
+      <div
+        className={styles.resizeGrip}
+        title="Ändra storlek"
+        aria-hidden="true"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onPointerCancel={onResizeUp}
+      />
     </div>
   );
 }

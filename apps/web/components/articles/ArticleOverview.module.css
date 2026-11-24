@@ -81,6 +81,29 @@
 .body {
   padding: 20px;
   overflow: auto;
+  /* With a set height (resized) the body takes the rest and scrolls. */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Storlekshandtaget: drag the bottom-right corner to resize the panel
+   (ArticleOverviewPanel stores the size). Two short diagonal strokes. */
+.resizeGrip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 0 52%,
+    var(--color-text-muted) 52% 58%,
+    transparent 58% 70%,
+    var(--color-text-muted) 70% 76%,
+    transparent 76%
+  );
 }
 
 /* Icon buttons that open the panel. The row size sits after an article
@@ -235,6 +258,9 @@
   }
   .body {
     padding: 16px;
+  }
+  .resizeGrip {
+    display: none;
   }
 }
 
