@@ -350,6 +350,17 @@ describe("härlett behov förbrukar prognosen i behovsberäkningen (användarbes
     expect(overviewForecast).toBe(58);
     expect(overviewBefore.rows.every((r) => r.kind === "forecast")).toBe(true);
     expect(overviewBefore.closingBalance).toBe(before.projected + before.demandDerived - (overviewForecast - before.demandForecast));
+    // The planned view (2026-11-24) shows the parent's proposal's 5 as one
+    // row and lets it consume the forecast like the calc: 53, and Disponibelt
+    // ends on projected + the proposals.
+    const plannedBefore = await planningService.getArticleOverview(c.id, { planned: true });
+    expect(plannedBefore.rows.filter((r) => r.kind === "derived_demand")).toEqual([
+      expect.objectContaining({ quantity: -5, partner: "FC-PAR — Förälder", parentArticleId: parent.id, documentType: null }),
+    ]);
+    expect(sum(plannedBefore.rows.filter((r) => r.kind === "forecast").map((r) => -r.quantity))).toBe(53);
+    expect(sum(plannedBefore.rows.filter((r) => r.kind === "proposal").map((r) => r.quantity))).toBe(55);
+    expect(plannedBefore.closingBalance).toBe(before.projected + before.proposalQuantity);
+    expect(plannedBefore.planned?.computedAt).toEqual(expect.any(String));
     // The Prognos card knows no derived demand either.
     const cardBefore = await planningService.getArticleForecast(c.id);
     expect(cardBefore.months[0]).toMatchObject({ month: "2030-03", actualDemand: 0, alreadyConsumed: 2, forecastDemand: 8 });

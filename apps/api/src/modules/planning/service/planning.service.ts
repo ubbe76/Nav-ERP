@@ -42,7 +42,7 @@ import {
   DEMAND_SALES_STATUSES,
   buildBomIndex,
   computeLowLevelCodes,
-  computeRequirements,
+  computeRequirementsDetailed,
   explodeFromIndex,
   latestStartFor,
   proposalSummary,
@@ -52,6 +52,7 @@ import {
   type DerivedDemand,
   type RequirementProposal,
   type RequirementRow,
+  type RequirementsResult,
   type RequirementsInput,
 } from "./requirements-calc.js";
 import {
@@ -859,7 +860,10 @@ export function createPlanningService(
   // Shared by every user — the result doesn't depend on who asks. The
   // PROMISE is cached so concurrent requests share one computation; a failed
   // one is dropped so the next request retries.
-  let cache: { at: number; rows: Promise<RequirementRow[]> } | null = null;
+  // `result` also carries where each derived demand came from (the
+  // artikelöversikt's planned rows); `rows` is its rows, the readers' view.
+  type CachedRequirements = { at: number; result: Promise<RequirementsResult>; rows: Promise<RequirementRow[]> };
+  let cache: CachedRequirements | null = null;
   // Skapa ordrar runs one call at a time in this process (one API container):
   // a second call — another tab, a click repeated after a timeout — waits
   // for the first, so its fresh recomputation sees the orders the first one
@@ -1263,7 +1267,12 @@ export function createPlanningService(
           const needDate = n.expectedDeliveryDate === null ? null : latestStartFor(n.expectedDeliveryDate, n.leadDays, offDays);
           const share = n.uncoveredQuantity / g.quantity;
           for (const m of s.materials) {
-            derivedDemands.push({ articleId: m.componentArticleId, quantity: m.totalQuantity * share, needDate });
+            derivedDemands.push({
+              articleId: m.componentArticleId,
+              quantity: m.totalQuantity * share,
+              needDate,
+              salesOrderRowId: n.salesOrderRowId,
+            });
           }
         }
       } catch (err) {
@@ -1378,11 +1387,14 @@ export function createPlanningService(
     return suggestDueDate(demand, { today, offDays: await dueDateOffDays(needDate, today, leadDays), leadDays });
   }
 
-  function computedRequirements(refresh: boolean): { at: number; rows: Promise<RequirementRow[]> } {
+  function computedRequirements(refresh: boolean): CachedRequirements {
     const t = now();
     if (refresh || !cache || t - cache.at >= cacheMs) {
-      const rows = loadDatedInput().then(computeRequirements);
-      const entry = { at: t, rows };
+      const result = loadDatedInput().then(computeRequirementsDetailed);
+      // The catch below handles a failure through `rows` (derived from
+      // `result`), so a failed run is never an unhandled rejection.
+      const rows = result.then((r) => r.rows);
+      const entry = { at: t, result, rows };
       cache = entry;
       rows.catch(() => {
         if (cache === entry) cache = null;
@@ -2357,8 +2369,26 @@ export function createPlanningService(
 
     // Artikelöversikt (planeringsbild) — one article's open rows in date
     // order with a running balance. Derived at read time like the MRP.
-    async getArticleOverview(articleId: string): Promise<ArticleOverview> {
-      return buildArticleOverview(await loadOverviewInput(articleId));
+    // `planned` (?planned=true): plus the behovsberäkning's derived demand
+    // and the article's own proposals, from the cached run the Behovsberäkning
+    // page shows (recomputed only when the cache is stale, like the list).
+    async getArticleOverview(articleId: string, opts: { planned?: boolean } = {}): Promise<ArticleOverview> {
+      const input = await loadOverviewInput(articleId);
+      if (!opts.planned) return buildArticleOverview(input);
+      const entry = computedRequirements(false);
+      const { rows, derivedByArticle } = await entry.result;
+      // The article's own row — not a lego row (keyed per operation) or a
+      // configured row (per KO row), which carry the same articleId.
+      const row = rows.find((r) => r.articleId === articleId && r.moOperationId === undefined && r.salesOrderRowId === undefined);
+      return buildArticleOverview({
+        ...input,
+        planned: {
+          computedAt: new Date(entry.at).toISOString(),
+          derived: derivedByArticle.get(articleId) ?? [],
+          proposals: row?.proposals ?? [],
+          supplierName: row?.proposalKind === "purchase" ? (row.primarySupplier?.supplierName ?? null) : null,
+        },
+      });
     },
 
     // The same for a set of articles in one batch (Leveranstidskontroll's

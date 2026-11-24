@@ -96,6 +96,29 @@ describe("behovsberäkning — beställningsvara", () => {
     });
   });
 
+  it("the planned overview of a component names the KO row its material is for and ends on projected + proposals", async () => {
+    const { s, order, row } = await confirmedRow(2);
+    const skruv = (await list()).find((r) => r.articleId === s.parts.skruv.id)!;
+    const overview = await planning.getArticleOverview(s.parts.skruv.id, { planned: true });
+    expect(overview.rows.filter((r) => r.kind === "derived_demand")).toEqual([
+      expect.objectContaining({
+        documentType: "sales_order",
+        documentId: order.id,
+        documentNumber: order.orderNumber,
+        partner: `${s.article.articleNumber} — ${s.article.name}`,
+        quantity: -16,
+        parentArticleId: s.article.id,
+        sourceProposal: { key: `configured:${row.id}`, quantity: 2 },
+      }),
+    ]);
+    expect(overview.rows.filter((r) => r.kind === "proposal").map((r) => r.quantity)).toEqual(skruv.proposals.map((p) => p.quantity));
+    expect(overview.closingBalance).toBe(skruv.projected + skruv.proposalQuantity);
+    // The firm overview is unchanged: no planned rows.
+    const firm = await planning.getArticleOverview(s.parts.skruv.id);
+    expect(firm.rows.some((r) => r.kind === "derived_demand" || r.kind === "proposal")).toBe(false);
+    expect(firm).not.toHaveProperty("planned");
+  });
+
   it("Skapa ordrar makes the row's TO; afterwards the TO's material is the demand and the row is covered", async () => {
     const { s, row } = await confirmedRow(2);
     const user = await makeUser();

@@ -8,6 +8,15 @@
 // which comes from order PROPOSALS — not orders yet, so no row here), minus
 // the difference between this overview's forecast and the calc's
 // demandForecast (the calc lets derived demand consume the forecast too).
+//
+// The PLANNED view (`input.planned`, GET /articles/:id/overview?planned=true,
+// user's goal 2026-11-24: "en bättre överblick på behovet man beställer eller
+// skapar tillverkning mot") adds what the behovsberäkning plans on top: its
+// derived demand per proposal it comes from (`derived_demand`) and the
+// article's own proposals as supply (`proposal`). The derived demand then
+// consumes the forecast as in the calc, so closingBalance === projected +
+// proposalQuantity — Disponibelt ends where the behovsberäkning's proposals
+// leave the article. Neither kind is firm (isFirmOverviewRow).
 import {
   DEMAND_SALES_STATUSES,
   MATERIAL_MO_STATUSES,
@@ -17,9 +26,13 @@ import {
   explodeFromIndex,
   type BomEdge,
   type ManufacturingOrderStatus,
+  type PlannedDerivedDemand,
+  type ProposalReason,
   type PurchaseOrderStatus,
+  type RequirementProposal,
   type SalesOrderStatus,
 } from "./requirements-calc.js";
+import { isoWeekOf } from "../../timereport/service/schedule.service.js";
 import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 import { forecastWeeklyDemands, type ArticleForecastInput, type DatedDemand, type ForecastCalendar } from "./forecast.js";
 import { round4 } from "@navet/shared";
@@ -33,6 +46,9 @@ export interface OverviewArticle {
   active: boolean;
   unitCode: string | null;
   reorderPoint: number | null;
+  // Säkerhetslager — shown in the header; the overview itself nets nothing
+  // against it (the behovsberäkning's proposals do). Optional for the fixtures.
+  safetyStock?: number | null;
   orderQuantity: number | null;
   // Same article shape as RequirementsArticle so the two readers never drift;
   // the overview itself rounds nothing.
@@ -135,6 +151,21 @@ export interface ArticleOverviewInput {
   // the weekly forecast demands (forecast.ts) consumed by the demand rows
   // above, the same way the behovsberäkning does. Absent = no forecast rows.
   forecast?: { input: ArticleForecastInput; calendar: ForecastCalendar };
+  // The planned view (see the header): from ONE behovsberäkning run (the
+  // service's cached result). Absent = the firm overview, as every other
+  // reader (pegging, Leveranstidskontroll, Skapa saknade) builds it.
+  planned?: OverviewPlannedInput;
+}
+
+export interface OverviewPlannedInput {
+  // When the behovsberäkning run was computed (its computedAt).
+  computedAt: string;
+  // computeRequirementsDetailed's derivedByArticle for this article.
+  derived: PlannedDerivedDemand[];
+  // The article row's proposals (none for an article without a row).
+  proposals: RequirementProposal[];
+  // The proposals' supplier (purchase) — the row's primary supplier.
+  supplierName: string | null;
 }
 
 // What the repository loads: the input without the TO start dates, which the
@@ -152,7 +183,11 @@ export type OverviewRowKind =
   | "manufacturing_order"
   | "purchase_order"
   // Prognos (#10): one week's forecast demand — no document behind it.
-  | "forecast";
+  | "forecast"
+  // The planned view only: a behovsberäkning proposal's material (one row
+  // per proposal it comes from) and the article's own proposals.
+  | "derived_demand"
+  | "proposal";
 
 export interface ArticleOverviewRow {
   // Kind-prefixed source id — unique across kinds, stable between reloads.
@@ -170,6 +205,16 @@ export interface ArticleOverviewRow {
   quantity: number; // SIGNED: demand < 0, supply > 0
   balance: number; // onHand + Σ quantity up to and including this row
   isDraft: boolean; // draft IO — counted (like supplyPoDraft), but marked
+  // The article the demand is material for (mo_material, mo_planned_material,
+  // derived_demand) — the web re-targets the overview to it, so the demand
+  // can be followed up to the customer order.
+  parentArticleId?: string;
+  // `proposal` rows: the proposal (its key is the behovsberäkning's).
+  proposal?: { key: string; reason: ProposalReason; latestDate: string | null; late: boolean };
+  // `derived_demand` rows: the proposal it is material for and that
+  // proposal's quantity — the web rescales the row (explosion is linear)
+  // when another quantity is typed into it. Absent for the undated cascade.
+  sourceProposal?: { key: string; quantity: number };
 }
 
 export interface ArticleOverview {
@@ -180,6 +225,8 @@ export interface ArticleOverview {
   blockedOnHand: number;
   rows: ArticleOverviewRow[];
   closingBalance: number;
+  // Only the planned view: the behovsberäkning run its rows come from.
+  planned?: { computedAt: string };
 }
 
 // Same day: receipts before withdrawals, then a fixed kind order, then the
@@ -187,19 +234,29 @@ export interface ArticleOverview {
 const KIND_ORDER: Record<OverviewRowKind, number> = {
   purchase_order: 0,
   manufacturing_order: 1,
-  sales_order: 2,
-  mo_material: 3,
-  mo_planned_material: 4,
-  forecast: 5,
+  proposal: 2,
+  sales_order: 3,
+  mo_material: 4,
+  mo_planned_material: 5,
+  derived_demand: 6,
+  forecast: 7,
 };
 
 // Inte ett skarpt behov (#10): a forecast row is planned for by the
 // behovsberäkning but never moves a färdigdatum suggestion, a pegging
 // allocation or a promised delivery date — pegOverview (and findFirmDemand
 // on top of it) and Leveranstidskontrollen's pools skip the rows this says
-// no to. ONE filter for all three.
+// no to. ONE filter for all three. The planned view's rows (proposals and
+// their derived demand) are not orders either — those readers never ask for
+// them, and the filter would keep them out if one did.
 export function isFirmOverviewRow(row: Pick<ArticleOverviewRow, "kind">): boolean {
-  return row.kind !== "forecast";
+  return row.kind !== "forecast" && row.kind !== "derived_demand" && row.kind !== "proposal";
+}
+
+// The Order column of a planned row: "Förslag v.49" (the proposal's need
+// week), "Förslag" when undated.
+export function proposalLabel(needWeek: string | null): string {
+  return needWeek === null ? "Förslag" : `Förslag v.${isoWeekOf(needWeek).isoWeek}`;
 }
 
 // The firm demand rows as the forecast rule reads them (forecast.ts): the
@@ -334,6 +391,7 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
       quantity: -rest,
       balance: 0,
       isDraft: false,
+      parentArticleId: row.parentArticleId,
     });
   }
 
@@ -359,16 +417,75 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
       quantity: -need,
       balance: 0,
       isDraft: false,
+      parentArticleId: mo.parentArticleId,
     });
+  }
+
+  const planned = input.planned;
+  if (planned) {
+    for (const p of planned.proposals) {
+      rows.push({
+        id: `prop:${p.key}`,
+        kind: "proposal",
+        direction: "supply",
+        // The need date: the proposal is there for its first uncovered
+        // demand (supply before demand on the same day).
+        date: p.needDate,
+        documentType: null,
+        documentId: null,
+        documentNumber: proposalLabel(p.needWeek),
+        status: "proposal",
+        partner: planned.supplierName,
+        quantity: p.quantity,
+        balance: 0,
+        isDraft: false,
+        proposal: { key: p.key, reason: p.reason, latestDate: p.latestDate, late: p.late },
+      });
+    }
+    // One row per proposal the material is for (a configured row's material
+    // can list the component twice — summed, same date).
+    const bySource = new Map<string, ArticleOverviewRow>();
+    for (const d of planned.derived) {
+      const sourceKey = d.source?.proposalKey ?? "cascade";
+      const existing = bySource.get(sourceKey);
+      if (existing) {
+        existing.quantity = round4(existing.quantity - d.quantity);
+        continue;
+      }
+      const s = d.source;
+      const row: ArticleOverviewRow = {
+        id: `drv:${sourceKey}`,
+        kind: "derived_demand",
+        direction: "demand",
+        date: d.date,
+        // A configured row's material is for the KO row's TO-to-be: the KO
+        // is the document. A parent's proposal has none yet.
+        documentType: s?.salesOrderId ? "sales_order" : null,
+        documentId: s?.salesOrderId ?? null,
+        documentNumber: s?.salesOrderNumber ?? proposalLabel(s?.needWeek ?? null),
+        status: "proposal",
+        partner: s ? `${s.articleNumber} — ${s.articleName}` : null,
+        quantity: round4(-d.quantity),
+        balance: 0,
+        isDraft: false,
+        ...(s ? { parentArticleId: s.articleId, sourceProposal: { key: s.proposalKey, quantity: s.proposalQuantity } } : {}),
+      };
+      bySource.set(sourceKey, row);
+      rows.push(row);
+    }
   }
 
   // Prognos (#10): the weekly forecast demands, consumed by the demand rows
   // above — the same rule and the same dated rows as the behovsberäkning's
   // consumed by the firm rows only (the calc also lets derived demand consume
   // it), so the invariant is closingBalance === projected + demandDerived −
-  // (this forecast − the calc's demandForecast).
+  // (this forecast − the calc's demandForecast). The planned view lets its
+  // derived demand consume it too, exactly as the calc does.
   if (input.forecast) {
-    const pieces = forecastWeeklyDemands(input.forecast.input, firmDemandsOf(rows), input.forecast.calendar);
+    const consuming = planned
+      ? [...firmDemandsOf(rows), ...planned.derived.map((d) => ({ date: d.date, quantity: d.quantity }))]
+      : firmDemandsOf(rows);
+    const pieces = forecastWeeklyDemands(input.forecast.input, consuming, input.forecast.calendar);
     for (const piece of pieces) {
       rows.push({
         id: `fc:${piece.month}:${piece.date}`,
@@ -402,5 +519,6 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
     blockedOnHand: input.blockedOnHand ?? 0,
     rows,
     closingBalance: balance,
+    ...(planned ? { planned: { computedAt: planned.computedAt } } : {}),
   };
 }

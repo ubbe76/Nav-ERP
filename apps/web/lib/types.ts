@@ -5488,7 +5488,11 @@ export type OverviewRowKind =
   | "mo_planned_material"
   | "manufacturing_order"
   | "purchase_order"
-  | "forecast";
+  | "forecast"
+  // ?planned=true only: a behovsberäkning proposal's material and the
+  // article's own proposals.
+  | "derived_demand"
+  | "proposal";
 
 export const OVERVIEW_KIND_LABELS: Record<OverviewRowKind, string> = {
   sales_order: "Kundorder",
@@ -5497,6 +5501,8 @@ export const OVERVIEW_KIND_LABELS: Record<OverviewRowKind, string> = {
   manufacturing_order: "Tillverkningsorder",
   purchase_order: "Inköpsorder",
   forecast: "Prognos",
+  derived_demand: "Material till förslag",
+  proposal: "Orderförslag",
 };
 
 export interface ArticleOverviewRow {
@@ -5516,6 +5522,13 @@ export interface ArticleOverviewRow {
   balance: number;
   // Draft IO — counted (like supplyPoDraft) but marked "Utkast".
   isDraft: boolean;
+  // mo_material, mo_planned_material, derived_demand: the article the
+  // material is for — the overview re-targets to it.
+  parentArticleId?: string;
+  // proposal rows: the behovsberäkning's proposal.
+  proposal?: { key: string; reason: RequirementProposal["reason"]; latestDate: string | null; late: boolean };
+  // derived_demand rows: the proposal the material is for and its quantity.
+  sourceProposal?: { key: string; quantity: number };
 }
 
 export interface ArticleOverview {
@@ -5528,6 +5541,7 @@ export interface ArticleOverview {
     active: boolean;
     unitCode: string | null;
     reorderPoint: number | null;
+    safetyStock?: number | null;
     orderQuantity: number | null;
     rounding: number | null;
   };
@@ -5537,6 +5551,8 @@ export interface ArticleOverview {
   blockedOnHand: number;
   rows: ArticleOverviewRow[];
   closingBalance: number;
+  // ?planned=true: the behovsberäkning run the planned rows come from.
+  planned?: { computedAt: string };
 }
 
 // POST /planning/orders — proposals are grouped server-side into one draft

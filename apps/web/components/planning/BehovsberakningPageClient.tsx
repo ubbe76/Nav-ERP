@@ -5,6 +5,7 @@ import { mergeUntouched, reconcileWithRecomputed } from "../../lib/rowStateMerge
 import { GatedLink } from "../ui/GatedLink";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { useArticleOverview } from "../articles/ArticleOverviewProvider";
+import { typedQuantities } from "../../lib/articleOverviewPlanned";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
@@ -458,8 +459,15 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // An open Artikelöversikt panel follows the row the user works in — a click
   // in the row or focus in its Antal field (user's request 2026-11-24). The
   // row's icon still opens the panel; a closed panel stays closed.
-  const { follow: followArticle } = useArticleOverview();
+  const { follow: followArticle, setPlanning } = useArticleOverview();
   const followRow = (row: DisplayRow) => followArticle(row.articleId);
+
+  // The overview shows this run's proposals and their material, with the
+  // quantities typed here (user's goal 2026-11-24: "en bättre överblick på
+  // behovet man beställer eller skapar tillverkning mot").
+  const typed = useMemo(() => typedQuantities(Object.values(rowStates)), [rowStates]);
+  useEffect(() => setPlanning({ computedAt, typed }), [setPlanning, computedAt, typed]);
+  useEffect(() => () => setPlanning(null), [setPlanning]);
 
   // Preview text for the confirmation dialog — the actual grouping (one
   // draft purchase order per primary supplier) happens server-side. Dedupe

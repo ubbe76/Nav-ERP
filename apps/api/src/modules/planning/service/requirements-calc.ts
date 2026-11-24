@@ -221,6 +221,44 @@ export interface DerivedDemand {
   articleId: string;
   quantity: number;
   needDate: string | null;
+  // The configured KO row whose TO-to-be needs the material — the
+  // artikelöversikt's planned rows name it (computeRequirementsDetailed).
+  salesOrderRowId?: string;
+}
+
+// Where a derived demand comes from (the artikelöversikt's planned rows,
+// user's goal 2026-11-24: see the demand a proposal is ordered against): the
+// proposal whose material it is — a parent's manufacturing proposal, or a
+// configured KO row's (proposalKey `configured:<rowId>`, the template as the
+// parent, the KO named). proposalQuantity is the proposal's own quantity, so
+// a reader can rescale the material for another quantity: the explosion is
+// linear (the web does it for a quantity typed into Förslag/Antal).
+export interface DerivedDemandSource {
+  proposalKey: string;
+  proposalQuantity: number;
+  needWeek: string | null;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  salesOrderId?: string;
+  salesOrderNumber?: string;
+  customerName?: string;
+}
+
+// One derived demand as the calc pushed it to a component: the same date and
+// quantity its netting (and its forecast consumption) used. source null = the
+// undated configuredCascade map (older form, nothing to name).
+export interface PlannedDerivedDemand {
+  date: string | null;
+  quantity: number;
+  source: DerivedDemandSource | null;
+}
+
+export interface RequirementsResult {
+  rows: RequirementRow[];
+  // Per component article: every derived demand, in push order. Σ quantity
+  // = the row's demandDerived.
+  derivedByArticle: Map<string, PlannedDerivedDemand[]>;
 }
 
 export interface RequirementsInput {
@@ -540,6 +578,12 @@ export function latestStartFor(needDate: string, leadDays: number, offDays: Read
 const NO_PARTNER_SETTINGS: PartnerDeliveryFields = { deliveryWeekdays: [], deliveryDayMode: null, transitDays: null };
 
 export function computeRequirements(input: RequirementsInput): RequirementRow[] {
+  return computeRequirementsDetailed(input).rows;
+}
+
+// The calc plus where each derived demand came from (RequirementsResult) —
+// the planning service caches this; computeRequirements is its rows.
+export function computeRequirementsDetailed(input: RequirementsInput): RequirementsResult {
   const today = input.today ?? stockholmToday();
   const thisMonday = mondayOf(today);
   const offDays = input.offDays ?? new Set<string>();
@@ -617,6 +661,17 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
   const forecastInputs = new Map((input.forecast?.articles ?? []).map((a) => [a.articleId, a] as const));
 
   const demandDerived = new Map<string, number>();
+  const derivedByArticle = new Map<string, PlannedDerivedDemand[]>();
+  // Recorded beside every derived pushDemand, with pushDemand's own rule
+  // (nothing for a quantity ≤ 0), so the list is exactly what was netted.
+  const recordDerived = (articleId: string, demand: PlannedDerivedDemand) => {
+    if (demand.quantity <= 0) return;
+    const list = derivedByArticle.get(articleId);
+    if (list) list.push(demand);
+    else derivedByArticle.set(articleId, [demand]);
+  };
+  const articleById = new Map(input.articles.map((a) => [a.articleId, a]));
+  const configuredByRow = new Map(input.configuredRows.map((c) => [c.salesOrderRowId, c]));
   // Konfigurator 4c: the configured rows' derived material (one derivation
   // per configuration, done by the planning service) is demand from TOs that
   // do not exist yet — like a proposal's cascade, derived demand, so the
@@ -624,10 +679,30 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
   for (const [componentId, quantity] of input.configuredCascade) {
     addTo(demandDerived, componentId, quantity);
     pushDemand(demands, componentId, { date: null, quantity });
+    recordDerived(componentId, { date: null, quantity, source: null });
   }
   for (const d of input.derivedDemands ?? []) {
     addTo(demandDerived, d.articleId, d.quantity);
     pushDemand(demands, d.articleId, { date: d.needDate, quantity: d.quantity });
+    const c = d.salesOrderRowId === undefined ? undefined : configuredByRow.get(d.salesOrderRowId);
+    const t = c ? articleById.get(c.templateArticleId) : undefined;
+    recordDerived(d.articleId, {
+      date: d.needDate,
+      quantity: d.quantity,
+      source: c
+        ? {
+            proposalKey: `configured:${c.salesOrderRowId}`,
+            proposalQuantity: c.uncoveredQuantity,
+            needWeek: c.expectedDeliveryDate === null ? null : needWeekOf(c.expectedDeliveryDate, thisMonday),
+            articleId: c.templateArticleId,
+            articleNumber: t?.articleNumber ?? "",
+            articleName: t?.name ?? "",
+            salesOrderId: c.salesOrderId,
+            salesOrderNumber: c.orderNumber,
+            customerName: c.customerName,
+          }
+        : null,
+    });
   }
 
   const rows: RequirementRow[] = [];
@@ -823,6 +898,18 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
             asap: proposal.reason === "reorder_point" || proposal.reason === "safety_stock",
             forecast: proposal.reason === "forecast",
           });
+          recordDerived(componentId, {
+            date: proposal.latestDate,
+            quantity: componentQuantity,
+            source: {
+              proposalKey: proposal.key,
+              proposalQuantity: proposal.quantity,
+              needWeek: proposal.needWeek,
+              articleId: id,
+              articleNumber: article.articleNumber,
+              articleName: article.name,
+            },
+          });
         }
       }
     }
@@ -889,7 +976,6 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
   // netted here: the row's material already arrived via configuredCascade.
   // The proposal is dated like a manufacturing proposal: need = the row's
   // ship date, latest start = the working day before minus the lead time.
-  const articleById = new Map(input.articles.map((a) => [a.articleId, a]));
   const configuredRows = input.configuredRows
     .filter((c) => c.uncoveredQuantity > 0)
     .sort((a, b) =>
@@ -1030,7 +1116,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           : 1
     );
 
-  return [...rows, ...configuredRows, ...legoRows];
+  return { rows: [...rows, ...configuredRows, ...legoRows], derivedByArticle };
 }
 
 // The row-level sort/filter fields derived from the proposals. Exported for
