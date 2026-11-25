@@ -4,6 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useDocumentTabs } from "./tabs/DocumentTabs";
 import { apiFetch } from "../lib/api";
 import { isEmptyEntry, type ListColumns, type ListColumnsEntry, type TableDensity } from "../lib/listColumns";
+import { NAV_LABEL_SIZES, type NavLabels } from "../lib/navLabels";
+import { isEmbedded, type TabMessage } from "../lib/documentTabs";
+import { postToFrame } from "../lib/tabNavigation";
 
 // Täthet och kolumner (Nav som program, punkt 6): the user's density and
 // per-list column setup, read with the page (AppShell) and changed here.
@@ -20,6 +23,9 @@ interface UserPrefsValue {
   // Programramen: the module panel folded away.
   navPanelCollapsed: boolean;
   setNavPanelCollapsed: (collapsed: boolean) => void;
+  // Namn under ikonerna: the rail's names and their size (off = icons only).
+  navLabels: NavLabels;
+  setNavLabels: (labels: NavLabels) => void;
 }
 
 const UserPrefsContext = createContext<UserPrefsValue>({
@@ -31,6 +37,8 @@ const UserPrefsContext = createContext<UserPrefsValue>({
   setDocumentTabs: () => {},
   navPanelCollapsed: false,
   setNavPanelCollapsed: () => {},
+  navLabels: "off",
+  setNavLabels: () => {},
 });
 
 // The state is this tab's from the first render on: later server renders
@@ -43,6 +51,7 @@ export function UserPrefsProvider({
   initialListColumns,
   initialDocumentTabs = true,
   initialNavPanelCollapsed = false,
+  initialNavLabels = "off",
   className,
   children,
 }: {
@@ -50,6 +59,7 @@ export function UserPrefsProvider({
   initialListColumns: ListColumns;
   initialDocumentTabs?: boolean;
   initialNavPanelCollapsed?: boolean;
+  initialNavLabels?: NavLabels;
   className?: string;
   children: ReactNode;
 }) {
@@ -57,6 +67,7 @@ export function UserPrefsProvider({
   const [listColumns, setListColumnsState] = useState(initialListColumns);
   const [documentTabs, setDocumentTabsState] = useState(initialDocumentTabs);
   const [navPanelCollapsed, setNavPanelCollapsedState] = useState(initialNavPanelCollapsed);
+  const [navLabels, setNavLabelsState] = useState(initialNavLabels);
   // The tabs live in the root layout (they outlive this frame); they follow
   // the user's setting.
   const tabsControl = useDocumentTabs();
@@ -108,9 +119,43 @@ export function UserPrefsProvider({
     [save]
   );
 
+  // Namn under ikonerna. The menu is the frame's (hidden inside a tab), so a
+  // choice made in a tab — Mina inställningar — is told to the frame, which
+  // shows it without saving it again.
+  const setNavLabels = useCallback(
+    (labels: NavLabels) => {
+      setNavLabelsState(labels);
+      save({ navLabels: labels });
+      if (isEmbedded()) postToFrame({ type: "nav-labels", navLabels: labels });
+    },
+    [save]
+  );
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin || (e.source as Window | null)?.parent !== window) return;
+      const message = e.data as TabMessage | null;
+      if (message?.type !== "nav-labels") return;
+      const labels = NAV_LABEL_SIZES.find((size) => size === message.navLabels);
+      if (labels) setNavLabelsState(labels);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   const value = useMemo(
-    () => ({ density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs, navPanelCollapsed, setNavPanelCollapsed }),
-    [density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs, navPanelCollapsed, setNavPanelCollapsed]
+    () => ({
+      density,
+      setDensity,
+      listColumns,
+      setListColumns,
+      documentTabs,
+      setDocumentTabs,
+      navPanelCollapsed,
+      setNavPanelCollapsed,
+      navLabels,
+      setNavLabels,
+    }),
+    [density, setDensity, listColumns, setListColumns, documentTabs, setDocumentTabs, navPanelCollapsed, setNavPanelCollapsed, navLabels, setNavLabels]
   );
   return (
     <UserPrefsContext.Provider value={value}>

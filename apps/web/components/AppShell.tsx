@@ -56,6 +56,7 @@ export async function AppShell({ children, articleOverview = true }: AppShellPro
         initialListColumns={settings.listColumns}
         initialDocumentTabs={settings.documentTabs}
         initialNavPanelCollapsed={settings.navPanelCollapsed}
+        initialNavLabels={settings.navLabels}
       >
         {/* The menu inside too: its Favoriter → Ändra offers shortcuts by the user's access. */}
         <PermissionsProvider role={user.role} permissions={user.permissions}>

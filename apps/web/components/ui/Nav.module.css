@@ -12,13 +12,14 @@
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   z-index: 20;
+  --rail-width: 60px;
 }
 
 .rail {
   list-style: none;
   margin: 0;
   padding: 10px 8px;
-  width: 60px;
+  width: var(--rail-width);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -65,9 +66,54 @@
   width: 20px;
   height: 20px;
 }
-/* The name is for the drawer; on the rail the tooltip (title) carries it. */
+/* The name is the tooltip (title) — unless the user shows the names. */
 .railLabel {
   display: none;
+}
+
+/* Namn under ikonerna (the user's setting navLabels, 2026-11-25): the name
+   under the icon in one of three sizes. The rail is as wide as the longest
+   single word needs (Tillverkning) — a name of two words may wrap, a word is
+   never broken — and the entries sit close, so the small size fits a
+   768 px high window; on a lower one the rail scrolls, as it does without
+   the names. */
+.sidebar[data-rail-labels="small"] {
+  --rail-width: 76px;
+  --rail-label-size: 10.5px;
+}
+.sidebar[data-rail-labels="normal"] {
+  --rail-width: 86px;
+  --rail-label-size: 12px;
+}
+.sidebar[data-rail-labels="large"] {
+  --rail-width: 98px;
+  --rail-label-size: 13.5px;
+}
+.sidebar[data-rail-labels] .rail {
+  padding: 8px 6px;
+  gap: 2px;
+}
+.sidebar[data-rail-labels] .railItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  min-height: 40px;
+  padding: 5px 2px 4px;
+}
+.sidebar[data-rail-labels] .railItem :global(svg) {
+  flex-shrink: 0;
+}
+.sidebar[data-rail-labels] .railLabel {
+  display: block;
+  max-width: 100%;
+  font-family: var(--font-body);
+  font-size: var(--rail-label-size);
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .panel {
@@ -226,8 +272,7 @@
 }
 
 /* Below tablet width rail and panel are an off-canvas drawer, toggled by the
-   hamburger; the panel always shows there (no folding), and the rail shows
-   the names. */
+   hamburger; the panel always shows there (no folding). */
 @media (max-width: 1024px) {
   .menuButton {
     display: flex;
@@ -275,7 +320,7 @@
   }
 
   .panel {
-    width: min(236px, calc(100vw - 76px));
+    width: min(236px, calc(100vw - var(--rail-width) - 16px));
   }
 
   .collapseButton {

@@ -1,6 +1,7 @@
 import { apiGet } from "./api";
 import type { ListColumns, TableDensity } from "./listColumns";
 import { hasFavoritesCard } from "./overviewCards";
+import { navLabelsOf, type NavLabels } from "./navLabels";
 
 // Favoriter: the user's own shortcuts at the top of the sidebar, stored as
 // the personal setting `favorites` (GET/PATCH /me/settings, replaced as a
@@ -50,6 +51,8 @@ export interface ShellSettings extends FavoritesState {
   documentTabs: boolean;
   // Programramen: the module panel folded away; default off.
   navPanelCollapsed: boolean;
+  // Namn under ikonerna; default off.
+  navLabels: NavLabels;
 }
 
 export async function loadShellSettings(cookieHeader: string | undefined): Promise<ShellSettings> {
@@ -62,6 +65,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
     listColumns: {},
     documentTabs: true,
     navPanelCollapsed: false,
+    navLabels: "off",
   };
   if (!cookieHeader) return fallback;
   try {
@@ -74,6 +78,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
       listColumns?: ListColumns;
       documentTabs?: boolean;
       navPanelCollapsed?: boolean;
+      navLabels?: string;
     }>("/api/v1/me/settings", cookieHeader);
     return {
       favorites: settings.favorites ?? null,
@@ -84,6 +89,7 @@ export async function loadShellSettings(cookieHeader: string | undefined): Promi
       listColumns: settings.listColumns ?? {},
       documentTabs: settings.documentTabs !== false,
       navPanelCollapsed: settings.navPanelCollapsed === true,
+      navLabels: navLabelsOf(settings.navLabels),
     };
   } catch {
     return fallback;

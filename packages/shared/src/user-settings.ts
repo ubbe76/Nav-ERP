@@ -83,6 +83,14 @@ export const TABLE_DENSITIES = ["normal", "compact"] as const;
 export type TableDensity = (typeof TABLE_DENSITIES)[number];
 export const tableDensitySchema = z.enum(TABLE_DENSITIES);
 
+// Namn under ikonerna (2026-11-25, the user's wish): the main menu's icon
+// rail shows each entry's name under its icon, in one of three text sizes;
+// "off" (the default) keeps the bare icons with the name as a tooltip. The
+// web mirror is apps/web/lib/navLabels.ts.
+export const NAV_LABEL_SIZES = ["off", "small", "normal", "large"] as const;
+export type NavLabels = (typeof NAV_LABEL_SIZES)[number];
+export const navLabelsSchema = z.enum(NAV_LABEL_SIZES);
+
 // Kolumner (punkt 6): per list page (keyed by its path, e.g.
 // "/forsaljning/ordrar") the columns the user hid and the widths they dragged
 // (content px). Column keys are the web table's own `key`s; one that no
@@ -148,6 +156,8 @@ export const userSettingsSchema = z.object({
   // Programramen: the module panel beside the icon rail folded away (only
   // the icons show). Default false.
   navPanelCollapsed: z.boolean(),
+  // Namn under ikonerna; default off.
+  navLabels: navLabelsSchema,
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 
