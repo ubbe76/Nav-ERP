@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DURATION_HINT, durationFromHours, durationPattern, formatDuration, hoursFromDuration, keypadPlaceholder, parseDuration, readAbsenceMinutes } from "../../web/lib/duration";
+import { DURATION_HINT, durationFromHours, durationPattern, formatDuration, hoursFromDuration, parseDuration, readAbsenceMinutes, withAutoColon } from "../../web/lib/duration";
 
-// Tidsfälten som tt:mm (2026-11-22, användarens val): t:mm, or a bare
-// number of minutes.
+// Tidsfälten som tt:mm (2026-11-22, användarens val): t:mm; digits alone
+// with the last two as the minutes and the colon filled in while typed
+// (2026-11-25), one or two digits alone are minutes.
 describe("tidsfälten (tt:mm)", () => {
   it("reads t:mm and bare minutes", () => {
     expect(parseDuration("1:30")).toBe(90);
@@ -12,10 +13,16 @@ describe("tidsfälten (tt:mm)", () => {
     expect(parseDuration("7.30")).toBe(450);
     expect(parseDuration("7,30")).toBe(450);
     expect(parseDuration(" 0:05 ")).toBe(5);
-    // A bare number is minutes (the user's choice), not hours.
+    // One or two digits are minutes (the user's choice), not hours.
     expect(parseDuration("90")).toBe(90);
     expect(parseDuration("8")).toBe(8);
     expect(parseDuration("0")).toBe(0);
+    // Three digits or more: the last two are the minutes (2026-11-25).
+    expect(parseDuration("130")).toBe(90);
+    expect(parseDuration("0130")).toBe(90);
+    expect(parseDuration("1000")).toBe(600);
+    expect(parseDuration("4000")).toBe(2400);
+    expect(parseDuration("123456")).toBe(1234 * 60 + 56);
   });
 
   it("refuses what could be read two ways, and what is not a time", () => {
@@ -24,6 +31,9 @@ describe("tidsfälten (tt:mm)", () => {
     expect(parseDuration("1:5")).toBeNull();
     expect(parseDuration("1:60")).toBeNull();
     expect(parseDuration("1:30:00")).toBeNull();
+    // 1:90 is no time, and seven digits are more hours than a field takes.
+    expect(parseDuration("190")).toBeNull();
+    expect(parseDuration("1234567")).toBeNull();
     expect(parseDuration("")).toBeNull();
     expect(parseDuration("abc")).toBeNull();
     expect(parseDuration("1 h")).toBeNull();
@@ -47,7 +57,7 @@ describe("tidsfälten (tt:mm)", () => {
   });
 
   it("the input's pattern accepts exactly what the parser reads", () => {
-    const samples = ["1:30", "01:30", ":45", "7.30", "7,30", " 0:05 ", "90", "8", "0", "4,5", "1:5", "1:60", "", "abc", "1 h", "-1:30", "−45", "- 1:30", "1:30:00", "1234567"];
+    const samples = ["1:30", "01:30", ":45", "7.30", "7,30", " 0:05 ", "90", "8", "0", "130", "0130", "123456", "190", "4,5", "1:5", "1:60", "", "abc", "1 h", "-1:30", "−45", "-130", "- 1:30", "1:30:00", "1234567"];
     for (const signed of [false, true]) {
       const pattern = new RegExp(`^(?:${durationPattern(signed)})$`, "v");
       for (const sample of samples) {
@@ -69,18 +79,36 @@ describe("tidsfälten (tt:mm)", () => {
     expect(hoursFromDuration("0:02", "0.01")).toBe(0.03);
   });
 
-  it("a touch screen's example shows the comma its keypad has, and reads the same", () => {
-    expect(keypadPlaceholder("tt:mm")).toBe("t.ex. 1,30");
-    expect(keypadPlaceholder("t.ex. 1:30")).toBe("t.ex. 1,30");
-    expect(keypadPlaceholder("t.ex. 40:00")).toBe("t.ex. 40,00");
-    expect(keypadPlaceholder("t.ex. 0:05")).toBe("t.ex. 0,05");
-    // A value shown as a default is not an example to rewrite.
-    expect(keypadPlaceholder("Systemstandard: 1:22")).toBe("Systemstandard: 1:22");
-    for (const example of ["1:30", "40:00", "0:05", "8:00"]) {
-      const comma = keypadPlaceholder(`t.ex. ${example}`).replace("t.ex. ", "");
-      expect(parseDuration(comma)).toBe(parseDuration(example));
-    }
-    expect(DURATION_HINT).toContain("1,30");
+  it("puts the colon in while digits are typed", () => {
+    // Typed digit by digit on the phone's keypad, which has no colon.
+    const typed = (keys: string, from = "") => [...keys].reduce((shown, key) => withAutoColon(shown + key, shown), from);
+    expect(typed("1")).toBe("1");
+    expect(typed("13")).toBe("13");
+    expect(typed("130")).toBe("1:30");
+    expect(typed("0130")).toBe("01:30");
+    expect(typed("1305")).toBe("13:05");
+    expect(typed("4000")).toBe("40:00");
+    // What it shows reads as what was typed.
+    for (const keys of ["8", "90", "130", "0130", "1305", "4000"]) expect(parseDuration(typed(keys))).toBe(parseDuration(keys));
+    // A backspace is left as it is, so the last digit can be retyped.
+    expect(withAutoColon("13:0", "13:05")).toBe("13:0");
+    expect(withAutoColon("13:08", "13:0")).toBe("13:08");
+    expect(withAutoColon("1:3", "1:30")).toBe("1:3");
+    // Deleting the colon alone puts it back; a digit added moves it.
+    expect(withAutoColon("130", "1:30")).toBe("1:30");
+    expect(withAutoColon("12:30", "1:30")).toBe("12:30");
+    expect(withAutoColon("1:230", "1:30")).toBe("12:30");
+    // A separator typed by hand is left as typed until the field is left.
+    expect(typed("1:30")).toBe("1:30");
+    expect(typed("7,30")).toBe("7,30");
+    expect(typed("7.30")).toBe("7.30");
+    expect(typed("1:")).toBe("1:");
+    // A sign stays in front (an ATF adjustment), and a cleared field is empty.
+    expect(typed("-130")).toBe("-1:30");
+    expect(typed("−")).toBe("−");
+    expect(withAutoColon("", "1:30")).toBe("");
+    expect(withAutoColon(" 130 ", "")).toBe("1:30");
+    expect(DURATION_HINT).toContain("130");
   });
 
   it("an absence is 0:01–24:00", () => {

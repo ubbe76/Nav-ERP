@@ -53,7 +53,7 @@ När **Tillåt ATF-uttag via schemat** är på (under [Lön, PAXml & schema](#lo
 
 ### OB-tillägg
 
-OB-tillägg (ersättning för obekväm arbetstid) definierar tidsfönster som ger ett lönetillägg utöver ordinarie arbetstid. Varje regel har **Kod**, **Namn**, **Dagtyp** (Vardag, Lördag, Söndag eller Helgdag — en helgdag räknas alltid som Helgdag, oavsett veckodag), **Från**/**Till** (klockslag i 24-timmarsformat) och **PAXml-kod**.
+OB-tillägg (ersättning för obekväm arbetstid) definierar tidsfönster som ger ett lönetillägg utöver ordinarie arbetstid. Varje regel har **Kod**, **Namn**, **Dagtyp** (Vardag, Lördag, Söndag eller Helgdag — en helgdag räknas alltid som Helgdag, oavsett veckodag), **Från**/**Till** (klockslag i 24-timmarsformat; kolonet fylls i medan du skriver, så `1800` blir 18:00) och **PAXml-kod**.
 
 Ett tidsfönster får inte gå över midnatt, och **Till** 00:00 betyder midnatt (dygnets slut). Ett OB-tillägg som ska gälla natten mot nästa dag läggs därför upp som två rader, t.ex. 22:00–00:00 och 00:00–06:00, och 00:00–00:00 gäller hela dygnet. En äldre regel som slutar 23:59 ger ingen OB för den sista minuten före midnatt — ändra **Till** till 00:00.
 
