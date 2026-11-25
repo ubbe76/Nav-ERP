@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -9,6 +9,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { Field, Input, Select, Toggle } from "../ui/Field";
+import { ClockInput } from "../ui/ClockInput";
 import { apiFetch } from "../../lib/api";
 import {
   SCHEDULE_BREAK_TYPE_LABELS,
@@ -53,63 +54,6 @@ export function netMinutes(schedule: { startTime: string; endTime: string; break
 
 export function formatHours(minutes: number) {
   return `${(minutes / 60).toLocaleString("sv-SE", { maximumFractionDigits: 2 })} h`;
-}
-
-// Normalize a loosely typed clock time to "HH:MM": "7" → "07:00",
-// "730"/"7:30" → "07:30", "1630" → "16:30". Returns null when unparseable.
-function normalizeClockTime(raw: string): string | null {
-  const cleaned = raw.trim().replace(/[.,]/g, ":");
-  let hours: number;
-  let minutes: number;
-  if (cleaned.includes(":")) {
-    const [h = "", m = ""] = cleaned.split(":");
-    if (!/^\d{1,2}$/.test(h) || !/^\d{0,2}$/.test(m)) return null;
-    hours = Number(h);
-    minutes = m === "" ? 0 : Number(m.padEnd(2, "0"));
-  } else if (/^\d{1,4}$/.test(cleaned)) {
-    if (cleaned.length <= 2) {
-      hours = Number(cleaned);
-      minutes = 0;
-    } else {
-      hours = Number(cleaned.slice(0, -2));
-      minutes = Number(cleaned.slice(-2));
-    }
-  } else {
-    return null;
-  }
-  if (hours > 23 || minutes > 59) return null;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-// 24-hour time field. The native <input type="time"> renders AM/PM when the
-// browser's OS locale says so — a text input keeps the register 24-hour
-// everywhere. Free-form typing is normalized on blur; the pattern catches
-// leftovers on submit.
-function ClockInput({
-  value,
-  onValueChange,
-  ...props
-}: { value: string; onValueChange: (value: string) => void } & Omit<
-  InputHTMLAttributes<HTMLInputElement>,
-  "value" | "onChange" | "type" | "pattern" | "size"
->) {
-  return (
-    <Input
-      {...props}
-      type="text"
-      inputMode="numeric"
-      placeholder="HH:MM"
-      maxLength={5}
-      pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
-      title="Klockslag i 24-timmarsformat, t.ex. 06:30 eller 16:00"
-      value={value}
-      onChange={(e) => onValueChange(e.target.value)}
-      onBlur={(e) => {
-        const normalized = normalizeClockTime(e.target.value);
-        if (normalized && normalized !== value) onValueChange(normalized);
-      }}
-    />
-  );
 }
 
 export function SchedulesPageClient({

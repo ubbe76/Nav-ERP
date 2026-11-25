@@ -251,10 +251,11 @@ Där en artikel ska väljas (orderrader, tillverkningsorder, struktur) finns en 
 
 Fält där du rapporterar eller anger en tid fylls i som timmar och minuter, **tt:mm**: `1:30` är en och en halv timme och `40:00` fyrtio timmar. Det gäller tidrapporter, frånvaro, paus, ATF, tiden på tillverkningsorderns **Rapportera**, resursens kapacitet per dag och inställningarna under Personal & lön. Fälten har **(tt:mm)** i namnet.
 
-- Ett tal utan kolon är **minuter**: `90` blir 1:30 och `8` blir 0:08.
-- Punkt och komma fungerar också mellan timmar och minuter (`7.30`, `7,30`), men minuterna skrivs alltid med två siffror, så `4,5` godtas inte.
-- På mobilen och surfplattan öppnar tidsfälten sifferknappsatsen, som inte har något kolon. Skriv kommat i stället, `1,30`. Exemplet i fältet visar det, t.ex. *t.ex. 1,30*.
+- Skriv bara siffrorna, så fylls kolonet i medan du skriver: de två sista siffrorna är minuterna. `130` blir 1:30, `0130` blir 01:30 och `4000` blir 40:00. Det räcker alltså med sifferknappsatsen på mobilen och surfplattan, som inte har något kolon.
+- En eller två siffror är **minuter**: `90` blir 1:30 och `8` blir 0:08.
+- Du kan också skriva kolonet själv, eller punkt eller komma (`7.30`, `7,30`), men minuterna skrivs alltid med två siffror, så `4,5` godtas inte.
 - När du lämnar fältet skrivs tiden om till tt:mm, så att du ser hur den har lästs innan du sparar.
+- Klockslagen i scheman och OB-tillägg fungerar likadant: `0730` blir 07:30 medan du skriver. Där är en eller två siffror hela timmar, så `7` blir 07:00.
 
 Ställtid, stycktid och cykeltid i beredningen har kvar sina enheter (min, sek eller st/h), som står vid fälten. Listor och summor visar tiden som tidigare, i timmar med decimaler.
 

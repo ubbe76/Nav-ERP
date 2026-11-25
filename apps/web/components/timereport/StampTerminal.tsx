@@ -10,7 +10,7 @@ import { FileText } from "lucide-react";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage, shortageList } from "../../lib/errorMessages";
-import { formatDuration, parseDuration } from "../../lib/duration";
+import { formatDuration, parseDuration, withAutoColon } from "../../lib/duration";
 import { othersStampingOnOperation, stampRestSuggestion } from "../../lib/restSuggestion";
 import type {
   AtfStatus,
@@ -1509,7 +1509,8 @@ export function StampTerminal({
                 autoComplete="off"
                 placeholder="t.ex. 8:00"
                 value={atfHours}
-                onChange={(e) => setAtfHours(e.target.value)}
+                // The colon fills itself in ("800" shows 8:00), as DurationInput.
+                onChange={(e) => setAtfHours(withAutoColon(e.target.value, atfHours))}
                 onBlur={(e) => {
                   // Show what was understood ("90" → 1:30), as DurationInput.
                   const minutes = parseDuration(e.target.value);

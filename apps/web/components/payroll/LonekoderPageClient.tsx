@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type FormEvent, type InputHTMLAttributes } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Field, Input, Select, Toggle } from "../ui/Field";
+import { ClockInput } from "../ui/ClockInput";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import {
@@ -21,63 +22,6 @@ import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
 const TABS = ["Frånvarokoder", "OB-tillägg", "Avvikelseorsaker"] as const;
 export type Tab = (typeof TABS)[number];
-
-// Same free-form "HH:MM" normalization as SchedulesPageClient's ClockInput
-// (apps/web/components/timereport/SchedulesPageClient.tsx) — that helper
-// isn't exported, so it's duplicated here rather than reaching across
-// module boundaries for a private function.
-function normalizeClockTime(raw: string): string | null {
-  const cleaned = raw.trim().replace(/[.,]/g, ":");
-  let hours: number;
-  let minutes: number;
-  if (cleaned.includes(":")) {
-    const [h = "", m = ""] = cleaned.split(":");
-    if (!/^\d{1,2}$/.test(h) || !/^\d{0,2}$/.test(m)) return null;
-    hours = Number(h);
-    minutes = m === "" ? 0 : Number(m.padEnd(2, "0"));
-  } else if (/^\d{1,4}$/.test(cleaned)) {
-    if (cleaned.length <= 2) {
-      hours = Number(cleaned);
-      minutes = 0;
-    } else {
-      hours = Number(cleaned.slice(0, -2));
-      minutes = Number(cleaned.slice(-2));
-    }
-  } else {
-    return null;
-  }
-  if (hours > 23 || minutes > 59) return null;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-// 24-hour time field, same as SchedulesPageClient's — free-form typing is
-// normalized on blur, the pattern catches leftovers on submit.
-function ClockInput({
-  value,
-  onValueChange,
-  ...props
-}: { value: string; onValueChange: (value: string) => void } & Omit<
-  InputHTMLAttributes<HTMLInputElement>,
-  "value" | "onChange" | "type" | "pattern" | "size"
->) {
-  return (
-    <Input
-      {...props}
-      type="text"
-      inputMode="numeric"
-      placeholder="HH:MM"
-      maxLength={5}
-      pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
-      title="Klockslag i 24-timmarsformat, t.ex. 06:30 eller 16:00"
-      value={value}
-      onChange={(e) => onValueChange(e.target.value)}
-      onBlur={(e) => {
-        const normalized = normalizeClockTime(e.target.value);
-        if (normalized && normalized !== value) onValueChange(normalized);
-      }}
-    />
-  );
-}
 
 // Shown on both create/edit modals — free-text PAXml codes have no
 // server-side allowlist, so a mistyped code only surfaces as an invalid

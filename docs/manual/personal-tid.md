@@ -12,7 +12,7 @@ Personalregistret och personalkortet finns i menyn **Personal & lön → Anstäl
 
 ### Dagsscheman
 
-Ett dagsschema är en namngiven arbetsdag: **kod**, namn, **starttid** och **sluttid** (24-timmarsformat HH:MM) samt **avbrott** däremellan. Varje avbrott har typ:
+Ett dagsschema är en namngiven arbetsdag: **kod**, namn, **starttid** och **sluttid** (24-timmarsformat HH:MM) samt **avbrott** däremellan. Kolonet i klockslagen fylls i medan du skriver: `0730` blir 07:30 och `1615` blir 16:15, och en eller två siffror är hela timmar (`7` blir 07:00). Varje avbrott har typ:
 
 - **Rast** — obetald, räknas bort från nettotiden (t.ex. lunch).
 - **Paus** — betald, ingår i nettotiden (t.ex. fikapaus).
