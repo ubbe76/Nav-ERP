@@ -5,6 +5,7 @@ import type { DocumentLanguage } from "./documentLanguage";
 import type { MailSignatureCompanyField } from "./mailSignature";
 import type { Permission } from "./permissions";
 import type { MarkupLevel } from "./markupLevels";
+import type { TerminalPrintWorkOrder } from "./terminalPrint";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
 import type {
   BuyerVatNumberProblem,
@@ -3737,6 +3738,8 @@ export interface SystemSettings {
   // Kräv kod i stämpelterminalen: the terminal asks for the employee's own
   // four-digit code after the anställningsnummer (off = exactly as before).
   terminalPinRequired: boolean;
+  // Skriv ut arbetsorder och ritning vid instämpling (lib/terminalPrint.ts).
+  terminalPrintWorkOrder: TerminalPrintWorkOrder;
   // Print active article/drawing revisions per row on external documents.
   showRevisionsOnDocuments: boolean;
   // Documents that print the article's Extra benämning under the name, in

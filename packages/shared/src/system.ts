@@ -17,6 +17,16 @@ export type ManufacturingMaterialShortage = z.infer<typeof manufacturingMaterial
 export const palletCardCodeSchema = z.enum(["none", "barcode", "qr"]);
 export type PalletCardCode = z.infer<typeof palletCardCodeSchema>;
 
+// Skriv ut arbetsorder och ritning i terminalen: when the stamp terminal
+// prints the TO printout (the drawings ride along as extra pages) by itself
+// after a stamp-in — "manual" (never by itself: the behaviour before the
+// setting existed and the default when unset), the order's first stamp-in
+// ("first_operation") or the first stamp-in on each operation
+// ("every_operation"). The terminal's Skriv ut arbetsorder button works in
+// every mode. apps/web/lib/terminalPrint.ts mirrors the values.
+export const terminalPrintWorkOrderSchema = z.enum(["manual", "first_operation", "every_operation"]);
+export type TerminalPrintWorkOrder = z.infer<typeof terminalPrintWorkOrderSchema>;
+
 export const updateCompanyInfoSchema = z
   .object({
     name: z.string().min(1).max(255).optional(),
@@ -118,6 +128,8 @@ const systemSettingsFieldsSchema = z.object({
     // terminal account's calls for an employee without the proof that code
     // gives (timereport.md). Off = exactly as before.
     terminalPinRequired: z.boolean().optional(),
+    // Skriv ut arbetsorder och ritning i terminalen — see the schema above.
+    terminalPrintWorkOrder: terminalPrintWorkOrderSchema.optional(),
     // PAXml löneart codes used by the payroll export — must match the
     // payroll system's own löneartstabell. An empty string is accepted (it
     // means "clear the override") and getSettings() decodes it back to the

@@ -9,6 +9,7 @@ import type {
   MailSignatureCompanyField,
   ManufacturingMaterialShortage,
   PalletCardCode,
+  TerminalPrintWorkOrder,
   UpdateCompanyCarrierInput,
   UpdateCompanyInfoInput,
   UpdateNumberSeriesInput,
@@ -201,6 +202,13 @@ const PALLET_CARD_CODE_KEY = "pallet_card_code";
 const PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY = "pallet_card_allow_quantity_mismatch";
 function decodePalletCardCode(raw: string | null | undefined): PalletCardCode {
   return raw === "barcode" || raw === "qr" ? raw : "none";
+}
+// Skriv ut arbetsorder och ritning i terminalen. "manual" = the terminal
+// never prints by itself, which is what it did before the setting existed —
+// an absent or unknown value changes nothing.
+const TERMINAL_PRINT_WORK_ORDER_KEY = "terminal_print_work_order";
+function decodeTerminalPrintWorkOrder(raw: string | null | undefined): TerminalPrintWorkOrder {
+  return raw === "first_operation" || raw === "every_operation" ? raw : "manual";
 }
 
 function flattenDeliveryDefaults(d: DeliveryDefaults) {
@@ -401,6 +409,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       terminalOvertimeChoice: get(TERMINAL_OVERTIME_CHOICE_KEY) === "true",
       timeKindSplit: get(TIME_KIND_SPLIT_KEY) === "true",
       terminalPinRequired: get(TERMINAL_PIN_REQUIRED_KEY) === "true",
+      terminalPrintWorkOrder: decodeTerminalPrintWorkOrder(get(TERMINAL_PRINT_WORK_ORDER_KEY)),
       paxmlCodeWorked: codeSetting(get(PAXML_CODE_WORKED_KEY), "TID"),
       paxmlCodeOvertime: codeSetting(get(PAXML_CODE_OVERTIME_KEY), "ÖT1"),
       paxmlCodeOvertimeOffSchedule: codeSetting(get(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY), "ÖT2"),
@@ -817,6 +826,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         }
         if (input.terminalPinRequired !== undefined) {
           await set(TERMINAL_PIN_REQUIRED_KEY, String(input.terminalPinRequired));
+        }
+        if (input.terminalPrintWorkOrder !== undefined) {
+          await set(TERMINAL_PRINT_WORK_ORDER_KEY, input.terminalPrintWorkOrder);
         }
         if (input.paxmlCodeWorked !== undefined) await set(PAXML_CODE_WORKED_KEY, input.paxmlCodeWorked);
         if (input.paxmlCodeOvertime !== undefined) await set(PAXML_CODE_OVERTIME_KEY, input.paxmlCodeOvertime);

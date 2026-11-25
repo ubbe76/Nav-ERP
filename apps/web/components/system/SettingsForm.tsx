@@ -12,6 +12,12 @@ import {
   type ExtraDescriptionDocument,
   type SystemSettings,
 } from "../../lib/types";
+import {
+  TERMINAL_PRINT_WORK_ORDER_LABELS,
+  TERMINAL_PRINT_WORK_ORDER_MODES,
+  terminalPrintWorkOrderOf,
+  type TerminalPrintWorkOrder,
+} from "../../lib/terminalPrint";
 import styles from "./SettingsForm.module.css";
 import { apiErrorMessage } from "../../lib/errorMessages";
 
@@ -55,6 +61,7 @@ export function SettingsForm({
     restSuggestStamp: settings.restSuggestStamp,
   });
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
+  const [printWorkOrder, setPrintWorkOrder] = useState(settings.terminalPrintWorkOrder);
   const [palletMismatch, setPalletMismatch] = useState(settings.palletCardAllowQuantityMismatch);
   const [batchTracking, setBatchTracking] = useState(settings.batchTrackingEnabled);
   const [multipleWarehouses, setMultipleWarehouses] = useState(settings.multipleWarehouses);
@@ -207,6 +214,11 @@ export function SettingsForm({
   async function changeMaterialShortage(next: SystemSettings["manufacturingMaterialShortage"]) {
     const updated = await save({ manufacturingMaterialShortage: next });
     if (updated) setMaterialShortage(updated.manufacturingMaterialShortage);
+  }
+
+  async function changePrintWorkOrder(next: TerminalPrintWorkOrder) {
+    const updated = await save({ terminalPrintWorkOrder: next });
+    if (updated) setPrintWorkOrder(updated.terminalPrintWorkOrder);
   }
 
   async function togglePalletMismatch() {
@@ -502,6 +514,31 @@ export function SettingsForm({
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Skriv ut arbetsorder och ritning vid instämpling</div>
+          <div className={styles.description}>
+            När stämpelterminalen skriver ut arbetsordern av sig själv — tillverkningsordern med ritningarna som extra
+            sidor, samma utskrift som Skriv ut TO. Första operationen: när någon stämplar in på ordern första gången.
+            Alla operationer: första gången någon stämplar in på varje operation. Manuellt: bara med knappen Skriv ut
+            arbetsorder i terminalen, som finns i alla lägena.
+          </div>
+        </div>
+        <div style={{ flexShrink: 0, width: 180 }}>
+          <Select
+            aria-label="Skriv ut arbetsorder och ritning vid instämpling"
+            value={printWorkOrder}
+            disabled={pending}
+            onChange={(e) => changePrintWorkOrder(terminalPrintWorkOrderOf(e.target.value))}
+          >
+            {TERMINAL_PRINT_WORK_ORDER_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {TERMINAL_PRINT_WORK_ORDER_LABELS[mode]}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
       <div className={styles.row}>
         <div className={styles.texts}>
