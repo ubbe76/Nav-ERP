@@ -79,9 +79,23 @@ Välj en av anledningarna (stora knappar) och skriv vid behov en **Kommentar (va
 
    Räcker inte lagersaldot för det material utstämplingen skulle dra kan terminalen, beroende på systeminställningen **Materialbrist vid rapportering**, fråga "Det saknas ingående delar: … Rapportera ändå?" (**Rapportera ändå** stämplar ut och rapporterar; avbryter du står du kvar på utstämplingen och ingenting är sparat) eller neka utstämplingen med "Det finns inte tillräckligt med ingående delar: …". Du är då fortfarande instämplad — be arbetsledaren fylla på lagret. Se [Tillverkning](/hjalp/tillverkning#materialbrist-vid-rapportering).
 
-   **Ritning:** under varje pågående stämpling i hemvyn och i utstämplingen finns en knapp per ritning, t.ex. **Ritning R-1002-SVETS rev A** (med en dokumentikon) — operationens valda ritningar och filer, eller alla orderns ritningar och artikelns filer när operationen inte har valt något. En fil utan ritning visas med sitt filnamn. Ritningen är den revision ordern byggs efter (se [Tillverkning](/hjalp/tillverkning#ritningar-och-revisioner)) och öppnas i en ny flik, där den kan skrivas ut. Finns ingen ritning visas ingen knapp.
+   **Arbetsorder och ritning:** under varje pågående stämpling i hemvyn och i utstämplingen finns knappen **Skriv ut arbetsorder** (med en skrivarikon, se [Skriv ut arbetsorder](#skriv-ut-arbetsorder)) och en knapp per ritning, t.ex. **Ritning R-1002-SVETS rev A** (med en dokumentikon) — operationens valda ritningar och filer, eller alla orderns ritningar och artikelns filer när operationen inte har valt något. En fil utan ritning visas med sitt filnamn. Ritningen är den revision ordern byggs efter (se [Tillverkning](/hjalp/tillverkning#ritningar-och-revisioner)) och öppnas i en ny flik, där den kan skrivas ut. Finns ingen ritning visas ingen ritningsknapp.
 
    Blev en utstämpling fel — fel antal, fel operation eller fel order — ångrar arbetsledaren den med **Ångra** under **Rapporteringar** på tillverkningsorderns detaljsida; antalen, materialet, inleveransen och stämplingens tid backas då i ett svep (se [Tillverkning](/hjalp/tillverkning#rapporteringar-och-angra)).
+
+### Skriv ut arbetsorder
+
+Arbetsordern är tillverkningsordern med ritningarna som extra sidor — samma utskrift som **Skriv ut TO** på tillverkningsordern (se [Tillverkning](/hjalp/tillverkning#skriv-ut-to)). Knappen **Skriv ut arbetsorder** under varje pågående stämpling skriver ut den när du vill. Knappen visar **Skriver ut…** medan utskriften hämtas.
+
+Inställningen **Skriv ut arbetsorder och ritning vid instämpling** (System → Inställningar, se [Inställningar](/hjalp/system#installningar)) avgör om terminalen också skriver ut arbetsordern av sig själv när du trycker **Starta valda** (eller **Starta ställ**/**Starta produktion**):
+
+- **Första operationen** — när någon stämplar in på ordern första gången, oftast på orderns första operation. Arbetsordern följer sedan med godset genom verkstaden.
+- **Alla operationer** — första gången någon stämplar in på varje operation.
+- **Manuellt** — aldrig av sig själv, bara med knappen. Det är förvalet.
+
+En andra instämpling på samma operation — en kollega, en ny dag eller **Ställ klart** — skriver aldrig ut igen. Startar du flera ordrar med samma **Starta valda** skrivs deras arbetsordrar ut i en enda utskrift, och en order skrivs bara ut en gång även om du startar flera av dess operationer. Utskriften görs efter instämplingen, så en instämpling som misslyckas skriver inte ut något.
+
+Webbläsaren visar sin vanliga utskriftsdialog, där du väljer skrivare och trycker **Skriv ut** (se [Utskrifter](/hjalp/komma-igang#utskrifter)). Ska utskriften gå direkt till skrivaren utan dialog startar du Chrome eller Edge på terminaldatorn med kioskutskrift (flaggan `--kiosk-printing`), eller sätter `print.always_print_silent` till `true` under `about:config` i Firefox; då används datorns standardskrivare. På en iPad, en iPhone, en Android-enhet och i Safari kan terminalen inte skriva ut av sig själv. Där står det *Arbetsordern skrivs inte ut av sig själv på den här enheten — tryck Skriv ut arbetsorder.*, och knappen öppnar PDF:en i en ny flik.
 
 ### Ställ och produktion
 

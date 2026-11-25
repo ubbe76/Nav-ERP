@@ -130,6 +130,15 @@ async function failIfNotOk(res: Response, fallback: string): Promise<void> {
   throw apiErrorFromBody(res.status, errorBody, fallback);
 }
 
+// A print nobody clicked (the stamp terminal's work order after a stamp-in)
+// only where the PDF prints from the invisible iframe: the tab route needs a
+// tab opened by the click itself — one opened after the stamp's request is
+// stopped by the popup blocker — and a PDF tab left open on a shared terminal
+// is the next person's screen. False ⇒ the caller asks for the button.
+export function canPrintUnattended(): boolean {
+  return currentStrategy() === "iframe";
+}
+
 // Call straight from the click handler, before any other await: the new tab of
 // the fallback is opened synchronously so popup blockers let it through.
 export async function printPdf(href: string, fallback = "Kunde inte skapa PDF:en"): Promise<void> {

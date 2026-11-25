@@ -423,6 +423,8 @@ När ordern frisläpps sparas vilka revisioner den byggs efter: artikelns aktiva
 - Raden med revisionerna ordern byggs efter under artikeln, t.ex. *Revision B · Ritningar: R-1001 rev 2, R-1002-SVETS rev A* (se [Ritningar och revisioner](#ritningar-och-revisioner)), och under en operation med valda ritningar eller filer raden *Ritning: R-1002-SVETS rev A · Fil: monteringsanvisning.pdf*.
 - **Ritningarna** läggs sist i dokumentet — PDF:er som extra sidor, JPEG/PNG som en sida var: filerna på de ritningsrevisioner ordern byggs efter och artikelns filer under fliken Filer (se [Artiklar](/hjalp/artiklar#filer)). En äldre revisions fil skrivs inte ut.
 
+I stämpelterminalen heter samma utskrift **Skriv ut arbetsorder**, och terminalen kan skriva ut den av sig själv när någon stämplar in, se [Skriv ut arbetsorder](/hjalp/terminal#skriv-ut-arbetsorder).
+
 Ordern kan skrivas ut i alla statusar. En äldre order som står kvar som **Planerad** har ännu inte fått någon materiallista eller några operationer, och då står det i dokumentet att operationer respektive material saknas (*Inga operationer — ordern är inte frisläppt än.* och *Inget material — ordern är inte frisläppt än.*). En order för en beställningsvara får däremot sina operationer och sitt material redan när den skapas (se [Tillverkningsorder för beställningsvara](#tillverkningsorder-for-bestallningsvara)), så den skrivs ut med dem i alla statusar.
 
 ### Pallkort

@@ -6,12 +6,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useCanOpen } from "../PermissionsProvider";
 import { Wordmark } from "../ui/Wordmark";
-import { FileText } from "lucide-react";
+import { FileText, Printer } from "lucide-react";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage, shortageList } from "../../lib/errorMessages";
 import { formatDuration, parseDuration, withAutoColon } from "../../lib/duration";
 import { othersStampingOnOperation, stampRestSuggestion } from "../../lib/restSuggestion";
+import { canPrintUnattended, printPdf } from "../../lib/printPdf";
+import {
+  printsAtStampIn,
+  workOrderPrintHref,
+  type StampInFacts,
+  type TerminalPrintWorkOrder,
+} from "../../lib/terminalPrint";
 import type {
   AtfStatus,
   AttendanceInputRequiredBody,
@@ -171,6 +178,7 @@ export function StampTerminal({
   timeKindSplit = false,
   restSuggestStamp = false,
   pinRequired: initialPinRequired = false,
+  printWorkOrder = "manual",
 }: {
   employees: EmployeeDirectoryEntry[];
   initialOpenSessions: StampSession[];
@@ -185,6 +193,10 @@ export function StampTerminal({
   // Kräv kod i stämpelterminalen: the code step after the anställningsnummer.
   // Off = no step and no extra request, exactly as before.
   pinRequired?: boolean;
+  // Skriv ut arbetsorder och ritning vid instämpling: Starta valda prints the
+  // work order by itself on the order's or each operation's first stamp-in
+  // (lib/terminalPrint.ts). Manuellt = only the Skriv ut arbetsorder button.
+  printWorkOrder?: TerminalPrintWorkOrder;
 }) {
   const [step, setStep] = useState<Step>({ name: "keypad" });
   // The terminal stays open for days: a number not in the list loaded with
@@ -205,6 +217,10 @@ export function StampTerminal({
   const pinToken = useRef<string | null>(null);
   const pinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busyNow = useRef(false);
+  // Counts the returns to the keypad: an answer that arrives after one (the
+  // work order's print, which runs on after the stamp) is never shown on the
+  // next person's screen.
+  const visit = useRef(0);
   const [openSessions, setOpenSessions] = useState(initialOpenSessions);
   const [openAttendance, setOpenAttendance] = useState(initialOpenAttendance);
   const [error, setError] = useState<string | null>(null);
@@ -297,6 +313,7 @@ export function StampTerminal({
     setShortageQuestion(null);
   }, []);
   const resetToKeypad = useCallback(() => {
+    visit.current += 1;
     setStep({ name: "keypad" });
     setEntry("");
     setPinEntry("");
@@ -877,6 +894,26 @@ export function StampTerminal({
     return finishAtf(employee, pending, { reason, overtimeDisposition });
   }
 
+  // Skriv ut arbetsorder och ritning vid instämpling: the orders a Starta
+  // valda started for the first time (as the setting counts it), printed as
+  // one PDF after the stamps — never before, so a refused stamp prints
+  // nothing. A device that cannot print without a click (the tab route of
+  // lib/printPdf.ts) gets the notice returned here instead; the button by
+  // each work prints. A failure is shown only while the same person is at
+  // the terminal.
+  function printStartedWorkOrders(orderIds: string[]): string | null {
+    const href = workOrderPrintHref(orderIds);
+    if (!href) return null;
+    if (!canPrintUnattended()) {
+      return "Arbetsordern skrivs inte ut av sig själv på den här enheten — tryck Skriv ut arbetsorder.";
+    }
+    const at = visit.current;
+    printPdf(href, "Kunde inte skriva ut arbetsordern").catch((err) => {
+      if (visit.current === at) setError(apiErrorMessage(err, "Kunde inte skriva ut arbetsordern"));
+    });
+    return null;
+  }
+
   // "Starta valda": stamps in every checked operation, one POST per
   // operation. A failure on one doesn't roll back the others — those stay
   // stamped in, and the failed ones stay checked in the operation list so
@@ -895,11 +932,14 @@ export function StampTerminal({
     let moved = false;
     let attendanceStarted = false;
     let reasonPending = attendanceReason;
+    // The orders this batch prints (Skriv ut arbetsorder och ritning vid
+    // instämpling), in the order they were started.
+    const printOrderIds: string[] = [];
     try {
       for (let i = 0; i < operations.length; i++) {
         const operation = operations[i]!;
         try {
-          const res = await employeeFetch<{ attendanceStarted?: boolean }>("/api/v1/stamp-sessions", {
+          const res = await employeeFetch<{ attendanceStarted?: boolean } & StampInFacts>("/api/v1/stamp-sessions", {
             method: "POST",
             body: JSON.stringify({
               employeeId: employee.id,
@@ -913,6 +953,7 @@ export function StampTerminal({
           });
           reasonPending = undefined;
           if (res?.attendanceStarted === true) attendanceStarted = true;
+          if (printsAtStampIn(printWorkOrder, res)) printOrderIds.push(operation.manufacturingOrderId);
         } catch (err) {
           // The stamp would start the attendance and the server wants an
           // answer first: ask, then send this and the remaining ones again.
@@ -943,12 +984,14 @@ export function StampTerminal({
         }
       }
       await refreshQuietly();
+      const printNotice = printStartedWorkOrders(printOrderIds);
       if (failed.length === 0) {
         // Only what was started: a row hidden by Sök/Bara redo was not.
         const started = new Set(operations.map((op) => op.operationId));
         setSelectedOperationIds((prev) => new Set([...prev].filter((id) => !started.has(id))));
         setError(null);
-        if (attendanceStarted) setNotice("Närvaron stämplades in.");
+        const notices = [attendanceStarted ? "Närvaron stämplades in." : null, printNotice].filter((n) => n !== null);
+        if (notices.length > 0) setNotice(notices.join(" "));
         setStep({ name: "home", employee });
       } else {
         // Back to the operation list (also from the deviation step, whose
@@ -1783,7 +1826,7 @@ export function StampTerminal({
               {step.session.packingInstructions && (
                 <div className={styles.packingNote}>📦 {step.session.packingInstructions}</div>
               )}
-              <OperationDrawingLinks orderId={step.session.manufacturingOrderId} operationId={step.session.moOperationId} />
+              <OperationPapers orderId={step.session.manufacturingOrderId} operationId={step.session.moOperationId} />
             </div>
             <OperationProgressTiles
               progress={operationProgress(
@@ -1928,12 +1971,17 @@ export function StampTerminal({
   );
 }
 
-// Ritning (0200): the files the operation is worked from — its chosen
-// drawings, otherwise the order's drawings and loose files, in the revision
-// the order is built from. Each opens in a new tab (the browser's viewer
-// prints it). Nothing is shown when there are none.
-function OperationDrawingLinks({ orderId, operationId }: { orderId: string; operationId: string }) {
+// Skriv ut arbetsorder (every mode of Skriv ut arbetsorder och ritning vid
+// instämpling) and Ritning (0200): the work order is the TO printout with the
+// drawings as extra pages — Skriv ut TO on the TO card — printed from the
+// click (lib/printPdf.ts). The drawing links are the files the operation is
+// worked from — its chosen drawings, otherwise the order's drawings and loose
+// files, in the revision the order is built from — each in a new tab (the
+// browser's viewer prints it).
+function OperationPapers({ orderId, operationId }: { orderId: string; operationId: string }) {
   const [files, setFiles] = useState<DrawingFileMeta[]>([]);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     apiFetch<DrawingFileMeta[]>(`/api/v1/manufacturing-orders/${orderId}/operations/${operationId}/drawings`)
@@ -1945,9 +1993,20 @@ function OperationDrawingLinks({ orderId, operationId }: { orderId: string; oper
       cancelled = true;
     };
   }, [orderId, operationId]);
-  if (files.length === 0) return null;
+  function print() {
+    setPrintError(null);
+    setPrinting(true);
+    // printPdf opens its fallback tab synchronously, before its first await.
+    printPdf(`/api/v1/manufacturing-orders/${orderId}/pdf`, "Kunde inte skriva ut arbetsordern")
+      .catch((err) => setPrintError(apiErrorMessage(err, "Kunde inte skriva ut arbetsordern")))
+      .finally(() => setPrinting(false));
+  }
   return (
     <div className={styles.drawingLinks}>
+      <button type="button" className={`${styles.drawingLink} ${styles.printLink}`} disabled={printing} onClick={print}>
+        <Printer size={20} strokeWidth={2} aria-hidden="true" />
+        {printing ? "Skriver ut…" : "Skriv ut arbetsorder"}
+      </button>
       {files.map((file) => (
         <a
           key={file.id}
@@ -1960,6 +2019,7 @@ function OperationDrawingLinks({ orderId, operationId }: { orderId: string; oper
           {file.drawingNumber ? `Ritning ${file.drawingNumber}${file.revision ? ` rev ${file.revision}` : ""}` : file.filename}
         </a>
       ))}
+      {printError && <p className={styles.printError}>{printError}</p>}
     </div>
   );
 }
@@ -2097,7 +2157,7 @@ function HomeStep({
                   Ställ klart
                 </button>
               )}
-              <OperationDrawingLinks orderId={session.manufacturingOrderId} operationId={session.moOperationId} />
+              <OperationPapers orderId={session.manufacturingOrderId} operationId={session.moOperationId} />
             </div>
           ))}
         </div>

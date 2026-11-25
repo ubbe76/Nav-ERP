@@ -929,6 +929,22 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+/* Skriv ut arbetsorder: a button dressed as the drawing links beside it. */
+.printLink {
+  cursor: pointer;
+}
+.printLink:disabled {
+  cursor: default;
+  color: var(--color-text-secondary);
+}
+.printError {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--status-stopped-text);
+}
 
 /* Meddelanden: the anslagstavla above the keypad (conversations addressed to
    this terminal's account) and an employee's own messages after the

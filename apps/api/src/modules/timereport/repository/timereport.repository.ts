@@ -397,11 +397,32 @@ export function createTimeReportRepository(db: Db) {
             .for("share");
           check({ workCenterId: op.workCenterId, operationStatus: op.status, orderStatus: order?.status ?? null });
         }
+        // Skriv ut arbetsorder och ritning i terminalen: whether this is the
+        // order's / the operation's first stamp-in, read before the insert —
+        // the terminal prints the TO by itself on one of them (the setting
+        // decides which). Two first stamps committing at the same moment can
+        // both answer true and print twice; accepted (harmless).
+        const [earlier] = op
+          ? [
+              ...(await tx.execute<{ on_order: boolean; on_operation: boolean }>(sql`
+                SELECT
+                  EXISTS (
+                    SELECT 1 FROM stamp_sessions s
+                    JOIN mo_operations o ON o.id = s.mo_operation_id
+                    WHERE o.manufacturing_order_id = ${op.manufacturingOrderId}::uuid
+                  ) AS on_order,
+                  EXISTS (SELECT 1 FROM stamp_sessions s WHERE s.mo_operation_id = ${moOperationId}::uuid) AS on_operation`)),
+            ]
+          : [];
         const [row] = await tx
           .insert(stampSessions)
           .values({ employeeId, moOperationId, createdBy, kind, workCenterId: op?.workCenterId ?? null })
           .returning();
-        return row!;
+        return {
+          ...row!,
+          firstStampOnOrder: earlier ? !earlier.on_order : false,
+          firstStampOnOperation: earlier ? !earlier.on_operation : false,
+        };
       });
     },
 

@@ -472,8 +472,10 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
 
   // Batch printout: ?ids=<uuid>,<uuid> → one PDF with the TO printouts
   // (drawings included) back to back. Static segment, never collides with
-  // /:id/pdf below.
-  app.get("/manufacturing-orders/pdf", async (req, reply) => {
+  // /:id/pdf below. The shop-floor read rule like /:id/pdf: the terminal
+  // prints every order a Starta valda started in one go (Skriv ut
+  // arbetsorder och ritning i terminalen).
+  app.get("/manufacturing-orders/pdf", { config: { access: MO_READ } }, async (req, reply) => {
     const { ids } = idListQuerySchema.parse(req.query);
     try {
       const { filename, content } = await service.getManufacturingOrdersPdf(ids);
