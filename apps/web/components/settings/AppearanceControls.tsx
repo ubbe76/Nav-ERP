@@ -7,10 +7,11 @@ import { useUserPrefs } from "../UserPrefsProvider";
 import { useFavorites } from "../FavoritesProvider";
 import { useThemeBoot } from "../ThemeBootProvider";
 import { DENSITY_LABELS, TABLE_DENSITIES } from "../../lib/listColumns";
+import { NAV_LABEL_LABELS, NAV_LABEL_SIZES } from "../../lib/navLabels";
 import { FAVORITES_PLACEMENTS, FAVORITES_PLACEMENT_LABELS, favoritesPlacement, type FavoritesPlacement } from "../../lib/overviewCards";
 import segmentedStyles from "../ThemeToggle.module.css";
 
-// Tema, Täthet, Flikar and Favoriter — the user menu's settings,
+// Tema, Täthet, Flikar, Namn under ikonerna and Favoriter — the user menu's settings,
 // also shown on Mina inställningar (the user's choice 2026-11-13: copied to
 // the page, nothing moved out of the menu yet). One component, so the two
 // places can never disagree; each passes its own section/label classes.
@@ -18,7 +19,7 @@ export function AppearanceControls({ classes }: { classes: { section?: string; l
   const router = useRouter();
   const pathname = usePathname();
   const { boot } = useThemeBoot();
-  const { density, setDensity, documentTabs, setDocumentTabs } = useUserPrefs();
+  const { density, setDensity, documentTabs, setDocumentTabs, navLabels, setNavLabels } = useUserPrefs();
   const { favorites, inSidebar, onOverview, setPlacement } = useFavorites();
   const [placementSaving, setPlacementSaving] = useState(false);
   const placement = favoritesPlacement(inSidebar, onOverview);
@@ -73,6 +74,24 @@ export function AppearanceControls({ classes }: { classes: { section?: string; l
               onClick={() => setDocumentTabs(on)}
             >
               {on ? "På" : "Av"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* Namn under ikonerna (2026-11-25): the main menu's names, and their size. */}
+      <div className={classes.section}>
+        <span className={classes.label}>Namn under ikonerna</span>
+        <div className={segmentedStyles.segmented} role="radiogroup" aria-label="Namn under ikonerna">
+          {NAV_LABEL_SIZES.map((size) => (
+            <button
+              key={size}
+              type="button"
+              role="radio"
+              aria-checked={navLabels === size}
+              data-active={navLabels === size}
+              onClick={() => setNavLabels(size)}
+            >
+              {NAV_LABEL_LABELS[size]}
             </button>
           ))}
         </div>

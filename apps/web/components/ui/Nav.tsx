@@ -40,7 +40,9 @@ import styles from "./Nav.module.css";
 // user's choice, saved as navPanelCollapsed). Översikt, Aviseringar and
 // Hjälp are pages of their own. The user's Favoriter are a panel of their
 // own (the star) when they show in the menu. On a narrow screen rail and
-// panel are the drawer behind the hamburger.
+// panel are the drawer behind the hamburger. Namn under ikonerna (the
+// user's setting navLabels, 2026-11-25) shows each entry's name under its
+// icon in one of three sizes; off, the name is the tooltip.
 
 type RailPage = "Översikt" | "Aviseringar" | "Hjälp";
 
@@ -111,7 +113,7 @@ export function Nav({ role, permissions, modules }: NavProps) {
   const [open, setOpen] = useState(false);
   const [editingFavorites, setEditingFavorites] = useState(false);
   const { favorites, inSidebar } = useFavorites();
-  const { navPanelCollapsed: collapsed, setNavPanelCollapsed } = useUserPrefs();
+  const { navPanelCollapsed: collapsed, setNavPanelCollapsed, navLabels } = useUserPrefs();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentHref = favoriteHref(pathname, searchParams);
@@ -244,6 +246,8 @@ export function Nav({ role, permissions, modules }: NavProps) {
         className={styles.sidebar}
         data-open={open}
         data-panel={panelOpen || undefined}
+        // Namn under ikonerna: the rail shows the names, in this size.
+        data-rail-labels={navLabels === "off" ? undefined : navLabels}
         data-app-chrome=""
         data-app-sidebar=""
         aria-label="Huvudmeny"

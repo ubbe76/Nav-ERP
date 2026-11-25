@@ -247,4 +247,7 @@ export type TabMessage =
   | { type: "nav-tab-activate"; digit: number }
   // From the frame: go to this page (inside the tab, after the page's own
   // unsaved-changes question).
-  | { type: "nav-tab-go"; href: string };
+  | { type: "nav-tab-go"; href: string }
+  // From the page: Namn under ikonerna changed in it (Mina inställningar in
+  // a tab) — the menu is the frame's, so the frame shows the new choice.
+  | { type: "nav-labels"; navLabels: string };

@@ -7,6 +7,8 @@ import {
   listColumnsKeySchema,
   MAX_FAVORITES,
   MAX_LIST_COLUMN_LISTS,
+  NAV_LABEL_SIZES,
+  type NavLabels,
   TABLE_DENSITIES,
   type ListColumnsEntry,
   type TableDensity,
@@ -42,6 +44,8 @@ const DENSITY_KEY = "table_density";
 // Flikar (punkt 5): absent = true.
 const DOCUMENT_TABS_KEY = "document_tabs";
 const NAV_PANEL_COLLAPSED_KEY = "nav_panel_collapsed";
+// Namn under ikonerna: absent (or a removed size) = "off".
+const NAV_LABELS_KEY = "nav_labels";
 const LIST_COLUMNS_KEY = "list_columns";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
@@ -155,6 +159,10 @@ function decodeDensity(raw: string | undefined): TableDensity {
   return (TABLE_DENSITIES as readonly string[]).includes(raw ?? "") ? (raw as TableDensity) : "normal";
 }
 
+function decodeNavLabels(raw: string | undefined): NavLabels {
+  return (NAV_LABEL_SIZES as readonly string[]).includes(raw ?? "") ? (raw as NavLabels) : "off";
+}
+
 export function createUserSettingsService(repo: UserSettingsRepository) {
   // Typed view over the user_settings KV rows for one user — mirrors
   // system.service.ts's getSettings() pattern, just per-user instead of
@@ -198,6 +206,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       listColumns: decodeListColumns(byKey.get(LIST_COLUMNS_KEY)),
       documentTabs: byKey.get(DOCUMENT_TABS_KEY) !== "false",
       navPanelCollapsed: byKey.get(NAV_PANEL_COLLAPSED_KEY) === "true",
+      navLabels: decodeNavLabels(byKey.get(NAV_LABELS_KEY)),
     };
   }
 
@@ -246,6 +255,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       }
       if (input.navPanelCollapsed !== undefined) {
         await repo.upsert(userId, NAV_PANEL_COLLAPSED_KEY, String(input.navPanelCollapsed));
+      }
+      if (input.navLabels !== undefined) {
+        await repo.upsert(userId, NAV_LABELS_KEY, input.navLabels);
       }
       if (input.density !== undefined) {
         await repo.upsert(userId, DENSITY_KEY, input.density);
