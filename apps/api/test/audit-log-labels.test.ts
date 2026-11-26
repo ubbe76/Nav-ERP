@@ -59,6 +59,7 @@ describe("händelseloggens etiketter", () => {
     ["action", "operation_moved"],
     ["action", "operation_unlocked"],
     ["action", "run_order_changed"],
+    ["action", "co_run"],
     // Inköpsorder stängd automatiskt vid sista inleveransen (2026-11-21).
     ["action", "closed_automatically"],
     // Stämplingar: a work stamp corrected, registered afterwards or removed (2026-11-22).

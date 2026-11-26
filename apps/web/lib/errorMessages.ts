@@ -795,6 +795,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "run-plan-subcontract-resource": "Resursen är en legoresurs — körplanen visar bara egna resurser.",
   // Dagplan
   "day-plan-date-out-of-range": "Dagplanen visar i dag och sex veckor framåt — välj en annan dag.",
+  // Samkör
+  "co-run-changed": "Planen har ändrats sedan listan lästes — den har lästs om. Välj operationerna igen.",
   "plan-date-no-capacity": serverMessage("Resursen har ingen kapacitet den dagen — välj en annan dag."),
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
   "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",

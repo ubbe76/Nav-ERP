@@ -196,6 +196,22 @@ export const runPlanOrderSchema = z.object({
 });
 export type RunPlanOrderInput = z.infer<typeof runPlanOrderSchema>;
 
+// POST /planning/co-run[/preview] — Samkör: the chosen operations of ONE
+// resource are moved to `date` with Flytta's rule, laid next to each other in
+// the day's order and locked. `plannedStartDate` = the start day the list
+// showed (null = unplanned) — another one under the lock refuses the whole
+// request (409 co-run-changed). Sent in the order the block is to be run.
+export const coRunSchema = z.object({
+  workCenterId: z.string().uuid(),
+  date: businessDateSchema,
+  operations: z
+    .array(z.object({ moOperationId: z.string().uuid(), plannedStartDate: businessDateSchema.nullable() }))
+    .min(2)
+    .max(50)
+    .refine((ops) => new Set(ops.map((o) => o.moOperationId)).size === ops.length, { message: "operations must be unique" }),
+});
+export type CoRunInput = z.infer<typeof coRunSchema>;
+
 // POST /planning/operations/:opId/move — Flytta: the operation starts on
 // `date` (the day's whole capacity, overload allowed) and is locked; with
 // moveFollowing the TO's later unlocked operations are replanned after it.

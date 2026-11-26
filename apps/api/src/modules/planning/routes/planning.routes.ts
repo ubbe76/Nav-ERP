@@ -1,10 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   applyDeliveryTimeSchema,
   articleForecastUpdateSchema,
   articleOverviewQuerySchema,
   capacityQuerySchema,
   componentMovesSchema,
+  coRunSchema,
   createPlanningOrdersSchema,
   dayPlanQuerySchema,
   deliveryTimeCheckSchema,
@@ -16,12 +17,14 @@ import {
   runPlanPdfQuerySchema,
   runPlanOrderSchema,
   runPlanQuerySchema,
+  type CoRunInput,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { abcExportColumns, requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
   ComponentMoveChangedError,
+  CoRunChangedError,
   ForecastMonthOutsideHorizonError,
   InvalidStatusTransitionError,
   ManufacturingOrderNotFoundError,
@@ -440,6 +443,32 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       throw err;
     }
   });
+
+  // Samkör: the chosen operations of one resource moved to one day with
+  // Flytta's rule, laid next to each other and locked. The preview computes
+  // the same answer and writes nothing — it still needs the write rule and
+  // is NOT readOnlySafe (a read-only account cannot co-run anyway). 409
+  // co-run-changed when a selected operation is not where the list showed
+  // it: nothing written, the web reads the list again.
+  const coRunRoute = (run: (input: CoRunInput, userId: string) => ReturnType<PlanningService["coRun"]>) =>
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const input = coRunSchema.parse(req.body);
+      try {
+        const result = await run(input, req.user!.id);
+        if (!result) return reply.code(404).send(errorBody(new WorkCenterNotFoundError(input.workCenterId)));
+        return result;
+      } catch (err) {
+        if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+        if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
+        if (err instanceof CoRunChangedError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
+        if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    };
+  app.post("/planning/co-run/preview", coRunRoute((input) => service.previewCoRun(input)));
+  app.post("/planning/co-run", coRunRoute((input, userId) => service.coRun(input, userId)));
 
   // Lås upp: the days stay until the next Planera. Idempotent.
   app.post<{ Params: { opId: string } }>("/planning/operations/:opId/unlock", async (req, reply) => {

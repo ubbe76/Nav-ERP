@@ -3,6 +3,7 @@ import type {
   ArticleForecastUpdateInput,
   CapacityQuery,
   ComponentMovesInput,
+  CoRunInput,
   MissingComponentsInput as MissingComponentsRequest,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
@@ -72,6 +73,7 @@ import {
   computeCapacity,
   orderPlanStatus,
   operationStarted,
+  plannedDateRange,
   remainingOperationMinutes,
   resourceDayLoads,
   type CapacityInput,
@@ -129,6 +131,7 @@ import {
   type RunPlanRow,
   type RunPlanStamp,
 } from "./run-plan.js";
+import { coRunOrder, groupRunPlanByMaterial, planCoRun, type CoRunPlan, type CoRunResult } from "./co-run.js";
 import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
 import { isCoRunMaterial, linkedOperationMaterials } from "../../manufacturing/service/operation-materials.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
@@ -395,6 +398,16 @@ export class RunPlanOrderChangedError extends Error {
   constructor(public workCenterCode: string, public date: string) {
     super(`Körplanen för ${workCenterCode} ${date} har ändrats — läs om listan`);
     this.name = "RunPlanOrderChangedError";
+  }
+}
+
+// Samkör: a selected operation is not where the list showed it — another
+// resource, another start day, done, or its order no longer open. Nothing is
+// written; the web reads the list again. 409.
+export class CoRunChangedError extends Error {
+  constructor(public workCenterCode: string, public date: string) {
+    super(`Planen för ${workCenterCode} har ändrats sedan listan lästes — läs om listan och välj operationerna igen`);
+    this.name = "CoRunChangedError";
   }
 }
 
@@ -1450,7 +1463,9 @@ export function createPlanningService(
     const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { resources: opts.resources });
     // Optional on the repo for the unit tests' fakes ⇒ the default limit.
     const longOperationWeeks = await repo.longOperationWeeks?.(dbc);
-    return { ...planWorldOf(capacity, today), longOperationWeeks };
+    // `capacity` = the raw load, for the readers of the same world that are
+    // not the book (resourceDayLoads in Samkör's answer).
+    return { ...planWorldOf(capacity, today), longOperationWeeks, capacity };
   }
   // queueDays = Standardkötid as the load read it (this run's own value,
   // never a process constant); the resources carry their own Kötid for lego.
@@ -2023,6 +2038,172 @@ export function createPlanningService(
     }
     return { materials, stamps };
   }
+  // --- Samkör (co-run.ts owns the rules) -----------------------------------
+  // What the preview and the write share: the resource, the day and the
+  // selected operations tested, the world loaded and the co-run planned in
+  // memory. `dbc` undefined = outside a transaction (the preview); with
+  // `lock` the selected operations are locked FOR UPDATE in id order — never
+  // the order row — and the caller already holds the production_plan lock.
+  // null = the resource does not exist (404 in the route). Throws, in this
+  // order: a legoresurs (400), a passed day (400), an unknown operation
+  // (404), an operation that is not where the list showed it (409
+  // co-run-changed), one without time to plan (409) and a day without
+  // capacity (409).
+  async function prepareCoRun(dbc: Tx | undefined, input: CoRunInput, opts: { lock: boolean }) {
+    const workCenter = await repo.runPlanWorkCenter(dbc, input.workCenterId);
+    if (!workCenter) return null;
+    if (workCenter.type === "subcontract") throw new RunPlanSubcontractResourceError(workCenter.code);
+    const today = todayFn();
+    if (input.date < today) throw new PlanDateInPastError(input.date, today);
+    const operationIds = input.operations.map((o) => o.moOperationId);
+    const selected = new Map((await repo.coRunOperations(dbc, operationIds, opts)).map((row) => [row.moOperationId, row]));
+    for (const id of operationIds) if (!selected.has(id)) throw new OperationNotFoundError(id);
+    for (const sent of input.operations) {
+      const row = selected.get(sent.moOperationId)!;
+      if (
+        row.workCenterId !== workCenter.id ||
+        row.operationStatus !== "pending" ||
+        !OPEN_MO_STATUSES.has(row.orderStatus) ||
+        row.plannedStartDate !== sent.plannedStartDate
+      ) {
+        throw new CoRunChangedError(workCenter.code, input.date);
+      }
+    }
+    const world = await loadPlanWorld(dbc);
+    const stamped = await repo.stampedOperationIds(dbc);
+    const inWorld = new Map(world.operations.map((o) => [o.moOperationId, o]));
+    for (const id of operationIds) {
+      const op = inWorld.get(id);
+      // Under the book's threshold nothing would be written (roundPlanDays).
+      if (!op || remainingOperationMinutes(op) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
+    }
+    const plan = planCoRun(world, stamped, { date: input.date, operationIds });
+    if (plan.noCapacity) throw new PlanDateNoCapacityError(input.date, workCenter.code);
+    return { workCenter, today, operationIds, selected, world, plan };
+  }
+  type CoRunPrepared = NonNullable<Awaited<ReturnType<typeof prepareCoRun>>>;
+
+  // The resource's pending, planned operations on the day as the co-run
+  // LEAVES them, computed on the world in memory (the preview): the ones
+  // that start there afterwards, with the place they hold today — a place
+  // survives only on the same start day, as writeOperationPlans keeps it.
+  function coRunDayOperationsAfter(
+    prepared: CoRunPrepared,
+    date: string,
+    current: { id: string; runPosition: number | null }[]
+  ): { id: string; runPosition: number | null }[] {
+    const positionOf = new Map(current.map((op) => [op.id, op.runPosition]));
+    return prepared.plan.operationsAfter
+      .filter(
+        (op) =>
+          op.workCenterId === prepared.workCenter.id && op.operationStatus === "pending" && plannedDateRange(op)?.start === date
+      )
+      .map((op) => ({ id: op.moOperationId, runPosition: positionOf.get(op.moOperationId) ?? null }));
+  }
+
+  // The answer of both routes. `dayOperations` = the day's operations after
+  // the co-run (read back under the lock by the write, in memory by the
+  // preview) — coRunOrder gives the places from them.
+  async function buildCoRunResult(
+    prepared: CoRunPrepared,
+    date: string,
+    dayOperations: { id: string; runPosition: number | null }[]
+  ): Promise<CoRunResult> {
+    const { workCenter, today, operationIds, selected, world, plan } = prepared;
+    const before = new Map(world.operations.map((o) => [o.moOperationId, o]));
+    const after = new Map(plan.operationsAfter.map((o) => [o.moOperationId, o]));
+    const isSelected = new Set(operationIds);
+
+    const operations = operationIds.map((id) => {
+      const row = selected.get(id)!;
+      const range = plannedDateRange(after.get(id)!);
+      return {
+        moOperationId: id,
+        manufacturingOrderId: row.manufacturingOrderId,
+        orderNumber: row.orderNumber,
+        sequenceNo: row.sequenceNo,
+        fromDate: row.plannedStartDate,
+        plannedStartDate: range?.start ?? null,
+        plannedEndDate: range?.end ?? null,
+        outcome: plan.outcomes.get(id)!,
+      };
+    });
+
+    // Flyttas också: what the moves touched besides the selected ones, when
+    // its days are others than before (a plan written again on the same
+    // days, or the clearing of an operation that had none, is no change).
+    const following: CoRunResult["following"] = [];
+    for (const id of new Set([...plan.plans.map((p) => p.operationId), ...plan.clear])) {
+      if (isSelected.has(id)) continue;
+      const op = after.get(id);
+      if (!op) continue;
+      const from = plannedDateRange(before.get(id)!);
+      const to = plannedDateRange(op);
+      if ((from?.start ?? null) === (to?.start ?? null) && (from?.end ?? null) === (to?.end ?? null)) continue;
+      following.push({
+        moOperationId: id,
+        manufacturingOrderId: op.manufacturingOrderId,
+        orderNumber: op.orderNumber,
+        sequenceNo: op.sequenceNo,
+        workCenterCode: world.workCenters.get(op.workCenterId)?.code ?? "?",
+        fromStartDate: from?.start ?? null,
+        plannedStartDate: to?.start ?? null,
+        plannedEndDate: to?.end ?? null,
+      });
+    }
+    following.sort((a, b) => a.orderNumber.localeCompare(b.orderNumber, "sv", { numeric: true }) || a.sequenceNo - b.sequenceNo);
+
+    // Dagens last: the same rule on the world before and after.
+    const loadOf = (ops: CapacityOperationRow[]) =>
+      resourceDayLoads({ ...world.capacity, operations: ops }, today, date).get(workCenter.id) ?? {
+        date,
+        loadHours: 0,
+        availableHours: null,
+        overloaded: false,
+      };
+
+    // The selected operations' rows as the körplan builds them (buildRunPlan
+    // over their orders — no T.o.m., so an operation beyond the horizon is
+    // in too) with the extras, grouped by the Material-läge's own function.
+    const orderIdOf = new Map(operationIds.map((id) => [id, selected.get(id)!.manufacturingOrderId]));
+    const orderIds = new Set(orderIdOf.values());
+    const extras = await loadRunPlanExtras(operationIds, orderIdOf);
+    const rowOf = new Map(
+      buildRunPlan({
+        today,
+        toDate: "9999-12-31",
+        workCenter,
+        stations: [],
+        operations: plan.operationsAfter.filter((o) => orderIds.has(o.manufacturingOrderId)),
+        plannedOrderOperations: [],
+        ...extras,
+      }).rows.map((row) => [row.moOperationId, row])
+    );
+    const materialRows = operationIds.map((id) => rowOf.get(id)).filter((row): row is RunPlanRow => row !== undefined);
+
+    return {
+      workCenter: { id: workCenter.id, code: workCenter.code, name: workCenter.name },
+      date,
+      operations,
+      following,
+      dayLoad: { before: loadOf(world.operations), after: loadOf(plan.operationsAfter) },
+      lateOrders: plan.warnings
+        .filter((w) => w.kind === "late")
+        .map((w) => ({
+          manufacturingOrderId: w.manufacturingOrderId,
+          orderNumber: w.orderNumber,
+          dueDate: w.dueDate ?? null,
+          plannedFinish: w.plannedFinish ?? null,
+        })),
+      warnings: plan.warnings,
+      materials: groupRunPlanByMaterial(materialRows).groups,
+      runOrder: coRunOrder(dayOperations, operationIds).map((id) => {
+        const op = after.get(id)!;
+        return { moOperationId: id, orderNumber: op.orderNumber, sequenceNo: op.sequenceNo, selected: isSelected.has(id) };
+      }),
+    };
+  }
+
   // The listed operations of a run plan's rows: a Planerad TO's operation
   // carries no extras (buildRunPlan never reads them for it).
   const extrasOperationsOf = (rows: RunPlanRow[]) => {
@@ -3192,6 +3373,79 @@ export function createPlanningService(
         userId,
       });
       return { operation: moved.operation, following: moved.following, warnings: moved.warnings };
+    },
+
+    // Samkör, the preview — what POST /planning/co-run would do, computed
+    // on the plan as it is right now: no transaction, no production_plan
+    // lock, nothing written. null = the resource does not exist.
+    async previewCoRun(input: CoRunInput): Promise<CoRunResult | null> {
+      const prepared = await prepareCoRun(undefined, input, { lock: false });
+      if (!prepared) return null;
+      const current = await repo.runPlanDayOperations(undefined, prepared.workCenter.id, input.date, { lock: false });
+      return buildCoRunResult(prepared, input.date, coRunDayOperationsAfter(prepared, input.date, current));
+    },
+
+    // Samkör — the selected operations moved to ONE day with Flytta's rule
+    // (planCoRun: one at a time against one world), locked and laid next to
+    // each other after the day's already ordered ones. ONE transaction.
+    // Lock order: production_plan → the selected operations (FOR UPDATE, by
+    // id) → the day's operations (FOR UPDATE, by id) — never the order row.
+    // The places are written LAST: writeOperationPlans drops run_position
+    // for every operation whose start day changes. null = the resource does
+    // not exist.
+    async coRun(input: CoRunInput, userId: string | null): Promise<CoRunResult | null> {
+      const written = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const prepared = await prepareCoRun(tx, input, { lock: true });
+        if (!prepared) return null;
+        const { plan } = prepared;
+        await repo.writeOperationPlans(tx, { plans: plan.plans, clear: plan.clear, plannedAt: new Date() });
+        await repo.setOperationLocks(tx, plan.lockIds, true);
+        const current = await repo.runPlanDayOperations(tx, prepared.workCenter.id, input.date, { lock: true });
+        const order = coRunOrder(current, prepared.operationIds);
+        if (order.length > 0) await repo.writeRunPositions(tx, order);
+        return { prepared, current };
+      });
+      if (!written) return null;
+      const { prepared } = written;
+      const result = await buildCoRunResult(prepared, input.date, written.current);
+      // The same event as Flytta for every operation a move was run on (one
+      // beyond the horizon lost its days: logged too, with no days), marked
+      // as part of a co-run; one already on the day was not moved.
+      for (const op of result.operations) {
+        if (op.outcome === "already_on_day") continue;
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: op.orderNumber,
+          action: "operation_moved",
+          detail: {
+            moOperationId: op.moOperationId,
+            sequenceNo: op.sequenceNo,
+            workCenterCode: prepared.workCenter.code,
+            fromDate: op.fromDate,
+            toDate: input.date,
+            plannedStartDate: op.plannedStartDate,
+            plannedEndDate: op.plannedEndDate,
+            moveFollowing: true,
+            warnings: result.warnings.filter((w) => w.manufacturingOrderId === op.manufacturingOrderId),
+            reason: "co_run",
+          },
+          userId,
+        });
+      }
+      await audit.log({
+        entityType: "production_plan",
+        entityId: null,
+        action: "co_run",
+        detail: {
+          workCenterCode: prepared.workCenter.code,
+          date: input.date,
+          operations: result.operations.map((op) => `${op.orderNumber} op ${op.sequenceNo}`).join(", "),
+          moved: result.operations.filter((op) => op.outcome === "moved").length,
+        },
+        userId,
+      });
+      return result;
     },
 
     // Lås upp — the allocation stays until the next Planera. Idempotent.

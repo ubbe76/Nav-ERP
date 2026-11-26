@@ -5973,6 +5973,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   operation_moved: "Operation flyttad",
   operation_unlocked: "Operation upplåst",
   run_order_changed: "Körordning ändrad",
+  co_run: "Operationer samkörda",
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
@@ -7735,4 +7736,50 @@ export interface DayPlanResult {
   productionGroups: { id: string; code: string; name: string }[];
   resources: DayPlanResource[];
   totals: { rows: number; hours: number; unlinkedOperations: number; shortMaterials: number };
+}
+
+// Samkör (POST /planning/co-run and /planning/co-run/preview): the request…
+export interface CoRunInput {
+  workCenterId: string;
+  date: string;
+  // In the order the block is to be run; plannedStartDate = the start day
+  // the list showed (null = unplanned).
+  operations: { moOperationId: string; plannedStartDate: string | null }[];
+}
+
+export type CoRunOutcome = "moved" | "already_on_day" | "not_placed";
+
+// …and the answer of both: the preview computed, the write as written.
+export interface CoRunResult {
+  workCenter: RunPlanStation;
+  date: string;
+  // The selected operations, in the order they were sent.
+  operations: {
+    moOperationId: string;
+    manufacturingOrderId: string;
+    orderNumber: string;
+    sequenceNo: number;
+    fromDate: string | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+    outcome: CoRunOutcome;
+  }[];
+  // Operations that were not selected and whose days changed or were removed.
+  following: {
+    moOperationId: string;
+    manufacturingOrderId: string;
+    orderNumber: string;
+    sequenceNo: number;
+    workCenterCode: string;
+    fromStartDate: string | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+  }[];
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
+  lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
+  warnings: PlanWarning[];
+  // The selected operations' co-run materials, summed per article.
+  materials: RunPlanMaterialGroup[];
+  // The day's places afterwards: the ones already ordered, then the block.
+  runOrder: { moOperationId: string; orderNumber: string; sequenceNo: number; selected: boolean }[];
 }

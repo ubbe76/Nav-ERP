@@ -12,7 +12,7 @@
 // Nothing is stored: a co-run is the moved days, the locks and the places.
 import { round4 } from "@navet/shared";
 import { compareArticleNumbers } from "../../manufacturing/service/operation-materials.js";
-import { plannedDateRange, type CapacityOperationRow } from "./capacity-calc.js";
+import { plannedDateRange, type CapacityDayLoad, type CapacityOperationRow } from "./capacity-calc.js";
 import {
   operationsWithPlan,
   planOperationMove,
@@ -206,4 +206,46 @@ export function coRunOrder(current: { id: string; runPosition: number | null }[]
     .sort((a, b) => a.runPosition! - b.runPosition!)
     .map((op) => op.id);
   return [...ordered, ...selectedIds.filter((id) => onDay.has(id))];
+}
+
+// --- Svaret -----------------------------------------------------------------
+
+// What POST /planning/co-run and its preview answer with — the same shape,
+// the preview computed and the write as written.
+export interface CoRunResult {
+  workCenter: { id: string; code: string; name: string };
+  date: string;
+  // The selected operations, in the order they were sent.
+  operations: {
+    moOperationId: string;
+    manufacturingOrderId: string;
+    orderNumber: string;
+    sequenceNo: number;
+    fromDate: string | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+    outcome: CoRunOutcome;
+  }[];
+  // Operations that were NOT selected and whose days changed or were
+  // removed, by order number (natural order), then sequence.
+  following: {
+    moOperationId: string;
+    manufacturingOrderId: string;
+    orderNumber: string;
+    sequenceNo: number;
+    workCenterCode: string;
+    fromStartDate: string | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+  }[];
+  // The resource's load on the day before and after (resourceDayLoads).
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
+  // The warnings of kind `late`.
+  lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
+  warnings: PlanWarning[];
+  // The selected operations' co-run materials, summed per article.
+  materials: RunPlanMaterialGroup[];
+  // The day's places afterwards (coRunOrder): the ones already ordered, then
+  // the block.
+  runOrder: { moOperationId: string; orderNumber: string; sequenceNo: number; selected: boolean }[];
 }

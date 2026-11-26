@@ -101,6 +101,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   operation_moved: "Operation flyttad",
   operation_unlocked: "Operation upplåst",
   run_order_changed: "Körordning ändrad",
+  co_run: "Operationer samkörda",
   started: "Startad",
   closed: "Stängd",
   // Inköpsorder: the last receipt (or a row change) left nothing to receive.

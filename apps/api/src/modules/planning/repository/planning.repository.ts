@@ -1521,20 +1521,23 @@ export function createPlanningRepository(db: Db) {
       return new Set(rows.map((r) => r.moOperationId));
     },
 
-    async runPlanWorkCenter(tx: Tx, workCenterId: string) {
-      const [row] = await tx
-        .select({ id: workCenters.id, code: workCenters.code, type: workCenters.type })
+    // `dbc` undefined = outside a transaction (Samkör's preview).
+    async runPlanWorkCenter(dbc: Db | Tx | undefined, workCenterId: string) {
+      const [row] = await (dbc ?? db)
+        .select({ id: workCenters.id, code: workCenters.code, name: workCenters.name, type: workCenters.type, active: workCenters.active })
         .from(workCenters)
         .where(eq(workCenters.id, workCenterId));
       return row ?? null;
     },
 
-    // Ordningen inom dagen (#18) — the resource's pending operations on open
-    // TO:s whose planned start day is `date`, locked FOR UPDATE in id order
-    // (the caller holds the production_plan lock; never the order row).
-    async lockRunPlanDayOperations(tx: Tx, workCenterId: string, date: string) {
-      const rows = await tx.execute<{ id: string; order_number: string; run_position: number | null }>(sql`
-        SELECT o.id, mo.order_number, o.run_position
+    // Ordningen inom dagen (#18) and Samkör — the resource's pending
+    // operations on open TO:s whose planned start day is `date`, in id
+    // order. With `lock` FOR UPDATE of the operations (the caller holds the
+    // production_plan lock; never the order row); without it a plain read
+    // (Samkör's preview).
+    async runPlanDayOperations(dbc: Db | Tx | undefined, workCenterId: string, date: string, opts: { lock: boolean }) {
+      const rows = await (dbc ?? db).execute<{ id: string; order_number: string; sequence_no: number; run_position: number | null }>(sql`
+        SELECT o.id, mo.order_number, o.sequence_no, o.run_position
         FROM mo_operations o
         JOIN manufacturing_orders mo ON mo.id = o.manufacturing_order_id
         WHERE o.work_center_id = ${workCenterId}::uuid
@@ -1542,8 +1545,58 @@ export function createPlanningRepository(db: Db) {
           AND o.planned_start_date = ${date}::date
           AND mo.status IN ('released', 'in_progress')
         ORDER BY o.id
-        FOR UPDATE OF o`);
-      return [...rows].map((r) => ({ id: r.id, orderNumber: r.order_number, runPosition: r.run_position }));
+        ${opts.lock ? sql`FOR UPDATE OF o` : sql``}`);
+      return [...rows].map((r) => ({ id: r.id, orderNumber: r.order_number, sequenceNo: r.sequence_no, runPosition: r.run_position }));
+    },
+    // The same query, locked — the set PUT /planning/run-plan/order counts.
+    async lockRunPlanDayOperations(tx: Tx, workCenterId: string, date: string) {
+      return this.runPlanDayOperations(tx, workCenterId, date, { lock: true });
+    },
+
+    // Samkör — the selected operations as they are NOW, with what the 409
+    // tests read (resource, own status, start day, the order's status). In
+    // id order; with `lock` FOR UPDATE of the operations — never the order
+    // row. An id that does not exist is simply absent.
+    async coRunOperations(dbc: Db | Tx | undefined, ids: string[], opts: { lock: boolean }) {
+      if (ids.length === 0) return [];
+      const idList = sql.join(
+        ids.map((id) => sql`${id}::uuid`),
+        sql`, `
+      );
+      const rows = await (dbc ?? db).execute<{
+        id: string;
+        manufacturing_order_id: string;
+        order_number: string;
+        order_status: string;
+        sequence_no: number;
+        status: string;
+        work_center_id: string;
+        planned_start_date: string | null;
+      }>(sql`
+        SELECT o.id, o.manufacturing_order_id, mo.order_number, mo.status AS order_status, o.sequence_no, o.status,
+               o.work_center_id, o.planned_start_date::text AS planned_start_date
+        FROM mo_operations o
+        JOIN manufacturing_orders mo ON mo.id = o.manufacturing_order_id
+        WHERE o.id IN (${idList})
+        ORDER BY o.id
+        ${opts.lock ? sql`FOR UPDATE OF o` : sql``}`);
+      return [...rows].map((r) => ({
+        moOperationId: r.id,
+        manufacturingOrderId: r.manufacturing_order_id,
+        orderNumber: r.order_number,
+        orderStatus: r.order_status,
+        sequenceNo: r.sequence_no,
+        operationStatus: r.status,
+        workCenterId: r.work_center_id,
+        plannedStartDate: r.planned_start_date,
+      }));
+    },
+
+    // Samkör's locks: ONE UPDATE for all of them. The caller only passes
+    // operations that have a plan (the CHECK forbids a lock without days).
+    async setOperationLocks(tx: Tx, ids: string[], locked: boolean): Promise<void> {
+      if (ids.length === 0) return;
+      await tx.update(moOperations).set({ planLocked: locked }).where(inArray(moOperations.id, ids));
     },
 
     // run_position = 1..n in the given order, ONE statement.
