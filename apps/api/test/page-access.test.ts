@@ -57,6 +57,7 @@ describe("page access table", () => {
         "/tillverkning/korplan",
         "/tillverkning/ordrar",
         "/tillverkning/ordrar/x1",
+        "/tillverkning/struktur",
         "/tillverkning/terminal",
       ].sort()
     );

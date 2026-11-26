@@ -3046,6 +3046,8 @@ export interface CapacitySummary {
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
   resourceSuggestions: ResourceSuggestionRow[];
+  // Pending operations moved by hand (Låst) among the loaded ones.
+  lockedOperations: number;
 }
 
 export interface CapacityResult {

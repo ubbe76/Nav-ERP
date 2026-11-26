@@ -16,6 +16,7 @@ import {
   outlookTone,
   uncoveredText,
 } from "../../lib/deliveryOutlook";
+import { structureHref } from "../../lib/structureTree";
 import type { OutlookRow, SalesOrderDeliveryOutlook, SalesOrderRow } from "../../lib/types";
 import { GatedLink } from "../ui/GatedLink";
 import { StatusPill } from "../ui/StatusPill";
@@ -85,6 +86,10 @@ export function DeliveryOutlookHead({ state }: { state: DeliveryOutlookState }) 
       <span className={styles.headLabel}>Leveransläge:</span>
       <span className={styles.headText}>{line.text}</span>
       {state.outlook.counts.componentLate > 0 && <StatusPill status="delayed" label={COMPONENT_LATE_LABEL} compact />}
+      {/* The whole tree behind the line — plain text for a profile without the page. */}
+      <GatedLink href={structureHref({ ko: state.outlook.salesOrderId })} className={styles.structureLink}>
+        Visa strukturen
+      </GatedLink>
     </div>
   );
 }

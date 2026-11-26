@@ -6,6 +6,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { Table } from "../ui/Table";
 import { toUnitQuantity } from "../../lib/units";
 import { formatQuantity } from "../../lib/format";
+import { structureHref } from "../../lib/structureTree";
 import type {
   CoverageAllocation,
   CoverageGoesTo,
@@ -19,6 +20,16 @@ import styles from "./Pegging.module.css";
 // BASE unit — shown in the material row's own unit, like the Material table.
 function inRowUnit(q: number, row: MOMaterialConsumption): string {
   return `${formatQuantity(toUnitQuantity(q, row.unitFactor))} ${row.unitCode}`;
+}
+
+// Visa strukturen: the TO's whole tree with its planned days
+// (/tillverkning/struktur) — in the Material heading of the TO card.
+export function StructureLink({ manufacturingOrderId }: { manufacturingOrderId: string }) {
+  return (
+    <GatedLink href={structureHref({ to: manufacturingOrderId })} className={styles.structureLink}>
+      Visa strukturen
+    </GatedLink>
+  );
 }
 
 export function daysLateText(days: number): string {

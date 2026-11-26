@@ -17,6 +17,14 @@
   color: var(--status-delayed-text);
   font-weight: 600;
 }
+a.structureLink {
+  color: var(--accent-fg);
+  text-decoration: underline;
+}
+/* Without the page (GatedLink's plain text): nothing to offer. */
+span.structureLink {
+  display: none;
+}
 .headLabel {
   color: var(--color-text-muted);
 }

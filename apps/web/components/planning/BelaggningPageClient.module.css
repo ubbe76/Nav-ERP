@@ -275,6 +275,12 @@
   color: var(--color-text-primary);
 }
 
+.structureLink {
+  color: var(--accent-fg);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
 .rowLink:hover {
   color: var(--accent-fg);
 }

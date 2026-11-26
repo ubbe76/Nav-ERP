@@ -63,6 +63,8 @@ const ENTRIES: readonly Entry[] = [
   { path: "/tillverkning/korplan", rule: ["office", "terminal", "tillverkningsorder_las"] },
   // Dagplan (and its Mötesläge under /mote) reads like Körplan.
   { path: "/tillverkning/dagplan", rule: ["office", "terminal", "tillverkningsorder_las"] },
+  // Struktur (one order's tree) is read like a TO — the same profiles as Körplan.
+  { path: "/tillverkning/struktur", rule: ["office", "terminal", "tillverkningsorder_las"] },
   // Efterkalkylera flera needs Tillverkning (costing routes), unlike the read-only order list.
   { path: "/tillverkning/efterkalkylera", rule: ["tillverkning"] },
   { path: "/tillverkning", rule: ["tillverkning"] },

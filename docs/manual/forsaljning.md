@@ -522,6 +522,8 @@ På kundorderkortet visas **Leveransläge** för en order i status **Bekräftad*
 
 Märket **Halvfabrikat sent** visas bredvid när en tillverkningsorder som täcker en rad väntar på ett halvfabrikat som blir klart för sent. Raden kan då stå som i tid, men tillverkningsorderns plan vet inte om förseningen — se [Täcks av och Går till](/hjalp/tillverkning#tacks-av-och-gar-till).
 
+Länken **Visa strukturen** på samma rad öppnar [Struktur](/hjalp/tillverkning#struktur): hela kundordern som ett träd — varje rad med sin tillverkningsorder, dess material och halvfabrikatens tillverkningsordrar under — med de planerade dagarna på en dagaxel. Där ser du var i kedjan en försening uppstår och kan planera om. Länken visas för den som kan öppna tillverkningsordrar.
+
 **I radtabellen** har varje rad med rest ett märke i kolumnen **Leveransläge**:
 
 | Märke | Betyder |

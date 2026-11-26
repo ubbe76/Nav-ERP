@@ -16,6 +16,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
 import { plannedDateLabel, weekdayShortDate } from "../../lib/planning";
 import { planSuggestionNotice, suggestionCountLabel, suggestionShift, suggestionText } from "../../lib/resourceSuggestion";
+import { structureHref } from "../../lib/structureTree";
 import { SwitchResourceButton } from "./SwitchResourceButton";
 import { useCan } from "../PermissionsProvider";
 import type {
@@ -696,6 +697,9 @@ function ExpansionRow({
                     Flytta…
                   </Button>
                 )}
+                <Link href={structureHref({ to: o.manufacturingOrderId })} className={styles.structureLink}>
+                  Visa strukturen
+                </Link>
               </div>
               {o.suggestion && (
                 <div className={styles.suggestionLine}>
@@ -862,6 +866,12 @@ function PlanSummary({
               )}
             </span>
           ))}
+          {summary.lockedOperations > 0 && (
+            <span title="Operationer som flyttats för hand ligger kvar när du planerar">
+              {" · "}
+              {summary.lockedOperations === 1 ? "1 låst operation" : `${summary.lockedOperations} låsta operationer`}
+            </span>
+          )}
           {granularity === "week" && summary.overloadedDays > 0 && (
             <span>
               {" · "}

@@ -67,7 +67,7 @@ import { Lock } from "lucide-react";
 import { suggestionText } from "../../lib/resourceSuggestion";
 import { SwitchResourceButton } from "../planning/SwitchResourceButton";
 import { plannedDateLabel } from "../../lib/planning";
-import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections";
+import { CoveredByCell, GoesToSection, StructureLink, coverageOfRow } from "./CoverageSections";
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
 import { PrintButton } from "../documents/PrintButton";
@@ -466,11 +466,14 @@ export function ManufacturingOrderDetail({
 
       <SectionHeading
         actions={
-          canEditLines && (
-            <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: null })}>
-              + Lägg till material
-            </Button>
-          )
+          <>
+            <StructureLink manufacturingOrderId={order.id} />
+            {canEditLines && (
+              <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: null })}>
+                + Lägg till material
+              </Button>
+            )}
+          </>
         }
       >
         Material

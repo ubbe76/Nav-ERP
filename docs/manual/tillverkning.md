@@ -385,6 +385,8 @@ Sektionen **Går till** visar åt andra hållet vilka behov ordern själv täcke
 
 Kopplingen är härledd — den räknas fram varje gång kortet visas och ingenting är reserverat. Den kan därför ändras när ett tidigare behov kommer in: lager och ordrar fördelas på behoven i datumordning, det tidigaste behovet först.
 
+Länken **Visa strukturen** vid rubriken **Material** öppnar [Struktur](#struktur): hela trädet under ordern — halvfabrikatens tillverkningsordrar med sitt eget material, nivå för nivå — med de planerade dagarna på en dagaxel.
+
 ### Halvfabrikat sent
 
 Märket **Halvfabrikat sent** visas på TO-kortet (bredvid **Sen**), i listan **Tillverkning → Ordrar** och i Beläggningen när en tillverkningsorder för ett halvfabrikat som ordern behöver blir klar efter att behovet uppstår. Det gäller frisläppta och pågående ordrar — samma ordrar som kan bli **Sen**. Halvfabrikatets klardatum är planens slutdatum, annars **Planerat färdigdatum** — samma datum som avgör **Sen**. Lager är aldrig sent, och en sen inköpsorder eller saknat inköpsmaterial ger inget märke (kortet visar dem i **Täcks av**). Filtrera listan med statusvalet **Halvfabrikat sent**.
@@ -598,13 +600,74 @@ Klicka på en cell och sedan **Flytta…** vid operationen. I dialogen **Flytta 
 - **Lås upp** (i samma dialog, för en låst operation) släpper låset. Dagen ligger kvar tills nästa **Planera**, som då planerar om operationen. Låset försvinner också när operationen blir klar.
 - En klar operation, en legooperation, en operation utan tid och en operation på en order som inte är frisläppt eller pågående går inte att flytta.
 
+Länken **Visa strukturen** vid operationen i den utfällda cellen öppnar [Struktur](#struktur) för tillverkningsordern: hela trädet under den, med halvfabrikatens planerade dagar.
+
 ### Sammanfattningen
 
-Ovanför matrisen står **Senast planerad** (tidpunkten för senaste **Planera**, eller "Inte planerad ännu") och en sammanfattning, till exempel "3 överbelagda celler · 2 sena ordrar · 4 ej planerade". I veckovyn läggs *N överbelagda dagar* till (resurs × dag över hela perioden, även när veckan som helhet ryms). Klicka på ett tal för att fälla ut listan: de överbelagda cellerna (resurs, vecka eller dag, belastning), de **sena** ordrarna (färdigdatum och planerat klar) och de **ej planerade** ordrarna — ordernumren länkar till TO-kortet. Finns förslag på alternativ resurs läggs räknaren *N förslag på alternativ resurs* till sist i raden, och listan har **Byt till 120** per rad. En order är **Sen** när den sista operationen beräknas bli klar efter färdigdatumet.
+Ovanför matrisen står **Senast planerad** (tidpunkten för senaste **Planera**, eller "Inte planerad ännu") och en sammanfattning, till exempel "3 överbelagda celler · 2 sena ordrar · 4 ej planerade". I veckovyn läggs *N överbelagda dagar* till (resurs × dag över hela perioden, även när veckan som helhet ryms). Klicka på ett tal för att fälla ut listan: de överbelagda cellerna (resurs, vecka eller dag, belastning), de **sena** ordrarna (färdigdatum och planerat klar) och de **ej planerade** ordrarna — ordernumren länkar till TO-kortet. Finns förslag på alternativ resurs läggs räknaren *N förslag på alternativ resurs* till sist i raden, och listan har **Byt till 120** per rad. En order är **Sen** när den sista operationen beräknas bli klar efter färdigdatumet. Finns operationer som flyttats för hand står också *N låsta operationer* i raden — **Planera** låter dem ligga kvar; släpp dem med **Lås upp**, eller en hel order eller struktur på en gång i [Struktur](#planera-om-fran-strukturen).
 
 [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) i Försäljning använder samma beläggning och samma planeringsregel: den lägger en ny orders operationer på resursernas lediga tid per dag, det vill säga tillgänglig tid minus lasten som visas här — inklusive de planerade dagarna och kötiden mellan operationerna.
 
 Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har kapacitet (veckoschema eller timmar per dag) — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar kapacitet.
+
+## Struktur
+
+Sidan **Struktur** visar **en orders hela träd** med planerade dagar: överst en tillverkningsorder eller en kundorders rader, under varje tillverkningsorder dess material och under varje material det som täcker det — en tillverkningsorder för halvfabrikatet (med sitt eget material under sig), lager, en inköpsorder eller ingenting. Du ser på en gång var i kedjan en försening uppstår och kan flytta det som behöver flyttas, även långt ned i strukturen.
+
+Sidan öppnas från korten, inte från menyn:
+
+- **Visa strukturen** vid rubriken **Material** på TO-kortet,
+- **Visa strukturen** på raden **Leveransläge** på kundorderkortet (hela kundordern, en gren per rad),
+- **Visa strukturen** vid en operation i [Beläggningens](#belaggning) utfällda cell.
+
+Öppnas sidan utan order finns ett sökfält för **TO- eller KO-nummer**. Strukturen kan läsas av alla som kan öppna en tillverkningsorder; åtgärderna kräver behörigheten Tillverkning. Inga priser visas.
+
+### Vad strukturen visar
+
+Till vänster står trädet, indraget per nivå, och till höger en **dagaxel** med veckonummer och dagar. Lördagar, söndagar och röda dagar är tonade och i dag är markerad. Axeln börjar i dag och går till det senaste datumet i trädet (minst två veckor, högst tolv); den rullar i sin egen ruta och trädets spalt står kvar. Datum som ligger senare än axeln står som text på raden.
+
+- **Tillverkningsorder** — ordernummer (länk till kortet), artikel, *antal*, *färdigt 9 dec* och på axeln en tunn linje från första till sista planerade dag, en **romb** på **Planerat färdigdatum** och ett **streck** på dagen då det behövs av nivån ovanför. Under ordern står **operationerna** med en **stapel** på varje planerad dag (*op 10 Montering · 110*, planerade dagar och timmar kvar). Operationerna är utfällda på trädets två översta nivåer; längre ned fäller du ut dem med **Visa operationer (N)**, eller alla på en gång med **Visa alla operationer**.
+- **Legooperationer** har ingen stapel utan texten *Lego · N dagar* (resursens ledtid och kötid). Orderns klardag räknar in dem — står legot sist visas *klar 3 dec* på orderns rad.
+- **Material** — artikel, *behov* och ett streck på dagen då materialet behövs (tillverkningsorderns start).
+- **Lager** och **inköpsorder** (*IO-1017 · inleverans 5 dec*, en ring på axeln) är trädets löv. Det som ingenting täcker står i rött som **Saknas** med antalet.
+- **Kundorderrad** (när en kundorder ligger överst) — artikel, *rest*, en romb på avsändningsdagen och radens märke ur [Leveransläget](/hjalp/forsaljning#leveranslage).
+
+Antalen står i artikelns basenhet. Pilen till vänster om en rad fäller ihop och ut grenen under den.
+
+**Material som täcks helt av lager är dolt** för att trädet ska gå att överblicka — kryssa i **Visa material i lager (N)** för att se även de raderna.
+
+**Samma tillverkningsorder på två ställen.** Täcker en tillverkningsorder två behov i trädet ritas den en gång, på det första stället. På nästa ställe står bara ordernumret, antalet och länken **visas ovan**, som hoppar till det första stället och markerar raden.
+
+Ovanför trädet står en summering — till exempel *3 tillverkningsordrar · 1 sen · 1 med halvfabrikat sent · 2 låsta operationer · 1 saknas* — och, när en tillverkningsorder ligger överst, rutan **Går till** med de behov ordern själv täcker och länken **Öppna strukturen för KO-1234** (eller för tillverkningsordern ovanför). Strukturen visas alltid nedåt från den order du öppnat; uppåt går du en nivå i taget med länken, eftersom ett halvfabrikat kan gå till flera ordrar.
+
+Ett mycket stort träd kortas av: *Trädet är avkortat (fler än 10 nivåer / fler än 600 rader)*. Innehåller strukturen sig själv visas *Strukturen går runt på artikel …* och grenen ritas inte vidare.
+
+### Märkena i strukturen
+
+- **Sen** — orderns plan blir klar efter **Planerat färdigdatum**. Linjen, staplarna och romben får varningsfärg.
+- **Halvfabrikat sent** — en tillverkningsorder som ordern behöver blir klar efter att den behövs, se [Halvfabrikat sent](#halvfabrikat-sent).
+- *N dagar för sent* (röd text på en tillverkningsorder eller inköpsorder) — den blir klar eller kommer in så många arbetsdagar efter att nivån ovanför behöver den. Strecket för behovet är då rött.
+- **N låsta** på ordern och **Låst** på operationen — operationer som flyttats för hand; **Planera** låter dem ligga. En låst operations stapel har en mörk ram.
+- **Saknas** — ingenting täcker behovet.
+
+Märkena är samma som på TO-kortet, i listan och i Leveransläget — strukturen har inga egna regler. Kopplingen mellan behov och tillgång är härledd: den räknas fram varje gång sidan visas, ingenting är reserverat, och den kan ändras när ett tidigare behov kommer in.
+
+### Planera om från strukturen
+
+Med behörigheten Tillverkning kan du rätta till planen direkt i trädet. Sidan läses om efter varje ändring.
+
+- **Flytta…** — klicka på en operations stapel, eller välj **Flytta…** i operationens meny **⋯**. Det är samma dialog som i Beläggning, se [Flytta och Lås upp](#flytta-och-las-upp): operationen börjar på den valda dagen och blir **Låst**.
+- **Lås upp** (operationens meny) släpper låset på en operation.
+- **Lås upp hela ordern** (orderns meny **⋯**) släpper alla låsta operationer på tillverkningsordern, efter en fråga.
+- **Lås upp strukturen** (ovanför trädet) släpper alla låsta operationer på alla tillverkningsordrar i trädet, efter frågan *Lås upp N operationer på M tillverkningsordrar?*.
+- **Flytta halvfabrikaten…** (orderns meny, när ordern har halvfabrikat under sig) öppnar samma dialog som på TO-kortet, se [Flytta halvfabrikaten](#flytta-halvfabrikaten).
+- **Skapa saknade halvfabrikat…** (orderns meny, när ett tillverkat material saknar täckning) öppnar samma dialog som på TO-kortet, se [Skapa saknade halvfabrikat](#skapa-saknade-halvfabrikat).
+
+När ett lås släpps står dagarna kvar tills nästa **Planera** i Beläggning, som då planerar om operationerna.
+
+### Strukturen på telefonen
+
+På en smal skärm visas ingen dagaxel. Trädet är en indragen lista där varje rad har sina datum som text — *planerad 26 nov–2 dec · färdigt 9 dec · behövs 12 dec* — följt av märkena, och operationerna står som underrader (*op 20 Slipning · 120 · 1–2 dec · Låst*). Djupare än fyra nivåer ökar inte indraget; nivån står då som en siffra före raden. Menyn **⋯** har samma åtgärder.
 
 ## Dagplan
 

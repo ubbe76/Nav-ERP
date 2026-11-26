@@ -94,3 +94,15 @@
   font-size: 13px;
   color: var(--color-text-secondary);
 }
+
+/* Visa strukturen in the Material heading. */
+a.structureLink {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--accent-fg);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+span.structureLink {
+  display: none;
+}
