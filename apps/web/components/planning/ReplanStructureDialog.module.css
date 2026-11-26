@@ -1,0 +1,167 @@
+/* Planera om strukturen. The modal body is narrow (about 496px, the whole
+   screen on a phone): every list is a column or a wrapping flex line — no
+   pixel grids. */
+.top {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.dueRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.dueRow > :first-child {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.dueHint {
+  margin-top: 6px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.pending,
+.done,
+.help {
+  margin-top: var(--space-4);
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.section {
+  min-width: 0;
+}
+
+.heading {
+  margin: 0 0 4px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.orders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+/* One TO: the box to the left, its lines stacked to the right; the level is
+   an indent (capped, so a deep tree keeps its text on a phone). */
+.order {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 7px 0 7px calc(var(--level, 0) * 16px);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.orderBox {
+  flex: none;
+  display: flex;
+  align-items: center;
+  /* The line height of the title, so the box sits on its first line. */
+  min-height: 20px;
+}
+
+.orderBody {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.orderTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  cursor: pointer;
+}
+
+.orderTitle[data-fixed="true"] {
+  cursor: default;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The answer on screen is older than the form: shown, but toned down until
+   the new one lands. */
+.summary[data-stale="true"] .lines,
+.summary[data-stale="true"] .extra {
+  opacity: 0.55;
+}
+
+.late {
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.operations > summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.operations > ul {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  color: var(--color-text-secondary);
+}
+
+.operations li[data-locked="true"] {
+  color: var(--color-text-primary);
+}
+
+.list {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.list[data-tone="alert"] {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}

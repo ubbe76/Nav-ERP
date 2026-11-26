@@ -70,6 +70,7 @@ import { plannedDateLabel } from "../../lib/planning";
 import { CoveredByCell, GoesToSection, StructureLink, coverageOfRow } from "./CoverageSections";
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
+import { ReplanStructureDialog } from "../planning/ReplanStructureDialog";
 import { PrintButton } from "../documents/PrintButton";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { formatStockholmDateTime } from "../../lib/date";
@@ -137,6 +138,7 @@ export function ManufacturingOrderDetail({
   const [coverage, setCoverage] = useState<ManufacturingOrderCoverage | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   const [missingOpen, setMissingOpen] = useState(false);
+  const [replanOpen, setReplanOpen] = useState(false);
   // A request sequence: the effect and the dialogs' onMoved/onCreated can
   // overlap, and only the LAST request may write — an older answer landing
   // after the post-commit one would show stale Saknas/moves.
@@ -331,6 +333,19 @@ export function ManufacturingOrderDetail({
             onClick={() => setMissingOpen(true)}
           >
             Skapa saknade halvfabrikat…
+          </Button>
+        )}
+        {/* Planera om strukturen: this TO and the halvfabrikat-TOs under it,
+            children first, locked — only an open order, only with Tillverkning. */}
+        {canEditLines && (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={dueDateDirty}
+            title={dueDateDirty ? "Spara färdigdatumet först" : undefined}
+            onClick={() => setReplanOpen(true)}
+          >
+            Planera om strukturen…
           </Button>
         )}
         {/* Shop-floor printout — the article's drawings are appended. */}
@@ -542,6 +557,17 @@ export function ManufacturingOrderDetail({
           loadCoverage().catch(() => undefined);
         }}
       />
+      {canEditLines && (
+        <ReplanStructureDialog
+          target={replanOpen ? { manufacturingOrderId: order.id, orderNumber: order.orderNumber } : null}
+          onClose={() => setReplanOpen(false)}
+          onChanged={() => {
+            setHistoryKey((k) => k + 1);
+            router.refresh();
+            loadCoverage().catch(() => undefined);
+          }}
+        />
+      )}
       <MissingComponentsDialog
         open={missingOpen}
         onClose={() => setMissingOpen(false)}

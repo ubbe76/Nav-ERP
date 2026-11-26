@@ -13,6 +13,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { MoveComponentsDialog } from "../manufacturing/MoveComponentsDialog";
 import { MissingComponentsDialog } from "../manufacturing/MissingComponentsDialog";
 import { MoveOperationDialog, type MoveTarget } from "./MoveOperationDialog";
+import { ReplanStructureDialog, type ReplanStructureTarget } from "./ReplanStructureDialog";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
@@ -45,6 +46,7 @@ import {
   spanSegment,
   stockOnlyCount,
   structureHref,
+  replannable,
   structureOrderIds,
   totalsText,
   truncatedNotices,
@@ -187,6 +189,7 @@ function StructureView({ query }: { query: string }) {
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
   const [componentsFor, setComponentsFor] = useState<{ orderId: string; moves: CoverageMove[] } | null>(null);
   const [missingFor, setMissingFor] = useState<string | null>(null);
+  const [replanFor, setReplanFor] = useState<ReplanStructureTarget | null>(null);
 
   useEffect(() => {
     const seq = ++sequence.current;
@@ -346,6 +349,15 @@ function StructureView({ query }: { query: string }) {
     setMissingFor(node.manufacturingOrderId);
   }
 
+  // Planera om strukturen…: the dialog previews and writes; the TO it is
+  // opened on is the top of what is planned.
+  function openReplan(node: StructureOrderNode) {
+    if (!canWrite) return;
+    setActionError(null);
+    setNotice(null);
+    setReplanFor({ manufacturingOrderId: node.manufacturingOrderId, orderNumber: node.orderNumber });
+  }
+
   const lockedOrders = lockedOrderCount(nodes);
   const todayIndex = markerIndex(today, axis);
   const gridStyle = { "--days": axis.days.length } as CSSProperties;
@@ -415,6 +427,11 @@ function StructureView({ query }: { query: string }) {
           {withOperations.length > 0 && (
             <Button type="button" variant="ghost" size="small" onClick={toggleAllOperations}>
               {allOperationsOpen ? "Dölj alla operationer" : "Visa alla operationer"}
+            </Button>
+          )}
+          {canWrite && rootOrder && replannable(rootOrder) && (
+            <Button type="button" variant="secondary" size="small" disabled={busy} onClick={() => openReplan(rootOrder)}>
+              Planera om strukturen…
             </Button>
           )}
           {canWrite && data.totals.lockedOperations > 0 && (
@@ -524,6 +541,7 @@ function StructureView({ query }: { query: string }) {
                           busy={busy}
                           onComponents={() => openComponents(node)}
                           onMissing={() => openMissing(node)}
+                          onReplan={() => openReplan(node)}
                           onUnlock={() => unlockOrders([node.manufacturingOrderId], unlockOrderQuestion(node))}
                         />
                       ) : null
@@ -566,6 +584,9 @@ function StructureView({ query }: { query: string }) {
       {canWrite && missingFor !== null && (
         <MissingComponentsDialog open onClose={() => setMissingFor(null)} orderId={missingFor} onCreated={reload} />
       )}
+      {canWrite && (
+        <ReplanStructureDialog target={replanFor} onClose={() => setReplanFor(null)} onChanged={reload} />
+      )}
     </div>
   );
 }
@@ -577,6 +598,7 @@ function OrderMenu({
   busy,
   onComponents,
   onMissing,
+  onReplan,
   onUnlock,
 }: {
   node: StructureOrderNode;
@@ -584,6 +606,7 @@ function OrderMenu({
   busy: boolean;
   onComponents: () => void;
   onMissing: () => void;
+  onReplan: () => void;
   onUnlock: () => void;
 }) {
   return (
@@ -592,6 +615,7 @@ function OrderMenu({
       items={[
         facts.componentOrders && { label: "Flytta halvfabrikaten…", onSelect: onComponents, disabled: busy },
         facts.missingManufacturable && { label: "Skapa saknade halvfabrikat…", onSelect: onMissing, disabled: busy },
+        replannable(node) && { label: "Planera om strukturen…", onSelect: onReplan, disabled: busy },
         node.lockedOperations > 0 && { label: "Lås upp hela ordern", onSelect: onUnlock, disabled: busy },
       ]}
     />

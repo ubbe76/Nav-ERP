@@ -399,6 +399,8 @@ Förslaget är arbetsdagen före det tidigaste behovet bland alla behov ordern t
 
 Avmarkerar du en rad avmarkeras och inaktiveras de ordrar som hör under den. Tryck **Flytta** (avstängd utan markerade rader) och bekräfta. Bara **färdigdatum** ändras: kör **Planera** i Beläggningen för att lägga om dagarna, som dialogen påminner om. Har något datum ändrats under tiden visas ett felmeddelande och raderna läses in på nytt.
 
+Ska även **dagarna** läggas om — halvfabrikaten först och ordern när dess material är klart — använder du **Planera om strukturen…** på TO-kortet (frisläppt eller pågående order, behörighet Tillverkning; är ett ändrat **Planerat färdigdatum** inte sparat är knappen avstängd). På en bred skärm kan knappen ligga i kortets meny **⋯**. Se [Planera om strukturen](#planera-om-strukturen).
+
 ### Skapa saknade halvfabrikat
 
 Knappen **Skapa saknade halvfabrikat…** (behörighet Tillverkning) finns när ett tillverkat material ingenting täcker. Dialogen **Skapa saknade halvfabrikat** visar hela trädet med indrag per nivå: artikelnummer och benämning, **Antal** och **Färdigdatum** (*hinner inte* när datumet inte räcker, *saknar datum* när behovet saknar datum). Nedanför står noteringar — till exempel inköpta artiklar som saknas, de skapas inte här utan syns i Behovsberäkningen, och inaktiva artiklar (*… är inaktiv — ingen tillverkningsorder*). [Prognos](/hjalp/lager#prognos) räknas inte som behov här: ett halvfabrikat med saldo på hyllan får ingen ny order bara för att prognosen skulle förbruka saldot.
@@ -680,8 +682,43 @@ Med behörigheten Tillverkning kan du rätta till planen direkt i trädet. Sidan
 - **Lås upp strukturen** (ovanför trädet) släpper alla låsta operationer på alla tillverkningsordrar i trädet, efter frågan *Lås upp N operationer på M tillverkningsordrar?*.
 - **Flytta halvfabrikaten…** (orderns meny, när ordern har halvfabrikat under sig) öppnar samma dialog som på TO-kortet, se [Flytta halvfabrikaten](#flytta-halvfabrikaten).
 - **Skapa saknade halvfabrikat…** (orderns meny, när ett tillverkat material saknar täckning) öppnar samma dialog som på TO-kortet, se [Skapa saknade halvfabrikat](#skapa-saknade-halvfabrikat).
+- **Planera om strukturen…** (ovanför trädet när en tillverkningsorder ligger överst, och i varje öppen tillverkningsorders meny **⋯**) planerar om ordern och halvfabrikaten under den i ett svep, se [Planera om strukturen](#planera-om-strukturen).
 
 När ett lås släpps står dagarna kvar tills nästa **Planera** i Beläggning, som då planerar om operationerna.
+
+### Planera om strukturen
+
+**Planera om strukturen…** planerar om **en tillverkningsorder och halvfabrikatens tillverkningsordrar under den** i rätt ordning: **halvfabrikaten först**, och varje order får börja **den dag dess material är klart** — samma dag som halvfabrikatet blir klart eller inköpsordern kommer in. De planerade dagarna **låses**. Åtgärden finns på sidan Struktur (ovanför trädet och i orderns meny **⋯**) och på TO-kortet, för den som har behörigheten Tillverkning och bara på en frisläppt eller pågående order. Ordern du öppnar dialogen på är toppen; det som ligger ovanför den rörs inte.
+
+Dialogen **Planera om strukturen** är en förhandsvisning — ingenting ändras förrän du trycker **Planera om**. Den räknas om en kort stund efter varje ändring du gör (*Räknar…*).
+
+- **Färdigdatum** — toppens **Planerat färdigdatum**. Fältet visar det nuvarande; lämnar du det (eller tömmer fältet) ändras datumet inte. **Sätt till klar-dagen** fyller i den dag förhandsvisningen säger att ordern blir klar. Datumet styr inte vilka dagar operationerna hamnar på — placeringen är alltid framåt från i dag — utan bara om ordern räknas som **Sen**.
+- **Flytta även halvfabrikatens färdigdatum** (förvald) — varje **valt** halvfabrikat får sin nya klar-dag som färdigdatum. Utan krysset behåller halvfabrikaten sina datum.
+- **Tillverkningsordrar** — trädet med indrag per nivå och en kryssruta per halvfabrikat. Toppen är alltid med. Ett halvfabrikat som bara går till ordern ovanför är förvalt. Ett halvfabrikat som **också täcker andra behov** är inte förvalt och står som *delas med TO-1077 — planeras inte om* tills du kryssar i det. Avmarkerar du en order avmarkeras ordrarna under den, och de kan inte väljas förrän den är vald igen (*välj TO-1050 först*). En order som inte är vald ligger kvar som den är, och ordern ovanför räknar med dess nuvarande klar-dag.
+
+För varje order visar förhandsvisningen:
+
+- **Planerad:** dagarna före → efter (*1–3 dec → 4–8 dec*) och *klar 8 dec*, med märket **Sen** när klar-dagen ligger efter (det nya) färdigdatumet,
+- **Färdigdatum:** före → efter (*2 dec → 8 dec*),
+- varför ordern inte kan börja tidigare: *börjar tidigast 9 dec — när TO-1050 är klar* eller *— när IO-88 har kommit*,
+- operationerna (fäll ut *3 operationer*) med sina dagar före → efter. Operationer som redan var låsta **planeras också om** och pekas ut: *2 var låsta och planeras om*.
+
+Därunder står **Överbelagda dagar** (resurs och dag där lasten efter omplaneringen överstiger kapaciteten) och **Observera** med varningar och noteringar, till exempel:
+
+- *material saknar täckning (…) — räknas inte i när materialet är klart* — saknat material stoppar inte omplaneringen, men ordern får inte vänta på det. Lös bristen med [Skapa saknade halvfabrikat](#skapa-saknade-halvfabrikat) eller i Behovsberäkningen.
+- *… saknar datum — räknas inte i när materialet är klart* — en inköpsorder eller tillverkningsorder utan datum.
+- *op 10 är påbörjad och ligger före att TO-1050 är klar* — en påbörjad operation ligger alltid kvar i dag, även om halvfabrikatet inte är klart.
+- **Lego först i rutten:** börjar en vald order med en legooperation räknas legot här från dagen materialet är klart. Listorna och strukturen räknar ett lego från i dag, så de kan visa en tidigare klar-dag för just den ordern efteråt; noteringen säger vilken. Ordern ovanför ligger ändå rätt, eftersom dess dagar är låsta.
+
+Ryms en vald order inte inom planeringshorisonten (två år) står det i rött och **Planera om** är avstängd — välj bort ordern eller frigör kapacitet.
+
+**Planera om** skriver det förhandsvisningen visar: de nya dagarna, låsen och färdigdatumen. Dialogen står kvar med resultatet och knappen **Stäng**, och sidan läses om. Har planen eller ett färdigdatum i trädet ändrats sedan förhandsvisningen skrivs ingenting; dialogen visar *Planen har ändrats — förhandsvisningen är uppdaterad. Kontrollera och planera om igen.* med den nya förhandsvisningen.
+
+Att känna till:
+
+- **Resursen byts aldrig**, och **Planera** i Beläggning är oförändrad — den väntar inte på halvfabrikat. Efter en omplanering rör **Planera** inte trädet, eftersom allt är låst. Släpp låsen med **Lås upp hela ordern** eller **Lås upp strukturen** när dagarna ska få flyttas igen.
+- Kör du **Planera om strukturen** en gång till planeras de låsta operationerna om på nytt — annars hade en andra körning inte gjort något.
+- Direkt efter en omplanering kan **Flytta halvfabrikaten…** på TO-kortet föreslå ett tidigare datum (*Behövs tidigare*) för ett halvfabrikat som blir klart samma dag som ordern ovanför börjar. Det är väntat: det förslaget är alltid arbetsdagen före behovet, medan omplaneringen låter ordern börja samma dag.
 
 ### Strukturen på telefonen
 

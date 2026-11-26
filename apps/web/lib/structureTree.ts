@@ -98,6 +98,11 @@ export function unlockOrderQuestion(node: Pick<StructureOrderNode, "orderNumber"
   return `Lås upp ${plural(node.lockedOperations, "operation", "operationer")} på ${node.orderNumber}? Dagarna står kvar tills nästa Planera.`;
 }
 
+// Planera om strukturen… is offered on an open TO (Frisläppt/Pågående — the
+// only ones with operations to plan; the API answers 409 for the rest).
+export const replannable = (node: Pick<StructureOrderNode, "orderStatus">): boolean =>
+  node.orderStatus === "released" || node.orderStatus === "in_progress";
+
 // The TO has a manufactured material nothing covers (Skapa saknade
 // halvfabrikat…) / a halvfabrikat TO below it (Flytta halvfabrikaten…).
 export function orderChildFacts(nodes: readonly StructureNode[], orderNodeId: string): { missingManufacturable: boolean; componentOrders: boolean } {
