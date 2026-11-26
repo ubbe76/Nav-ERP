@@ -133,11 +133,12 @@ export function splitResources(resources: readonly DayPlanResource[]): { busy: D
 }
 
 // The page's own address with the day and the group ("?dag=&grupp="), for the
-// link between the page and Mötesläget.
-export function dayPlanHref(base: string, params: { dag?: string | null; grupp?: string | null }): string {
+// link between the page and Mötesläget, and the page's view ("&visa=material").
+export function dayPlanHref(base: string, params: { dag?: string | null; grupp?: string | null; visa?: string | null }): string {
   const qs = new URLSearchParams();
   if (params.dag) qs.set("dag", params.dag);
   if (params.grupp) qs.set("grupp", params.grupp);
+  if (params.visa) qs.set("visa", params.visa);
   const query = qs.toString();
   return query ? `${base}?${query}` : base;
 }

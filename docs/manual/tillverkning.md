@@ -647,6 +647,45 @@ På en telefon och i ett smalt fönster visas varje operation som ett kort i st�
 
 Halvfabrikat och material som inte är kopplat till en operation visas inte här — se **Täcks av** på TO-kortet.
 
+### Planera efter material
+
+Med **Visa** överst väljer du mellan **Körordning** och **Material**. I läget **Material** grupperas varje resurs operationer efter **ingående material**, så att du lätt ser vilka jobb som tar samma plåt eller profil och kan köra dem ihop.
+
+Som material räknas samma sak som i kolumnen [Material](#material): **köpt** material som är **kopplat till operationen i beredningen** och som det finns något kvar att ta ut av.
+
+- Varje material är en grupp med rubriken artikelnummer och benämning, *behov 14,5 st · användbart saldo 22 st* och antalet operationer. **Behov** är summan av gruppens rader. Räcker inte saldot till gruppen tillsammans står raden i rött med märket **räcker inte**. Klicka på rubriken för att fälla ihop eller fälla ut gruppen.
+- Under rubriken står gruppens operationer med **Dag**, **TO**, **Operation** och **Artikel**, **Antal kvar**, **Tid kvar (h)**, **Färdigdatum**, **Status** och **Behov** — radens eget behov av materialet och *finns*, *saknas 4 st* eller *kommer 2 dec · IO-88*.
+- **Saldot räknas per rad, summan visar konkurrensen:** varje rad jämförs för sig mot hela det användbara saldot, så två rader kan båda visa *finns* fast saldot bara räcker till den ena. Det är gruppens summa — *behov* mot *användbart saldo* och märket **räcker inte** — som visar om materialet räcker till alla.
+- En operation som tar två material står i båda grupperna.
+- Sist kommer **Utan kopplat material (N)** — operationer som saknar kopplat köpt material. Gruppen är hopfälld och har texten *Koppla materialet till operationen i beredningen för att kunna samköra.* Därefter **Materialet uttaget (N)** för operationer där allt kopplat material redan är uttaget. Ingen av de två grupperna går att välja ur.
+
+Mötesläget visar alltid körordningen.
+
+### Samkör
+
+Med rättigheten Tillverkning har varje rad i en materialgrupp en kryssruta. Kryssa i de operationer som ska köras ihop — minst två, på samma resurs — och välj **Samkör valda…** under gruppen. Bredvid knappen står hur många som är valda. En operation som står i två grupper är samma val i båda. En operation utan tid kvar går inte att välja.
+
+Dialogen **Samkör** visar vad som händer **innan** något ändras:
+
+- **Dag** — dagen operationerna ska köras. Förvalet är dagen som dagplanen visar; i [Körplan](#korplan) är det den tidigaste planerade dagen bland de valda, tidigast i dag. Det går inte att välja en dag som passerat. Varje gång du byter dag räknas förhandsvisningen om.
+- **Operationer** — de valda, med var de ligger och vart de flyttas: *tors 26 nov → ons 2 dec*, *ligger redan på dagen* eller *ryms inte inom två år*.
+- **Dagens last** — resursens last den dagen före och efter, till exempel *4,2 h → 9,8 h av 8 h · överbelagd*. En samkörning får ta dagens hela kapacitet, så dagen kan bli överbelagd.
+- **Flyttas också** — efterföljande operationer i samma ordrar som följer med.
+- **Blir sena** — ordrar som blir klara efter sitt färdigdatum.
+- **Observera** — övriga varningar från planeringen.
+- **Material** — de valda operationernas material tillsammans: *behov* mot *användbart saldo*, och *räcker inte* när saldot inte täcker dem.
+- **Körordning** — dagens ordning efteråt, med de valda märkta *samkörs*. De läggs **intill varandra**, efter de operationer som redan är ordnade för hand den dagen, i den ordning listan visade dem.
+
+Har resursen ingen kapacitet den dagen (helg, röd dag eller ledig dag i schemat) står det i dialogen och **Samkör** är avstängd — välj en annan dag.
+
+**Samkör** flyttar operationerna till dagen, lägger dem intill varandra i körordningen och **låser** dem. Dialogen visar resultatet och du stänger den med **Stäng**.
+
+- Operationerna får märket **Låst**: **Planera** flyttar dem inte. Vill du släppa en operation igen väljer du **Lås upp** i radens meny **⋯** (läget **Körordning**) eller i **Flytta…** i [Beläggning](#flytta-och-las-upp).
+- **Ställtiden räknas per operation** även när jobben körs ihop — planen och kalkylen ändras inte av en samkörning.
+- Ingenting sparas om själva gruppen: en samkörning är de flyttade dagarna, låsen och platserna i körordningen. Ordningen ändrar du som vanligt med **Upp** och **Ned**.
+
+Har någon annan ändrat planen sedan listan lästes får du meddelandet *Planen har ändrats sedan listan lästes — den har lästs om. Välj operationerna igen.* Då är inget ändrat.
+
 ### Ordna dagen
 
 Med rättigheten Tillverkning ändrar du körordningen på två sätt:
@@ -689,6 +728,8 @@ Går det inte att läsa om — nätverket är nere — står *Kunde inte läsa o
 
 Välj **Resurs** (produktionsresurserna; legoresurser finns inte med eftersom de inte körs hos er) och **T.o.m.** — ett datum. Förvalet är sista dagen i nästa vecka; listan tar med allt som ligger till och med det datumet. Utan vald resurs står *Välj en resurs*, och finns inget att köra står *Inga kommande arbeten på resursen t.o.m. 21 nov*.
 
+Med **Visa** väljer du mellan **Körordning** och **Material**. Läget **Material** grupperar resursens kommande operationer efter ingående material och har **Samkör valda…** — det fungerar som i dagplanen, se [Planera efter material](#planera-efter-material) och [Samkör](#samkor). Här spänner listan över flera dagar, så det är i Körplan du samlar jobb från olika dagar till en. Rader för en planerad TO, som saknar operationer än, står sist under **Planerad TO (N)** och går inte att välja.
+
 ### Vad som tas med
 
 - Väntande operationer i tillverkningsordrar som är **Frisläppt**, **Pågår** eller **Planerad**. Klara och stängda ordrar, makulerade ordrar, klara operationer och legooperationer tas inte med.
@@ -715,6 +756,7 @@ Med rättigheten Tillverkning har varje **planerad** operation i en dagsgrupp kn
 - **Tid kvar (h)** — återstående tid i timmar med två decimaler: stycktid × kvarvarande antal plus ställtiden så länge den inte är gjord. Det är samma tal som [Beläggning](#belaggning) räknar med för operationen.
 - **Färdigdatum** — tillverkningsorderns färdigdatum.
 - **Status** — hur långt operationen kan göras just nu: **Redo** (hela det som återstår kan göras), **Väntar på op N** (föregående operation har inte levererat något ännu), delvis redo visas som *N redo · väntar på op M*, och **Planerad TO** för en order som inte är frisläppt än. Beredskapen räknas som i [stämpelterminalen](/hjalp/terminal). Märket **Låst** betyder att dagen är flyttad för hand i Beläggning och ligger kvar när du kör **Planera**.
+- **Material** — det köpta material som är kopplat till operationen och om det finns, som kolumnen [Material](#material) i dagplanen.
 
 ### Skriv ut
 

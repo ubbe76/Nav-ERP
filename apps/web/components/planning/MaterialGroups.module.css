@@ -1,0 +1,376 @@
+/* Material-läget: one collapsible group per ingoing material. Two row
+   layouts share the markup, as in Dagplan: a table when the box is at least
+   760px wide and cards below that (a phone, a narrow resource section). */
+.groups {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* The last group's tinted header stays inside the box's rounded corners. */
+  overflow: hidden;
+  border-radius: 0 0 var(--radius-kpi-card) var(--radius-kpi-card);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+.empty {
+  margin: 0;
+  padding: 12px 16px;
+  color: var(--color-text-muted);
+}
+
+.group {
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.group:last-child {
+  border-bottom: none;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  padding: 9px 16px;
+  background: var(--color-bg);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.group[open] > .summary {
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.title {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.totals {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  color: var(--color-text-secondary);
+}
+
+.group[data-short="true"] .totals {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.shortBadge {
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.group[data-rest="true"] .title {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.hint {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* --- Rows: the table ---------------------------------------------------- */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.headRow,
+.row {
+  display: grid;
+  grid-template-columns: 92px 84px minmax(0, 1.4fr) 76px 82px 92px minmax(0, 1fr) minmax(0, 1.1fr);
+  column-gap: 12px;
+  padding: 0 16px;
+}
+
+.headRow[data-select="true"],
+.row[data-select="true"] {
+  grid-template-columns: 24px 92px 84px minmax(0, 1.4fr) 76px 82px 92px minmax(0, 1fr) minmax(0, 1.1fr);
+}
+
+.headRow {
+  padding-top: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.headRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.right {
+  text-align: right;
+}
+
+.row {
+  align-items: start;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-divider);
+  line-height: 1.45;
+}
+
+.rows > .row:last-child {
+  border-bottom: none;
+}
+
+.row > span {
+  min-width: 0;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  min-height: 1.45em;
+}
+
+.day {
+  white-space: nowrap;
+}
+
+.row[data-late="true"] .day {
+  color: var(--status-delayed-text);
+  font-weight: 600;
+}
+
+.orderLink {
+  color: var(--accent-fg);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.operation {
+  display: flex;
+  flex-direction: column;
+}
+
+.operationText {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.facts {
+  display: contents;
+}
+
+.facts > span {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.quantity,
+.hours {
+  text-align: right;
+}
+
+.hours .unit {
+  display: none;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.lockBadge {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.need {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+}
+
+.state {
+  font-weight: 600;
+}
+
+.state[data-tone="ok"] {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.state[data-tone="coming"] {
+  color: var(--status-delayed-text);
+}
+
+.state[data-tone="short"] {
+  color: var(--status-stopped-text);
+}
+
+.document {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.chosen {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background: var(--color-bg);
+  }
+}
+
+/* --- Rows: cards (a narrow box) ----------------------------------------- */
+
+@container (max-width: 759px) {
+  .headRow {
+    display: none;
+  }
+
+  .count {
+    margin-left: 0;
+  }
+
+  .row,
+  .row[data-select="true"] {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "order operation day"
+      "facts facts facts"
+      "status status status"
+      "need need need";
+    column-gap: 10px;
+    row-gap: 4px;
+    padding: 12px 16px;
+  }
+
+  .row[data-select="true"] {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "check order operation day"
+      "check facts facts facts"
+      "check status status status"
+      "check need need need";
+  }
+
+  /* A whole touch target for the checkbox. */
+  .check {
+    grid-area: check;
+    align-self: stretch;
+    align-items: flex-start;
+    min-width: 28px;
+    padding-top: 2px;
+  }
+
+  .day {
+    grid-area: day;
+    text-align: right;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+
+  .order {
+    grid-area: order;
+  }
+
+  .operation {
+    grid-area: operation;
+  }
+
+  .facts {
+    grid-area: facts;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+  }
+
+  .quantity,
+  .hours {
+    text-align: left;
+  }
+
+  .hours .unit {
+    display: inline;
+  }
+
+  .facts > span::before,
+  .need::before {
+    content: attr(data-label) " ";
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+
+  .status {
+    grid-area: status;
+  }
+
+  .need {
+    grid-area: need;
+  }
+
+  .need[data-empty="true"] {
+    display: none;
+  }
+}

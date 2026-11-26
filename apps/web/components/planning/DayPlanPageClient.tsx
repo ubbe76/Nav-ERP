@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical, Maximize, Minimize, Presentation, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
+import { runPlanView, type RunPlanView } from "../../lib/coRun";
 import {
   RUN_PLAN_STATUS_PILL,
   dayPlanHref,
@@ -32,7 +33,10 @@ import { Select } from "../ui/Field";
 import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
 import { RowMenu } from "../ui/RowMenu";
+import { SegmentedToggle } from "../ui/SegmentedToggle";
 import { StatusPill } from "../ui/StatusPill";
+import { CoRunDialog, type CoRunTarget } from "./CoRunDialog";
+import { MaterialGroups } from "./MaterialGroups";
 import { MoveOperationDialog, type MoveTarget } from "./MoveOperationDialog";
 import { RunPlanMaterials } from "./RunPlanMaterials";
 import { moveOperationTo, saveDayOrder, unlockOperation } from "./dayPlanWrites";
@@ -42,8 +46,10 @@ import styles from "./DayPlanPageClient.module.css";
 // meeting walks through. The API owns the selection, the order, the load and
 // the material status (GET /planning/day-plan); this page presents, and for
 // users with Tillverkning orders the day and moves operations with the
-// existing planning routes. `meeting` is Mötesläget: bigger, read-only,
-// reloaded every minute.
+// existing planning routes. Visa: Material (?visa=material) groups each
+// resource's rows by ingoing material, with Samkör valda… for the chosen
+// ones. `meeting` is Mötesläget: bigger, read-only, reloaded every minute —
+// and always in körordning.
 
 const PAGE = "/tillverkning/dagplan";
 const MEETING_PAGE = "/tillverkning/dagplan/mote";
@@ -67,6 +73,8 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   const searchParams = useSearchParams();
   const dag = searchParams.get("dag") ?? "";
   const grupp = searchParams.get("grupp") ?? "";
+  // Mötesläget is the run order on the wall: no Material view there.
+  const view: RunPlanView = meeting ? "order" : runPlanView(searchParams.get("visa"));
 
   // Mötesläget never writes: no ordering, no drag, no row menu, no dialog.
   const can = useCan();
@@ -82,6 +90,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   // Warnings from a move (I morgon, Lägg på i dag), shown above the list.
   const [notice, setNotice] = useState<{ title: string; warnings: string[] } | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
+  const [coRunTarget, setCoRunTarget] = useState<CoRunTarget | null>(null);
   const [finePointer, setFinePointer] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [drop, setDrop] = useState<DropState | null>(null);
@@ -171,12 +180,13 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     else void document.documentElement.requestFullscreen().catch(() => undefined);
   }
 
-  // URL-driven: ?dag=&grupp=. No dag = the server's today.
-  function show(next: { dag?: string | null; grupp?: string | null }) {
+  // URL-driven: ?dag=&grupp=&visa=. No dag = the server's today.
+  function show(next: { dag?: string | null; grupp?: string | null; visa?: RunPlanView }) {
     setNotice(null);
     const href = dayPlanHref(pathname, {
       dag: next.dag === undefined ? dag : next.dag,
       grupp: next.grupp === undefined ? grupp : next.grupp,
+      visa: (next.visa ?? view) === "material" ? "material" : null,
     });
     router.replace(href, { scroll: false });
   }
@@ -191,7 +201,9 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     try {
       await saveDayOrder(resource.workCenter.id, data.date, reorderIds(ids, from, to));
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte ändra ordningen"));
+      // The notice, not the error: the reload below clears the error, so
+      // a 409 run-plan-order-changed was never seen.
+      setNotice({ title: apiErrorMessage(err, "Kunde inte ändra ordningen"), warnings: [] });
     } finally {
       setBusy(false);
       // Also after a 409: the plan changed meanwhile, show it as it is.
@@ -221,7 +233,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         });
       }
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte flytta operationen"));
+      setNotice({ title: apiErrorMessage(err, "Kunde inte flytta operationen"), warnings: [] });
     } finally {
       setBusy(false);
       reload();
@@ -237,7 +249,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     try {
       await unlockOperation(row.moOperationId);
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte låsa upp operationen"));
+      setNotice({ title: apiErrorMessage(err, "Kunde inte låsa upp operationen"), warnings: [] });
     } finally {
       setBusy(false);
       reload();
@@ -347,6 +359,18 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
               ))}
             </Select>
           </label>
+          <div className={styles.field}>
+            <span className={styles.label}>Visa</span>
+            <SegmentedToggle
+              ariaLabel="Visa"
+              value={view}
+              options={[
+                { value: "order", label: "Körordning" },
+                { value: "material", label: "Material" },
+              ]}
+              onChange={(next) => show({ visa: next })}
+            />
+          </div>
           <div className={styles.toolbarActions}>
             <Link href={dayPlanHref(MEETING_PAGE, { dag, grupp })} className={`${buttonStyles.button} ${buttonStyles.secondary} ${buttonStyles.small}`}>
               <Presentation size={16} aria-hidden="true" />
@@ -389,6 +413,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
                 resource={resource}
                 data={data}
                 meeting={meeting}
+                view={view}
                 canWrite={canWrite}
                 canDrag={canWrite && finePointer}
                 busy={busy || loading}
@@ -400,6 +425,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
                 onMove={(row) => setMoveTarget(moveTargetOf(row, resource))}
                 onMoveTo={(row, date) => void moveTo(row, date)}
                 onUnlock={(row) => void unlock(row)}
+                onCoRun={(rows) => setCoRunTarget({ workCenter: resource.workCenter, rows, date: data.date })}
               />
             ))}
           </div>
@@ -415,6 +441,21 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
       {canWrite && (
         <MoveOperationDialog target={moveTarget} today={today} onClose={() => setMoveTarget(null)} onChanged={reload} />
       )}
+      {canWrite && data && (
+        <CoRunDialog
+          target={coRunTarget}
+          today={data.today}
+          onClose={() => setCoRunTarget(null)}
+          onChanged={reload}
+          onConflict={(message) => {
+            // The plan changed since the list was read: close, say so and
+            // read again (which clears the selection).
+            setCoRunTarget(null);
+            setNotice({ title: message, warnings: [] });
+            reload();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -423,6 +464,7 @@ function ResourceSection({
   resource,
   data,
   meeting,
+  view,
   canWrite,
   canDrag,
   busy,
@@ -434,10 +476,12 @@ function ResourceSection({
   onMove,
   onMoveTo,
   onUnlock,
+  onCoRun,
 }: {
   resource: DayPlanResource;
   data: DayPlanResult;
   meeting: boolean;
+  view: RunPlanView;
   canWrite: boolean;
   canDrag: boolean;
   busy: boolean;
@@ -449,8 +493,12 @@ function ResourceSection({
   onMove: (row: RunPlanRow) => void;
   onMoveTo: (row: RunPlanRow, date: string) => void;
   onUnlock: (row: RunPlanRow) => void;
+  onCoRun: (rows: RunPlanRow[]) => void;
 }) {
   const { workCenter, load } = resource;
+  // Material-läget groups everything the section lists: Kvar från tidigare
+  // first, then the day's operations — the order a co-run is sent in.
+  const listed = useMemo(() => [...resource.carried, ...resource.rows], [resource]);
   const isToday = data.date === data.today;
   const ids = reorderableIds(resource.rows);
   const percent = loadPercent(load);
@@ -649,7 +697,17 @@ function ResourceSection({
           ))}
       </header>
 
-      {resource.carried.length + resource.rows.length > 0 ? (
+      {resource.carried.length + resource.rows.length > 0 && view === "material" ? (
+        <MaterialGroups
+          rows={listed}
+          groups={resource.materialGroups}
+          unlinkedRowKeys={resource.unlinkedRowKeys}
+          version={data}
+          canSelect={canWrite}
+          busy={busy}
+          onCoRun={onCoRun}
+        />
+      ) : resource.carried.length + resource.rows.length > 0 ? (
         <div className={styles.list} data-columns={columns}>
           <div className={styles.headRow} aria-hidden="true">
             <span>Nr</span>

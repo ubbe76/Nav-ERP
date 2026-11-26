@@ -1,8 +1,10 @@
 // Dagplan's writes — the ONLY place the page changes anything, so Mötesläget
 // (which never imports a caller of these) cannot write by accident
-// (web-day-plan.test.ts). All three are the existing planning routes.
+// (web-day-plan.test.ts). The first three are the existing planning routes;
+// the co-run pair is called only by CoRunDialog, which the pages mount for
+// users with Tillverkning.
 import { apiFetch } from "../../lib/api";
-import type { MoveOperationResult, RunPlanOrderResult, UnlockOperationResult } from "../../lib/types";
+import type { CoRunInput, CoRunResult, MoveOperationResult, RunPlanOrderResult, UnlockOperationResult } from "../../lib/types";
 
 // Ordningen inom dagen: the day's full list of reorderable operations.
 export function saveDayOrder(workCenterId: string, date: string, moOperationIds: string[]): Promise<RunPlanOrderResult> {
@@ -22,4 +24,15 @@ export function moveOperationTo(moOperationId: string, date: string): Promise<Mo
 
 export function unlockOperation(moOperationId: string): Promise<UnlockOperationResult> {
   return apiFetch<UnlockOperationResult>(`/api/v1/planning/operations/${moOperationId}/unlock`, { method: "POST" });
+}
+
+// Samkör — the preview computes and writes nothing (a POST that only reads).
+export function previewCoRun(input: CoRunInput): Promise<CoRunResult> {
+  return apiFetch<CoRunResult>("/api/v1/planning/co-run/preview", { method: "POST", body: JSON.stringify(input) });
+}
+
+// Samkör — moves the chosen operations to the day, locks them and lays them
+// next to each other in the run order.
+export function writeCoRun(input: CoRunInput): Promise<CoRunResult> {
+  return apiFetch<CoRunResult>("/api/v1/planning/co-run", { method: "POST", body: JSON.stringify(input) });
 }

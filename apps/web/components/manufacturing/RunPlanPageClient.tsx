@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "../../lib/api";
+import { defaultCoRunDate, runPlanView } from "../../lib/coRun";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDate } from "../../lib/date";
 import { RUN_PLAN_STATUS_PILL, runPlanStatusText } from "../../lib/dayPlan";
@@ -13,15 +14,21 @@ import { shortDate, weekdayShortDate } from "../../lib/planning";
 import type { RunPlanOrderResult, RunPlanResult, RunPlanRow, RunPlanDay } from "../../lib/types";
 import { useCan } from "../PermissionsProvider";
 import { Input, Select } from "../ui/Field";
-import { FormError, FormHint } from "../ui/Form";
+import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
+import { SegmentedToggle } from "../ui/SegmentedToggle";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { useListNavigation } from "../ui/ListControls";
+import { CoRunDialog, type CoRunTarget } from "../planning/CoRunDialog";
+import { MaterialGroups } from "../planning/MaterialGroups";
+import { RunPlanMaterials } from "../planning/RunPlanMaterials";
 import styles from "./RunPlanPageClient.module.css";
 
 // Körplan: the waiting operations on one resource, grouped by day. The API
 // owns urval, ordning, dagnyckel and Tid kvar; this page only presents.
+// Visa: Material (?visa=material) groups the same rows by ingoing material,
+// with Samkör valda… for users with Tillverkning.
 
 const formatHours = (hours: number): string =>
   hours.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -56,6 +63,7 @@ const COLUMNS = [
   { key: "hours", label: "Tid kvar (h)", width: "100px", align: "right" as const },
   { key: "due", label: "Färdigdatum", width: "110px" },
   { key: "status", label: "Status", width: "minmax(190px, 1.5fr)" },
+  { key: "material", label: "Material", width: "minmax(200px, 2fr)" },
 ];
 // Upp/Ned: only shown in a reorderable group for users with Tillverkning.
 const MOVE_COLUMN = { key: "move", label: "Ordning", width: "96px" };
@@ -116,6 +124,9 @@ function renderCell(row: TableRow, key: string, move?: MoveControls) {
       return <span className="num">{formatHours(row.remainingHours)}</span>;
     case "due":
       return formatStockholmDate(row.dueDate);
+    case "material":
+      // A Planerad TO has no material rows to link yet.
+      return row.status === "planned_order" ? "" : <RunPlanMaterials row={row} />;
     default:
       return (
         <span className={styles.statusCell}>
@@ -131,6 +142,7 @@ export function RunPlanPageClient() {
   const { setFilter } = useListNavigation();
   const resource = searchParams.get("resurs") ?? "";
   const tom = searchParams.get("tom") ?? "";
+  const view = runPlanView(searchParams.get("visa"));
 
   const canOrder = useCan()(["tillverkning"]);
   const [data, setData] = useState<RunPlanResult | null>(null);
@@ -138,6 +150,9 @@ export function RunPlanPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [ordering, setOrdering] = useState(false);
+  const [coRunTarget, setCoRunTarget] = useState<CoRunTarget | null>(null);
+  // A message that survives the reload it comes with (409 co-run-changed).
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -171,13 +186,16 @@ export function RunPlanPageClient() {
       [next[index], next[target]] = [next[target]!, next[index]!];
       setOrdering(true);
       setError(null);
+      setNotice(null);
       try {
         await apiFetch<RunPlanOrderResult>("/api/v1/planning/run-plan/order", {
           method: "PUT",
           body: JSON.stringify({ workCenterId: resource, date: group.date, moOperationIds: next }),
         });
       } catch (err) {
-        setError(apiErrorMessage(err, "Kunde inte ändra ordningen"));
+        // The notice, not the error: the reload below clears the error, so
+        // a 409 run-plan-order-changed was never seen.
+        setNotice(apiErrorMessage(err, "Kunde inte ändra ordningen"));
       } finally {
         setOrdering(false);
         // Also after a 409: the plan changed meanwhile, show it as it is.
@@ -227,12 +245,28 @@ export function RunPlanPageClient() {
             aria-label="T.o.m."
           />
         </label>
+        <div className={styles.field}>
+          <span className={styles.label}>Visa</span>
+          <SegmentedToggle
+            ariaLabel="Visa"
+            value={view}
+            options={[
+              { value: "order", label: "Körordning" },
+              { value: "material", label: "Material" },
+            ]}
+            onChange={(next) => {
+              setNotice(null);
+              void setFilter("visa", next === "material" ? "material" : null);
+            }}
+          />
+        </div>
         {resource && data?.workCenter ? (
           <PrintButton href={`/api/v1/planning/run-plan/pdf?${pdfQuery.toString()}`} size="default" />
         ) : null}
       </div>
 
       <FormError margin="below">{error}</FormError>
+      {notice && <FormNotice className={styles.notice}>{notice}</FormNotice>}
 
       {!resource && !error && <FormHint>Välj en resurs</FormHint>}
 
@@ -240,7 +274,46 @@ export function RunPlanPageClient() {
         <FormHint>Inga kommande arbeten på resursen t.o.m. {shortDate(toDate)}</FormHint>
       )}
 
-      {resource && data?.workCenter && data.rows.length > 0 && (
+      {resource && data?.workCenter && data.rows.length > 0 && view === "material" && (
+        <>
+          <section className={styles.materialBox} data-loading={loading ? "true" : undefined}>
+            <MaterialGroups
+              rows={data.rows}
+              groups={data.materialGroups}
+              unlinkedRowKeys={data.unlinkedRowKeys}
+              version={data}
+              canSelect={canOrder}
+              busy={loading}
+              onCoRun={(rows) => {
+                setNotice(null);
+                setCoRunTarget({ workCenter: data.workCenter!, rows, date: defaultCoRunDate(rows, data.today) });
+              }}
+            />
+          </section>
+          <div className={styles.total}>
+            <span>Totalt</span>
+            <span className="num">{formatHours(data.totalHours)} h</span>
+          </div>
+        </>
+      )}
+
+      {canOrder && data && (
+        <CoRunDialog
+          target={coRunTarget}
+          today={data.today}
+          onClose={() => setCoRunTarget(null)}
+          onChanged={() => setReloadTick((n) => n + 1)}
+          onConflict={(message) => {
+            // The plan changed since the list was read: close, say so and
+            // read again (which clears the selection).
+            setCoRunTarget(null);
+            setNotice(message);
+            setReloadTick((n) => n + 1);
+          }}
+        />
+      )}
+
+      {resource && data?.workCenter && data.rows.length > 0 && view === "order" && (
         <>
           {groups.map((group) => {
             const groupRows = rowsByGroup.get(groupKey(group)) ?? [];
