@@ -64,10 +64,15 @@ describe("sectionsForUser", () => {
     expect(visible.length).toBeGreaterThan(0);
     for (const href of visible) {
       expect(
-        href.startsWith("/tillverkning/terminal") || href.startsWith("/tillverkning/ordrar") || href.startsWith("/tillverkning/korplan")
+        href.startsWith("/tillverkning/terminal") ||
+          href.startsWith("/tillverkning/ordrar") ||
+          href.startsWith("/tillverkning/korplan") ||
+          href.startsWith("/tillverkning/dagplan")
       ).toBe(true);
     }
     // Körplan (2026-11-12): the workshop sees its own resource's coming work.
     expect(visible).toContain("/tillverkning/korplan");
+    // Dagplan reads like Körplan.
+    expect(visible).toContain("/tillverkning/dagplan");
   });
 });

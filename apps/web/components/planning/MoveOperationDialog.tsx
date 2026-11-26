@@ -11,16 +11,29 @@ import { stockholmToday } from "../../lib/date";
 import { plannedDateLabel } from "../../lib/planning";
 import type {
   CapacityCellOrder,
-  CapacityResourceRow,
+  CapacityDayLoad,
   MoveOperationResult,
   PlanWarning,
   UnlockOperationResult,
 } from "../../lib/types";
 import styles from "./MoveOperationDialog.module.css";
 
+// What the dialog reads — Beläggning hands in its whole cell order and
+// resource row, Dagplan a körplan row and the day's load (lib/dayPlan.ts).
 export interface MoveTarget {
-  order: CapacityCellOrder;
-  resource: CapacityResourceRow;
+  order: Pick<
+    CapacityCellOrder,
+    | "moOperationId"
+    | "orderNumber"
+    | "articleNumber"
+    | "articleName"
+    | "sequenceNo"
+    | "remainingHours"
+    | "plannedStartDate"
+    | "plannedEndDate"
+    | "planLocked"
+  >;
+  resource: { code: string; name: string; dayLoads?: CapacityDayLoad[] };
 }
 
 function formatHours(hours: number): string {

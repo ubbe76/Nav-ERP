@@ -6,6 +6,7 @@ import {
   capacityQuerySchema,
   componentMovesSchema,
   createPlanningOrdersSchema,
+  dayPlanQuerySchema,
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
   listAbcQuerySchema,
@@ -29,6 +30,7 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerNotFoundError,
+  DayPlanDateOutOfRangeError,
   DeliveryTimeChangedError,
   NothingToReserveError,
   OperationNotFoundError,
@@ -370,6 +372,33 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return reply.send(pdf.content);
     } catch (err) {
       if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Dagplan — every resource's work one day, derived at read time. Read
+  // like the körplan (MO_READ); no price data. 400
+  // day-plan-date-out-of-range outside today … today + 41.
+  app.get("/planning/day-plan", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = dayPlanQuerySchema.parse(req.query);
+    try {
+      return await service.getDayPlan(query);
+    } catch (err) {
+      if (err instanceof DayPlanDateOutOfRangeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // The same day as a PDF (A4 landscape) — Skriv ut.
+  app.get("/planning/day-plan/pdf", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = dayPlanQuerySchema.parse(req.query);
+    try {
+      const pdf = await service.getDayPlanPdf(query);
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", contentDisposition(pdf.filename, "inline"));
+      return reply.send(pdf.content);
+    } catch (err) {
+      if (err instanceof DayPlanDateOutOfRangeError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

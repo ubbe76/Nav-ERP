@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDate } from "../../lib/date";
+import { RUN_PLAN_STATUS_PILL, runPlanStatusText } from "../../lib/dayPlan";
 import { formatQuantity } from "../../lib/format";
 import { shortDate, weekdayShortDate } from "../../lib/planning";
 import type { RunPlanOrderResult, RunPlanResult, RunPlanRow, RunPlanDay } from "../../lib/types";
@@ -14,7 +15,7 @@ import { useCan } from "../PermissionsProvider";
 import { Input, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
-import { StatusPill, type Status } from "../ui/StatusPill";
+import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { useListNavigation } from "../ui/ListControls";
 import styles from "./RunPlanPageClient.module.css";
@@ -24,27 +25,6 @@ import styles from "./RunPlanPageClient.module.css";
 
 const formatHours = (hours: number): string =>
   hours.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-// Same wording as the PDF.
-function statusText(row: RunPlanRow): string {
-  switch (row.status) {
-    case "planned_order":
-      return "Planerad TO";
-    case "ready":
-      return "Redo";
-    case "partial":
-      return `${formatQuantity(row.available ?? 0)} redo · väntar på op ${row.waitingForSequenceNo ?? ""}`.trim();
-    default:
-      return `Väntar på op ${row.waitingForSequenceNo ?? ""}`.trim();
-  }
-}
-
-const STATUS_PILL: Record<RunPlanRow["status"], Status> = {
-  planned_order: "draft",
-  ready: "done",
-  partial: "delayed",
-  not_ready: "stopped",
-};
 
 function groupOf(row: RunPlanRow): string {
   if (row.late) return "late";
@@ -139,7 +119,7 @@ function renderCell(row: TableRow, key: string, move?: MoveControls) {
     default:
       return (
         <span className={styles.statusCell}>
-          <StatusPill status={STATUS_PILL[row.status]} label={statusText(row)} compact />
+          <StatusPill status={RUN_PLAN_STATUS_PILL[row.status]} label={runPlanStatusText(row)} compact />
           {row.planLocked && <span className={styles.lockBadge}>Låst</span>}
         </span>
       );

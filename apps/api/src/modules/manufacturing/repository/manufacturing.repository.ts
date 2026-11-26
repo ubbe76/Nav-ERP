@@ -1553,9 +1553,14 @@ export function createManufacturingRepository(db: Db) {
                 articleId: articles.id,
                 articleNumber: articles.articleNumber,
                 articleName: articles.name,
+                articleType: articles.type,
+                unit: units.code,
+                quantityPlanned: moMaterialConsumptions.quantityPlanned,
+                quantityConsumed: moMaterialConsumptions.quantityConsumed,
               })
               .from(moMaterialConsumptions)
               .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
+              .leftJoin(units, eq(units.id, articles.unitId))
               .where(inArray(moMaterialConsumptions.moOperationId, operationIds)),
       ]);
       return { listed, siblings, materials };

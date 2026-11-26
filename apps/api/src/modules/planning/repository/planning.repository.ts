@@ -10,12 +10,15 @@ import {
   articleForecasts,
   articles,
   articleSuppliers,
+  attendanceSessions,
   bomComponents,
   configuratorTemplates,
   configuratorVariants,
   customers,
   daySchedules,
   dayScheduleBreaks,
+  employees,
+  employeeWorkCenters,
   holidays,
   inquiries,
   inquiryRows,
@@ -64,6 +67,7 @@ import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, OperationResourceOption, PlannedDay } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
 import type { RunPlanPlannedOperation } from "../service/run-plan.js";
+import type { OperationMaterialRow } from "../../manufacturing/service/operation-materials.js";
 import { roundPlanDays } from "../service/capacity-book.js";
 import type { ArticleOverviewLoad } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
@@ -1435,6 +1439,68 @@ export function createPlanningRepository(db: Db) {
         ...NO_TIME,
         plannedDays: null,
       }));
+    },
+
+    // --- Körplanens och dagplanens extras (loadRunPlanExtras) ---------------
+
+    // The material rows LINKED to the given operations, as the shared rule
+    // (operation-materials.ts) reads them — ONE set-based query.
+    async runPlanMaterialRows(operationIds: string[]): Promise<OperationMaterialRow[]> {
+      if (operationIds.length === 0) return [];
+      const rows = await db
+        .select({
+          moOperationId: moMaterialConsumptions.moOperationId,
+          articleId: articles.id,
+          articleNumber: articles.articleNumber,
+          articleName: articles.name,
+          articleType: articles.type,
+          unit: units.code,
+          quantityPlanned: moMaterialConsumptions.quantityPlanned,
+          quantityConsumed: moMaterialConsumptions.quantityConsumed,
+        })
+        .from(moMaterialConsumptions)
+        .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
+        .leftJoin(units, eq(units.id, articles.unitId))
+        .where(inArray(moMaterialConsumptions.moOperationId, operationIds));
+      return rows.map((r) => ({ ...r, quantityPlanned: Number(r.quantityPlanned), quantityConsumed: Number(r.quantityConsumed) }));
+    },
+
+    // Användbart saldo per article — onHandByArticle's rule (a Spärrad
+    // lagerplats is never counted), ONE query. An article without stock rows
+    // is absent: read it as 0.
+    async usableOnHand(articleIds: string[]): Promise<Map<string, number>> {
+      const onHand = await onHandByArticle(db, articleIds);
+      return new Map([...onHand].map(([articleId, balance]) => [articleId, balance.usable]));
+    },
+
+    // Who is on the given operations right now: the open stamp sessions
+    // (paused = gone home with the work still open), by name — ONE query.
+    async openStampsByOperation(operationIds: string[]) {
+      if (operationIds.length === 0) return [];
+      return db
+        .select({
+          moOperationId: stampSessions.moOperationId,
+          employeeId: employees.id,
+          name: employees.name,
+          paused: sql<boolean>`${stampSessions.pausedAt} IS NOT NULL`,
+        })
+        .from(stampSessions)
+        .innerJoin(employees, eq(employees.id, stampSessions.employeeId))
+        .where(and(isNull(stampSessions.stoppedAt), inArray(stampSessions.moOperationId, operationIds)))
+        .orderBy(employees.name, employees.id);
+    },
+
+    // På plats: the active employees clocked in right now (an open närvaro),
+    // on each of their Förvalda stationer, by name — ONE query. An employee
+    // without a förvald station is on no resource.
+    async presentByWorkCenter() {
+      return db
+        .select({ workCenterId: employeeWorkCenters.workCenterId, employeeId: employees.id, name: employees.name })
+        .from(attendanceSessions)
+        .innerJoin(employees, eq(employees.id, attendanceSessions.employeeId))
+        .innerJoin(employeeWorkCenters, eq(employeeWorkCenters.employeeId, employees.id))
+        .where(and(isNull(attendanceSessions.stoppedAt), eq(employees.active, true)))
+        .orderBy(employees.name, employees.id);
     },
 
     // --- Produktionsplanering ---------------------------------------------

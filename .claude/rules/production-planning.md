@@ -6,7 +6,19 @@ paths:
   - "apps/api/src/modules/planning/service/delivery-time-check*"
   - "apps/api/src/modules/planning/repository/**"
   - "apps/api/src/modules/planning/service/run-plan*"
+  - "apps/api/src/modules/planning/service/day-plan*"
+  - "apps/api/src/modules/planning/service/co-run*"
+  - "apps/api/src/modules/manufacturing/service/operation-materials*"
   - "apps/api/test/run-plan*"
+  - "apps/api/test/day-plan*"
+  - "apps/api/test/co-run*"
+  - "apps/api/test/operation-materials*"
+  - "apps/api/test/web-day-plan*"
+  - "apps/web/app/tillverkning/dagplan/**"
+  - "apps/web/components/planning/DayPlanPageClient*"
+  - "apps/web/components/planning/RunPlanMaterials*"
+  - "apps/web/components/planning/dayPlanWrites.ts"
+  - "apps/web/lib/dayPlan.ts"
   - "apps/api/test/run-plan-order*"
   - "apps/api/test/plan-days-migration*"
   - "apps/web/app/tillverkning/korplan/**"
@@ -102,6 +114,24 @@ Specar `private/superpowers/specs/2026-11-12-korplan-design.md` och #18-specen (
 - **`PUT /planning/run-plan/order`** (`runPlanOrderSchema` = `{ workCenterId, date, moOperationIds }` = **hela** dagens lista, unika, högst 500; modulens skrivregel `tillverkning` — verkstadsprofilen läser körplanen men ordnar inte; inte `readOnlySafe`): EN transaktion, **advisory-låset först** → resursen (404/400 som GET) → dagens väntande operationer på öppna TO `FOR UPDATE` sorterade på id (`lockRunPlanDayOperations`) — **aldrig ordern** → annan mängd än den skickade ⇒ 409 `run-plan-order-changed` (`RunPlanOrderChangedError`), inget skrivet, webben läser om → `run_position = 1..n` i EN `UPDATE … FROM (VALUES …)` (`writeRunPositions`). Idempotent; händelseloggen `production_plan`/`run_order_changed` (*Körordning ändrad*, `orderNumbers` som EN kommaseparerad text) bara när ordningen ändrades, efter commit.
 - **Nollningen har tre skrivare — glöms en står en plats kvar på fel resurs eller dag** (CHECK:en fångar bara "position utan plan"): `writeOperationPlans` (speglingen nollar när `planned_start_date` ändras, `clear` alltid — samma startdag igen **behåller** platsen, så Planera rör inte arbetsledarens ordning), `switchOperationResourcesInTx` (`operation-resources.ts`) och resursbytet i `updateOperationInTx` (`order-edit.ts`) vid byte av `work_center_id`. En ny TO har alltid null.
 - Test: `run-plan.test.ts` (urval, nyckel, gränser, ordning med position; Tid kvar/dag/plan = `GET /planning/capacity` och beredskap = `GET /terminal/operations` för samma operation; behörighet, 404/400, PDF via `pdfText`), `run-plan-order.test.ts` (ordna, oplanerad operation på dagen utanför ordningen, idempotens, 409 utan skrivning, behörighet, väntar på låset, två samtidiga, varje nollningsväg, datumen orörda), `permissions-coverage.test.ts`, `read-only-account.test.ts`, `audit-log-labels.test.ts`.
+
+## Dagplan (etapp 1 av planeringsverktyget)
+
+Spec `private/superpowers/specs/2026-11-26-dagplan-samkorning-design.md`. Alla resursers arbete EN dag i körordning — **härledd vid varje läsning, inget lagras, ingen egen regel**. Ingen migration.
+
+- **Rutterna:** `GET /planning/day-plan?date=&productionGroupId=` (`dayPlanQuerySchema`; utelämnad `date` = Stockholmsdagen) ⇒ `DayPlanResult` (`day-plan.ts`), `GET /planning/day-plan/pdf` (filnamn `dagplan-<date>.pdf`). `MO_READ` som körplanen, inga prisfält. Fönstret är **i dag … i dag + 41** (S5, `DAY_PLAN_MAX_AHEAD_DAYS` — Beläggningens dagvy som bredast), utanför ⇒ 400 `day-plan-date-out-of-range`. Okänd grupp ⇒ tom `resources` (ett urval, ingen 404).
+- **Rena `buildDayPlan` lånar allt:** resurserna = `runPlanStations` (aktiva, aldrig lego, `compareStationCodes`), alla listas även utan rader; raderna = **`buildRunPlan` per resurs** med `toDate` = dagen (samma ordning, samma `reorderable` — testet "the day's rows are buildRunPlan's…"), operationerna förfiltrerade per resurs i EN passage så beredskapen bara räknas för resursens egna ordrar; lasten = **`resourceDayLoads`** (`capacity-calc.ts`: `operationLoadDays` + `resourceDayMinutes × capacityFactor` + `dayLoadOf`/`finishCell` — testet "equals the matrix's dayLoads" låser att den är matrisens dagcell, överlast läses ur flaggan); föregående/nästa dag = företagets arbetsdagar (`addWorkingDays`), null utanför fönstret.
+- **Planerad TO finns inte i dagplanen (S4):** `plannedOrderOperations: []` — de har inga operationer att stämpla på. Körplanen visar dem som förut.
+- **Kvar från tidigare (`carried`, S6):** i dag = körplanens **Försenad** (`row.late`); en senare dag = **varje planerad operation som börjat en tidigare dag — även före i dag — och fortfarande ligger på dagen** (`plannedStartDate < date ≤ plannedEndDate`; avsteg från specens text, som bara räknade starter från i dag). `rows` = `row.date === date && !row.late` (en oplanerad operation på färdigdatumets dag ligger där, utan `reorderable`); `unplannedRows` = körplanens Ej planerad som räknare.
+- **Materialregeln är EN ren fil:** `manufacturing/service/operation-materials.ts` (`linkedOperationMaterials`, `compareArticleNumbers`, `isCoRunMaterial` = **köpt + rest kvar**, B3). Terminalen använder samma gruppering men behåller sitt innehåll (allt kopplat material, S1 — `terminal-operations.test.ts`). `materialLinked` = operationen har någon kopplad rad på en **köpt** artikel oavsett rest; `materials: []` med `materialLinked: true` = allt uttaget.
+- **`loadRunPlanExtras` (planeringsservicen) — två frågor för materialet:** `repo.runPlanMaterialRows(operationIds)` (EN mängdfråga) och `repo.usableOnHand(articleIds)` = `onHandByArticle` (EN fråga, spärrade lagerplatser räknas aldrig — `stock-on-hand-readers.test.ts`). **finns/saknas = användbart saldo mot radens EGEN rest** (S2, Materialbrist-regeln vid rapportering, inte FIFO): två operationer kan båda visa *finns* på ett saldo som räcker till en. Plus EN fråga för öppna stämplingar (`openStampsByOperation`).
+- **Pegging bara för rader som saknas:** *kommer d* = den allokering ur `pegParents` (ETT anrop för ordrarna med en `short`-rad) som inte är lager och kommer **sist**; utan sådan `supply: null` och `missingQuantity` aldrig under det hyllan saknar. Inga `short`-rader ⇒ pegging körs inte alls (räknaren i `day-plan.route.test.ts`) — Mötesläget läser om varje minut per öppen skärm.
+- **Extras bara för visade rader:** `getDayPlan` bygger först listan utan extras (rent), laddar sedan material/stämplingar för `carried + rows` och bygger igen — aldrig för hela golvets väntande operationer. `getRunPlan` laddar för sina listade rader. Planerad TO bär aldrig extras.
+- **På plats** (`presentByWorkCenter`: öppen närvaro ⨝ aktiv anställd ⨝ förvalda stationer) laddas bara när dagen är i dag — ett faktum om nu. Namn syns för alla med `MO_READ` (S10).
+- **PDF:en** är körplanens renderare med `materialHeading` satt (`DAY_PLAN_COLS`: Nr först, Låst i statustexten, Material sist som text — typsnittet har inga symboler); utan fältet är körplanens PDF byte för byte oförändrad.
+- **Webben** (`/tillverkning/dagplan`, `DayPlanPageClient`, URL `?dag=&grupp=`; utelämnad `dag` = serverns `today`, aldrig webbläsarens datum): rena `lib/dayPlan.ts` (`reorderIds`/`dropIndex`/`reorderableIds`, `loadText`, `materialText`, `moveTargetOf`, och körplanens statustext `runPlanStatusText` som Körplan nu delar). **Ordningen skrivs med den befintliga `PUT /planning/run-plan/order`** med dagens `reorderable`-id:n (Upp/Ned och HTML5-dragning inom en resurs; dragning bara på `pointer: fine`) — 409 `run-plan-order-changed` ⇒ meddelande + omläsning som Körplan. Radmenyn: **Flytta…** (`MoveOperationDialog`, vars `MoveTarget` är avsmalnad till det dialogen läser — Beläggning skickar samma objekt som förut), **I morgon**/**Nästa arbetsdag** och **Lägg på i dag** = Flytta med `moveFollowing: true` efter `confirmDialog`, **Lås upp**. Raderna är en tabell när resursrutan är minst 860 px och kort därunder (container query, inte viewport) — sidan får aldrig bli bredare än skärmen.
+- **Mötesläget** (`/tillverkning/dagplan/mote`, egen rutt utan AppShell som terminalen, S11; täcks av `pageAccess`-posten för `/tillverkning/dagplan`) skriver aldrig: sidans enda skrivningar bor i `dayPlanWrites.ts`, varje anropare börjar med `if (!canWrite) return` och `canWrite = !meeting && …`; inga länkar i raderna, ingen `ConfirmDialogHost`. Omläsning var 60:e sekund bara när fliken syns; ett misslyckat anrop behåller bilden (*Kunde inte läsa om*). Inga klockslag renderas. `web-day-plan.test.ts` vaktar (källkodsvakt + de rena hjälparna).
+- Tester: `operation-materials.test.ts`, `day-plan.test.ts` (rent), blocket `resourceDayLoads` i `capacity-calc.test.ts`, `day-plan.route.test.ts` (DB: material finns/saknas/kommer/spärrat, pegging-räknaren, stämplingar, På plats, 400, behörighet, PDF), `web-day-plan.test.ts`, `page-access.test.ts`, `module-nav-sections.test.ts`.
 
 ## Resursens kapacitet
 

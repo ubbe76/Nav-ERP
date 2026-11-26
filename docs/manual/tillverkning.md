@@ -606,9 +606,86 @@ Ovanför matrisen står **Senast planerad** (tidpunkten för senaste **Planera**
 
 Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har kapacitet (veckoschema eller timmar per dag) — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar kapacitet.
 
+## Dagplan
+
+**Tillverkning → Dagplan** visar **en dag** för **alla resurser**: vad som ska köras på varje maskin eller arbetsplats, i körordning, med last mot kapacitet, om materialet finns och vem som arbetar på vad just nu. Sidan är gjord för avstämningen med verkstaden på morgonen — gå igenom den resurs för resurs, ändra ordningen eller flytta det som inte hinns med.
+
+Överst väljer du dag med pilarna (**Föregående arbetsdag** och **Nästa arbetsdag** — helger och röda dagar hoppas över) och **I dag**. Rubriken visar dagen och veckan, till exempel *tors 26 nov · v.48*. Dagplanen visar i dag och sex veckor framåt, aldrig en dag som passerat. Med **Grupp** visar du bara resurserna i en [produktionsgrupp](#produktionsgrupper); **Alla resurser** tar bort urvalet. Legoresurser finns inte med.
+
+Raden under visar dagens summa, till exempel *18 operationer · 9,42 h*, och när det finns något att se upp med *2 material saknas* och *9 operationer saknar kopplat material*.
+
+Dagplanen räknas fram varje gång den öppnas ur samma plan som [Beläggning](#belaggning) och [Körplan](#korplan) — den sparar ingenting eget. Kör **Planera** i Beläggning när planen behöver läggas om.
+
+### Vad som visas
+
+Varje resurs med arbete den dagen har en egen ruta. Resurser utan arbete räknas upp sist: *Utan arbete den dagen: 130, 140*.
+
+Rubriken visar resursens nummer och namn och:
+
+- **Lasten mot kapaciteten**, till exempel *6,5 h av 8 h*, med en stapel. Är dagen överbelagd står *9 h av 8 h · överbelagd* i rött. *3 h · ingen kapacitet* betyder att resursen inte har någon tid den dagen, och en resurs utan veckoschema eller timmar per dag visar bara lasten. Det är samma tal som dagvyn i [Beläggning](#belaggning).
+- **På plats:** de anställda som har resursen som förvald station och är instämplade i närvaron just nu. Visas bara för i dag.
+- ***N* ej planerade** — operationer på resursen som varken har plan eller färdigdatum. Länken öppnar [Körplan](#korplan) för resursen.
+
+Under rubriken kommer raderna:
+
+- **Kvar från tidigare** — det som borde varit klart: i dag körplanens **Försenad**, en senare dag de operationer som börjat en tidigare dag och fortfarande ligger på dagen. Raderna har ett streck i stället för nummer och texten *Planerad 24 nov* (eller *Ej planerad*).
+- Dagens operationer, numrerade **1, 2, 3 …** i körordning — samma ordning som i [Körplan](#korplan). När det finns rader kvar från tidigare står rubriken **I dag** (eller **Dagens operationer** för en senare dag) före dem.
+
+På varje rad står **Nr**, **TO** (en länk till TO-kortet), **Operation** och **Artikel**, **Antal kvar**, **Tid kvar (h)**, **Färdigdatum** och **Status** — **Redo**, **Väntar på op N** eller *N redo · väntar på op M*, som i [Körplan](#kolumnerna), och märket **Låst** för en operation som är flyttad för hand. Under står **Material** och, när någon är instämplad på operationen, **Pågår** med namnen (*Anna (paus)* för den som har paus).
+
+På en telefon och i ett smalt fönster visas varje operation som ett kort i stället för en tabellrad.
+
+### Material
+
+**Material** visar det **köpta** material som är **kopplat till operationen i beredningen** och som det finns något kvar att ta ut av:
+
+- *finns* — det användbara lagersaldot räcker till radens behov. Saldot räknas mot **varje rad för sig**: två operationer som behöver samma plåt kan båda visa *finns* fast saldot bara räcker till den ena. Saldo på en spärrad lagerplats räknas inte.
+- *saknas 4 st* — saldot räcker inte och inget är på väg.
+- *kommer 2 dec · IO-88* — saldot räcker inte, men materialet väntas på den inköpsordern (eller tillverkningsordern) det datumet. Numret är en länk till ordern. *kommer, utan datum* betyder att ordern saknar leveransdatum, och *(utkast)* att inköpsordern inte är skickad än.
+- *—* — operationen saknar kopplat material. Koppla materialet till operationen i artikelns beredning om det ska synas här.
+- *uttaget* — allt kopplat material är redan uttaget.
+
+Halvfabrikat och material som inte är kopplat till en operation visas inte här — se **Täcks av** på TO-kortet.
+
+### Ordna dagen
+
+Med rättigheten Tillverkning ändrar du körordningen på två sätt:
+
+- **Upp** och **Ned** (pilarna på raden, med hjälptexterna *Flytta upp* och *Flytta ned*) byter plats med grannen.
+- **Dra** raden i greppet framför pilarna och släpp den där den ska ligga. Det går bara inom samma resurs, och bara med mus — på en pekskärm används pilarna.
+
+Ordningen sparas direkt och är densamma som i [Körplan](#ordningen-inom-dagen): den styr körplanen, utskrifterna och stämpelterminalens sortering **Planerad dag**, aldrig vilka datum operationerna ligger på. Har någon annan ändrat dagen under tiden får du ett meddelande om att körplanen har ändrats och listan läses om.
+
+Raderna under **Kvar från tidigare** och en operation som inte är planerad (den står på färdigdatumets dag) går inte att ordna.
+
+### Flytta till en annan dag
+
+Menyn **⋯** längst till höger på raden (med rättigheten Tillverkning) har:
+
+- **Flytta…** — öppnar dialogen **Flytta operation**, samma som i [Beläggning](#flytta-och-las-upp): välj **Dag** och om efterföljande operationer ska följa med.
+- **I morgon** — flyttar operationen till nästa arbetsdag efter en bekräftelse som nämner dagen: *Flytta op 10 på TO-1050 till fre 27 nov? Efterföljande operationer följer med och operationen låses.* Visar du en annan dag än i dag heter valet **Nästa arbetsdag**.
+- **Lägg på i dag** — för en rad under **Kvar från tidigare** när du visar i dag: operationen planeras om med start i dag.
+- **Lås upp** — för en operation som är **Låst**: nästa **Planera** får flytta den igen.
+
+En flyttad operation blir **Låst** och får ta dagens hela kapacitet, så dagen kan bli överbelagd. Varningar från flytten — till exempel att ordern blir sen — visas överst på sidan.
+
+### Mötesläge
+
+**Mötesläge** öppnar dagplanen för skärmen på väggen: större text, ingen meny och resurserna bredvid varandra (under varandra på en smal skärm). Läget visar samma dag och grupp som sidan, läser om sig självt varje minut medan fliken syns och har inga knappar som ändrar något.
+
+- Pilarna och **I dag** byter dag.
+- **Helskärm** fyller hela skärmen (knappen finns där webbläsaren stöder det; **Lämna helskärm** eller Esc går tillbaka).
+- **Stäng** går tillbaka till dagplanen.
+
+Går det inte att läsa om — nätverket är nere — står *Kunde inte läsa om* uppe till höger och den senaste bilden ligger kvar.
+
+### Skriv ut dagplanen
+
+**Skriv ut** öppnar utskriftsdialogen för dagen och gruppen som visas: en grupp per resurs med last och kapacitet i rubriken, först raderna kvar från tidigare och sedan dagens operationer numrerade i körordning, med materialet som text (*finns*, *saknas 4 st*, *kommer 2026-12-02 IO-88*).
+
 ## Körplan
 
-**Tillverkning → Körplan** visar de kommande arbetena på en resurs, dag för dag — det som körs på maskinen eller arbetsplatsen härnäst. Sidan går att skriva ut som underlag till verkstaden.
+**Tillverkning → Körplan** visar de kommande arbetena på en resurs, dag för dag — det som körs på maskinen eller arbetsplatsen härnäst. Sidan går att skriva ut som underlag till verkstaden. Vill du se **alla** resurser en och samma dag — för morgonmötet — använd [Dagplan](#dagplan).
 
 Välj **Resurs** (produktionsresurserna; legoresurser finns inte med eftersom de inte körs hos er) och **T.o.m.** — ett datum. Förvalet är sista dagen i nästa vecka; listan tar med allt som ligger till och med det datumet. Utan vald resurs står *Välj en resurs*, och finns inget att köra står *Inga kommande arbeten på resursen t.o.m. 21 nov*.
 

@@ -172,6 +172,16 @@ export type RunPlanQuery = z.infer<typeof runPlanQuerySchema>;
 export const runPlanPdfQuerySchema = runPlanQuerySchema.required({ workCenterId: true });
 export type RunPlanPdfQuery = z.infer<typeof runPlanPdfQuerySchema>;
 
+// GET /planning/day-plan[/pdf] — Dagplan: every resource's work ONE day.
+// `date` left out = today (Stockholm); the service refuses a day outside
+// today … today + 41 (400 day-plan-date-out-of-range). An unknown
+// productionGroupId is a selection without resources, never a 404.
+export const dayPlanQuerySchema = z.object({
+  date: businessDateSchema.optional(),
+  productionGroupId: z.string().uuid().optional(),
+});
+export type DayPlanQuery = z.infer<typeof dayPlanQuerySchema>;
+
 // PUT /planning/run-plan/order — the order within ONE day on a resource
 // (#18): the WHOLE day's list of operations in the wanted order. The order
 // only steers the körplan and the terminal's list, never a date.

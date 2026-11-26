@@ -6,6 +6,7 @@ import type {
   MissingComponentsInput as MissingComponentsRequest,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
+  DayPlanQuery,
   DeliveryTimeCheckRequest,
   ListAbcQuery,
   ListRequirementsQuery,
@@ -72,6 +73,7 @@ import {
   orderPlanStatus,
   operationStarted,
   remainingOperationMinutes,
+  resourceDayLoads,
   type CapacityInput,
   type CapacityOperationRow,
   type CapacityResult,
@@ -117,7 +119,18 @@ import {
   type ResourceSuggestion,
 } from "./resource-suggestions.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
-import { buildRunPlan, defaultRunPlanToDate, runPlanStations, type RunPlanResult, type RunPlanRow } from "./run-plan.js";
+import {
+  buildRunPlan,
+  defaultRunPlanToDate,
+  runPlanStations,
+  type RunPlanMaterial,
+  type RunPlanOperationMaterials,
+  type RunPlanResult,
+  type RunPlanRow,
+  type RunPlanStamp,
+} from "./run-plan.js";
+import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
+import { isCoRunMaterial, linkedOperationMaterials } from "../../manufacturing/service/operation-materials.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
 import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
 import {
@@ -385,6 +398,15 @@ export class RunPlanOrderChangedError extends Error {
   }
 }
 
+// Dagplan for a day outside its window: a passed day, or one more than
+// DAY_PLAN_MAX_AHEAD_DAYS ahead (S5 — Beläggning's day view at its widest). 400.
+export class DayPlanDateOutOfRangeError extends Error {
+  constructor(public date: string, public today: string) {
+    super(`${date} ligger utanför dagplanen — den visar i dag (${today}) och sex veckor framåt`);
+    this.name = "DayPlanDateOutOfRangeError";
+  }
+}
+
 // The körplan's Swedish texts, shared by every surface the API prints them
 // on (the PDF). The web has its own labels for the same fields.
 const formatRunPlanHours = (hours: number) =>
@@ -404,6 +426,18 @@ function runPlanStatusLabel(row: RunPlanRow): string {
     case "not_ready":
       return `Väntar på op ${row.waitingForSequenceNo}`;
   }
+}
+
+// Dagplanens material cell in the PDF — text only, no symbols (S13).
+function dayPlanMaterialText(row: RunPlanRow): string {
+  if (!row.materialLinked) return "–";
+  return row.materials
+    .map((m) => {
+      if (m.status === "available") return `${m.articleNumber} (finns)`;
+      if (m.supply) return `${m.articleNumber} (kommer ${m.supply.date ?? "utan datum"} ${m.supply.documentNumber})`;
+      return `${m.articleNumber} (saknas ${formatRunPlanQuantity(m.missingQuantity)}${m.unit ? ` ${m.unit}` : ""})`;
+    })
+    .join("; ");
 }
 
 // Flytta to a day where the resource has no capacity at all (a weekend, a
@@ -1889,6 +1923,114 @@ export function createPlanningService(
     return out;
   }
   const supplyOf = (pegging: Pegging, allocation: PegAllocation) => pegging.supplies.find((s) => s.id === allocation.supplyId)!;
+
+  // --- Körplanens och dagplanens extras ----------------------------------
+  // What the körplan and the dagplan show per listed operation beyond the
+  // plan: its co-run materials (B3 — purchased, linked to the operation,
+  // something left) against the shelf, and who is stamped in on it. ONE
+  // function for both readers, a fixed number of loads whatever the list:
+  // the linked material rows, the usable balances, the open stamps — and
+  // the pegging (pegParents, one batch) ONLY for the orders with a row that
+  // is short. Nothing short ⇒ no pegging at all (the mötesläge reads again
+  // every minute).
+  async function loadRunPlanExtras(
+    operationIds: string[],
+    orderIdOf: ReadonlyMap<string, string>
+  ): Promise<{ materials: Map<string, RunPlanOperationMaterials>; stamps: Map<string, RunPlanStamp[]> }> {
+    const materials = new Map<string, RunPlanOperationMaterials>();
+    const stamps = new Map<string, RunPlanStamp[]>();
+    if (operationIds.length === 0) return { materials, stamps };
+
+    const linked = linkedOperationMaterials(await repo.runPlanMaterialRows(operationIds));
+    const coRun = new Map([...linked].map(([operationId, list]) => [operationId, list.filter(isCoRunMaterial)]));
+    const onHand = await repo.usableOnHand([...new Set([...coRun.values()].flat().map((m) => m.articleId))]);
+    for (const [operationId, list] of linked) {
+      materials.set(operationId, {
+        linked: list.some((m) => m.articleType === "purchased"),
+        materials: coRun.get(operationId)!.map((m): RunPlanMaterial => {
+          // Per row against the article's WHOLE usable balance —
+          // Materialbrist's base at reporting, not the FIFO allocation.
+          const usableOnHand = round4(onHand.get(m.articleId) ?? 0);
+          const available = usableOnHand >= m.remainingQuantity;
+          return {
+            articleId: m.articleId,
+            articleNumber: m.articleNumber,
+            articleName: m.articleName,
+            unit: m.unit,
+            remainingQuantity: m.remainingQuantity,
+            usableOnHand,
+            status: available ? "available" : "short",
+            missingQuantity: available ? 0 : round4(m.remainingQuantity - Math.max(usableOnHand, 0)),
+            supply: null,
+          };
+        }),
+      });
+    }
+
+    // Kommer d — only for the short rows: what the pegging says covers the
+    // order's need of the article.
+    const shortOrderIds = new Set<string>();
+    for (const [operationId, entry] of materials) {
+      const orderId = orderIdOf.get(operationId);
+      if (orderId && entry.materials.some((m) => m.status === "short")) shortOrderIds.add(orderId);
+    }
+    if (shortOrderIds.size > 0) {
+      const world = await pegParents([...shortOrderIds]);
+      const demandsOf = new Map<string, ReturnType<typeof parentDemands>>();
+      for (const [operationId, entry] of materials) {
+        const orderId = orderIdOf.get(operationId);
+        if (!orderId || !shortOrderIds.has(orderId)) continue;
+        if (!demandsOf.has(orderId)) demandsOf.set(orderId, parentDemands(world, orderId));
+        for (const material of entry.materials) {
+          if (material.status !== "short") continue;
+          const demands = demandsOf.get(orderId)!.filter((d) => d.articleId === material.articleId);
+          const uncovered = round4(demands.reduce((sum, d) => sum + d.demand.uncovered, 0));
+          // The allocation that arrives LAST decides when the row is whole
+          // (an undated one counts as last); stock is there already.
+          let last: { pegging: Pegging; allocation: PegAllocation } | null = null;
+          for (const { pegging, demand } of demands) {
+            for (const allocation of demand.allocations) {
+              if (supplyOf(pegging, allocation).kind === "stock") continue;
+              const later =
+                last == null ||
+                (last.allocation.readyDate != null && (allocation.readyDate == null || allocation.readyDate > last.allocation.readyDate));
+              if (later) last = { pegging, allocation };
+            }
+          }
+          const supply = last ? supplyOf(last.pegging, last.allocation) : null;
+          if (supply?.row?.documentId) {
+            material.missingQuantity = uncovered;
+            material.supply = {
+              kind: supply.kind as "purchase_order" | "manufacturing_order",
+              documentId: supply.row.documentId,
+              documentNumber: supply.row.documentNumber,
+              date: last!.allocation.readyDate,
+              isDraft: supply.row.isDraft,
+            };
+          } else {
+            // No supply on its way: what the pegging leaves uncovered, never
+            // less than the row lacks on the shelf.
+            material.missingQuantity = Math.max(uncovered, material.missingQuantity);
+          }
+        }
+      }
+    }
+
+    for (const stamp of await repo.openStampsByOperation(operationIds)) {
+      const list = stamps.get(stamp.moOperationId) ?? [];
+      list.push({ employeeId: stamp.employeeId, name: stamp.name, paused: stamp.paused });
+      stamps.set(stamp.moOperationId, list);
+    }
+    return { materials, stamps };
+  }
+  // The listed operations of a run plan's rows: a Planerad TO's operation
+  // carries no extras (buildRunPlan never reads them for it).
+  const extrasOperationsOf = (rows: RunPlanRow[]) => {
+    const orderIdOf = new Map<string, string>();
+    for (const row of rows) if (row.moOperationId && row.status !== "planned_order") orderIdOf.set(row.moOperationId, row.manufacturingOrderId);
+    return { operationIds: [...orderIdOf.keys()], orderIdOf };
+  };
+
   // Halvfabrikat sent: a late allocation from a TO supply. A late IO or
   // missing material gives nothing (the behovsberäkning's and Materialbrist's).
   function isComponentLate(world: PeggedParents, parentId: string): boolean {
@@ -2752,7 +2894,97 @@ export function createPlanningService(
       // same rows (quantities, time flags, planned days) the matrix reads.
       // The calendars are not read by the körplan — no holiday span needed.
       const operations = orderIds.length === 0 ? [] : (await repo.loadCapacityInput(today, today, undefined, { orderIds })).operations;
-      return buildRunPlan({ today, toDate, workCenter, stations, operations, plannedOrderOperations });
+      // The list first (pure), then the extras for exactly the listed
+      // operations — the rows are built again with them; the order, the
+      // selection and the days never read them.
+      const input = { today, toDate, workCenter, stations, operations, plannedOrderOperations };
+      const listed = extrasOperationsOf(buildRunPlan(input).rows);
+      const extras = await loadRunPlanExtras(listed.operationIds, listed.orderIdOf);
+      return buildRunPlan({ ...input, ...extras });
+    },
+
+    // Dagplan — every resource's work ONE day (day-plan.ts owns the list;
+    // the rows are the körplan's, the load Beläggning's). Derived at every
+    // read from ONE capacity load over all open orders.
+    async getDayPlan(query: DayPlanQuery): Promise<DayPlanResult> {
+      const today = todayFn();
+      const date = query.date ?? today;
+      const lastDate = addDays(today, DAY_PLAN_MAX_AHEAD_DAYS);
+      if (date < today || date > lastDate) throw new DayPlanDateOutOfRangeError(date, today);
+      // One day past the window, so Nästa dag at the edge sees its holidays.
+      const capacity = await repo.loadCapacityInput(today, addDays(lastDate, 1));
+      // Full-day holidays, as planWorldOf reads them.
+      const offDays = new Set(capacity.holidays.filter((h) => h.dayScheduleId === null).map((h) => h.date));
+      const base = {
+        today,
+        date,
+        offDays,
+        workCenters: capacity.workCenters,
+        productionGroups: capacity.productionGroups,
+        productionGroupId: query.productionGroupId ?? null,
+        operations: capacity.operations,
+        dayLoads: resourceDayLoads(capacity, today, date),
+      };
+      // The day's list first (pure), then the extras for the operations it
+      // SHOWS (carried + rows) — never for the whole floor's pending work.
+      const empty = { materials: new Map<string, RunPlanOperationMaterials>(), stamps: new Map<string, RunPlanStamp[]>() };
+      const shown = buildDayPlan({ ...base, ...empty, present: new Map() }).resources.flatMap((r) => [...r.carried, ...r.rows]);
+      const listed = extrasOperationsOf(shown);
+      const extras = await loadRunPlanExtras(listed.operationIds, listed.orderIdOf);
+      // På plats is a fact about now — only today's dagplan carries it.
+      const present = new Map<string, DayPlanPresent[]>();
+      if (date === today) {
+        for (const p of await repo.presentByWorkCenter()) {
+          const list = present.get(p.workCenterId) ?? [];
+          list.push({ employeeId: p.employeeId, name: p.name });
+          present.set(p.workCenterId, list);
+        }
+      }
+      return buildDayPlan({ ...base, ...extras, present });
+    },
+
+    // The dagplan as a PDF (A4 landscape): one group per resource with rows,
+    // Kvar från tidigare first (no number), then the day's in körordning.
+    async getDayPlanPdf(query: DayPlanQuery): Promise<{ filename: string; content: Buffer }> {
+      if (!deps.runPlanPdf) throw new Error("The körplan PDF renderer is not wired");
+      const plan = await this.getDayPlan(query);
+      const group = query.productionGroupId ? plan.productionGroups.find((g) => g.id === query.productionGroupId) : null;
+      const pdfRow = (row: RunPlanRow, nr: string) => ({
+        day: nr,
+        orderNumber: row.orderNumber,
+        article: `${row.articleNumber} ${row.articleName}`,
+        operation: row.description ? `Op ${row.sequenceNo} ${row.description}` : `Op ${row.sequenceNo}`,
+        remainingQuantity: formatRunPlanQuantity(row.remainingQuantity),
+        remainingTime: formatRunPlanHours(row.remainingHours),
+        dueDate: row.dueDate ?? "–",
+        status: `${runPlanStatusLabel(row)}${row.planLocked ? " · Låst" : ""}`,
+        locked: "",
+        material: dayPlanMaterialText(row),
+      });
+      const loadText = (load: DayPlanResult["resources"][number]["load"]) =>
+        load.availableHours == null
+          ? formatRunPlanHours(load.loadHours)
+          : load.availableHours === 0
+            ? `${formatRunPlanHours(load.loadHours)} — ingen kapacitet`
+            : `${formatRunPlanHours(load.loadHours)} av ${formatRunPlanHours(load.availableHours)}`;
+      const content = await deps.runPlanPdf.renderRunPlan({
+        title: `Dagplan — ${RUN_PLAN_WEEKDAYS[plan.weekday - 1]} ${plan.date} (vecka ${plan.isoWeek})`,
+        subtitle: `${query.productionGroupId ? (group ? `${group.code} ${group.name}` : "Okänd produktionsgrupp") : "Alla resurser"} · Utskriven ${plan.today}`,
+        emptyText: "Inga planerade operationer den dagen.",
+        firstColumnHeading: "Nr",
+        materialHeading: "Material",
+        groups: plan.resources
+          .filter((r) => r.carried.length + r.rows.length > 0)
+          .map((r) => ({
+            heading: `${r.workCenter.code} ${r.workCenter.name} — ${loadText(r.load)}`,
+            totalLabel: `Summa ${r.workCenter.code}`,
+            total: formatRunPlanHours(r.rowHours),
+            rows: [...r.carried.map((row) => pdfRow(row, "–")), ...r.rows.map((row, i) => pdfRow(row, String(i + 1)))],
+          })),
+        totalLabel: "Summa tid kvar",
+        total: formatRunPlanHours(plan.totals.hours),
+      });
+      return { filename: `dagplan-${plan.date}.pdf`, content };
     },
 
     // The körplan as a PDF (A4 landscape), the same selection as the list,

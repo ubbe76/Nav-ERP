@@ -100,6 +100,55 @@ export interface RunPlanRow {
   // list PUT /planning/run-plan/order wants. An unplanned operation lies on
   // its due date and a Planerad TO's operation has no place: both false.
   reorderable: boolean;
+  // The co-run materials (B3); [] for a Planerad TO and for an operation
+  // without any — and when the reader did not load them.
+  materials: RunPlanMaterial[];
+  // The operation has at least one linked row on a PURCHASED article,
+  // whatever is left of it; false = "saknar kopplat material".
+  materialLinked: boolean;
+  // Open/paused stamp sessions on the operation.
+  activeStamps: RunPlanStamp[];
+}
+
+// Where a missing material is expected from (pegging) — only on a short row.
+export interface RunPlanMaterialSupply {
+  kind: "purchase_order" | "manufacturing_order";
+  documentId: string;
+  documentNumber: string;
+  date: string | null; // null = undated
+  isDraft: boolean;
+}
+
+// One co-run material of the operation (B3: purchased, linked to the
+// operation, something left to draw) with what the shelf holds.
+export interface RunPlanMaterial {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  // The operation's row: planned − consumed.
+  remainingQuantity: number;
+  // onHandByArticle(...).usable, round4 — the article's whole usable balance.
+  usableOnHand: number;
+  // available ⇔ usableOnHand >= remainingQuantity (per row against the
+  // whole balance — Materialbrist's base, not pegging).
+  status: "available" | "short";
+  missingQuantity: number; // 0 when available
+  supply: RunPlanMaterialSupply | null; // only when short
+}
+
+// An open or paused stamp session on the operation.
+export interface RunPlanStamp {
+  employeeId: string;
+  name: string;
+  paused: boolean;
+}
+
+// What the reader loaded per operation (moOperationId) — buildRunPlan only
+// puts it on the rows.
+export interface RunPlanOperationMaterials {
+  materials: RunPlanMaterial[];
+  linked: boolean;
 }
 
 // One group of the list, in list order: Försenad first (every day before
@@ -179,6 +228,11 @@ export function buildRunPlan(input: {
   operations: CapacityOperationRow[];
   // The Planerade TO:s operations on the resource.
   plannedOrderOperations: RunPlanPlannedOperation[];
+  // Per moOperationId, loaded by the reader. Left out (fixtures, readers
+  // that do not show them) = no materials, not linked, no stamps. Never
+  // read by the order, the selection, the dagnyckel or `reorderable`.
+  materials?: ReadonlyMap<string, RunPlanOperationMaterials>;
+  stamps?: ReadonlyMap<string, RunPlanStamp[]>;
 }): RunPlanResult {
   const byOrder = new Map<string, CapacityOperationRow[]>();
   for (const op of input.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
@@ -200,6 +254,8 @@ export function buildRunPlan(input: {
     const date = operationStartDate(op);
     const range = plannedDateRange(op);
     const ready = plannedOrder || op.moOperationId == null ? null : readiness.get(op.moOperationId)!;
+    const extrasId = plannedOrder ? null : op.moOperationId;
+    const material = extrasId == null ? undefined : input.materials?.get(extrasId);
     return {
       key: op.moOperationId ?? `${op.manufacturingOrderId}:${op.sequenceNo}`,
       moOperationId: op.moOperationId,
@@ -226,6 +282,9 @@ export function buildRunPlan(input: {
       available: ready ? ready.available : null,
       waitingForSequenceNo: ready && ready.readiness !== "ready" ? (previous.get(op.moOperationId!) ?? null) : null,
       reorderable: !plannedOrder && op.moOperationId != null && range != null && range.start >= input.today,
+      materials: material?.materials ?? [],
+      materialLinked: material?.linked ?? false,
+      activeStamps: (extrasId == null ? undefined : input.stamps?.get(extrasId)) ?? [],
       minutes,
     };
   };

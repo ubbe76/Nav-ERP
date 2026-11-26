@@ -7609,6 +7609,43 @@ export interface RunPlanRow {
   // The row takes part in Ordningen inom dagen (a planned operation on its
   // planned start day) — the day's reorderable ids are what the PUT wants.
   reorderable: boolean;
+  // The co-run materials: purchased, linked to the operation, something left
+  // to draw. [] for a Planerad TO and for an operation without any.
+  materials: RunPlanMaterial[];
+  // false = "saknar kopplat material" (no linked row on a purchased article).
+  materialLinked: boolean;
+  // Open/paused stamp sessions on the operation.
+  activeStamps: RunPlanStamp[];
+}
+
+// Where a missing material is expected from (pegging) — only on a short row.
+export interface RunPlanMaterialSupply {
+  kind: "purchase_order" | "manufacturing_order";
+  documentId: string;
+  documentNumber: string;
+  date: string | null; // null = undated
+  isDraft: boolean;
+}
+
+export interface RunPlanMaterial {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  // The operation's row: planned − consumed.
+  remainingQuantity: number;
+  // The article's whole usable balance (never a Spärrad lagerplats).
+  usableOnHand: number;
+  // available ⇔ usableOnHand >= remainingQuantity — per row, not allocated.
+  status: "available" | "short";
+  missingQuantity: number; // 0 when available
+  supply: RunPlanMaterialSupply | null; // only when short
+}
+
+export interface RunPlanStamp {
+  employeeId: string;
+  name: string;
+  paused: boolean;
 }
 
 export interface RunPlanDay {
@@ -7645,4 +7682,35 @@ export interface RunPlanResult {
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];
+}
+
+// Dagplan (GET /planning/day-plan): every resource's work one day.
+export interface DayPlanResource {
+  workCenter: RunPlanStation;
+  productionGroupId: string | null;
+  load: CapacityDayLoad;
+  // Kvar från tidigare: today the körplan's Försenad; a later day the
+  // planned operations that started an earlier day and still lie on the day.
+  carried: RunPlanRow[];
+  // The day's operations in körordning.
+  rows: RunPlanRow[];
+  // Tid kvar of carried + rows, in hours.
+  rowHours: number;
+  // The körplan's Ej planerad on the resource.
+  unplannedRows: number;
+  // På plats — only today.
+  present: { employeeId: string; name: string }[];
+}
+
+export interface DayPlanResult {
+  today: string;
+  date: string;
+  weekday: number; // ISO 1 = Monday … 7 = Sunday
+  isoWeek: number;
+  // The previous / next working day; null outside today … today + 41.
+  previousDate: string | null;
+  nextDate: string | null;
+  productionGroups: { id: string; code: string; name: string }[];
+  resources: DayPlanResource[];
+  totals: { rows: number; hours: number; unlinkedOperations: number; shortMaterials: number };
 }

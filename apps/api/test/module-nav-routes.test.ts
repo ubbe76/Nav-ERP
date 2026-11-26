@@ -56,6 +56,7 @@ const NOT_IN_NAV = new Set([
   "/system/teman/ny", // "Nytt tema" on the themes list
   "/kvalitet/avvikelser/ny", // "+ Ny avvikelse" on the list and "Ny reklamation"/"Ny avvikelse" on the documents
   "/tillverkning/resurser/import", // "Importera" on the resource, lego resource and production group lists
+  "/tillverkning/dagplan/mote", // "Mötesläge" on Dagplan (no AppShell)
   // Legacy redirect stub, deliberately unlisted.
   "/lager/inventera",
 ]);

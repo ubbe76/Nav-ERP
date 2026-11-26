@@ -1,0 +1,58 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 20px;
+  min-width: 0;
+}
+
+/* Article to the left (clipped), the status to the right (never clipped). */
+.item {
+  display: flex;
+  max-width: 100%;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+}
+
+.article {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+}
+
+.name {
+  color: var(--color-text-secondary);
+}
+
+.state {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.state[data-tone="ok"] {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.state[data-tone="coming"] {
+  color: var(--status-delayed-text);
+}
+
+.state[data-tone="short"] {
+  color: var(--status-stopped-text);
+}
+
+.document {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.none {
+  color: var(--color-text-muted);
+}

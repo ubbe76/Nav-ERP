@@ -643,6 +643,41 @@ function dayLoadOf(date: string, loadHours: number, availableHours: number | nul
   return { date, loadHours: cell.loadHours, availableHours: cell.availableHours, overloaded: cell.overloaded };
 }
 
+// The load and the capacity of ONE day per resource — the same three rules
+// computeCapacity puts together for `dayLoads`: operationLoadDays (the
+// bucket), resourceDayMinutes × capacityFactor (the capacity) and dayLoadOf /
+// finishCell (rounding, overload). Never a rule of its own: the test "equals
+// the matrix's dayLoads" compares it with the day view for every resource
+// and day. Keyed on workCenterId; every own resource is in (loadHours 0
+// without load), legoresurser never — as in the matrix.
+export function resourceDayLoads(
+  input: Pick<CapacityInput, "workCenters" | "operations" | "weekScheduleDays" | "daySchedules" | "holidays">,
+  today: string,
+  date: string
+): Map<string, CapacityDayLoad> {
+  const lookups = buildScheduleLookups(input.weekScheduleDays, input.daySchedules, input.holidays);
+  const workCenters = input.workCenters.filter((w) => w.type !== "subcontract");
+  const loadHours = new Map<string, number>(workCenters.map((w) => [w.workCenterId, 0]));
+  for (const operation of input.operations) {
+    const hours = loadHours.get(operation.workCenterId);
+    if (hours === undefined) continue;
+    // Summed per operation in hours, as the matrix's day cell is.
+    let minutes = 0;
+    for (const chunk of operationLoadDays(operation, today)) if (chunk.date === date) minutes += chunk.minutes;
+    if (minutes > 0) loadHours.set(operation.workCenterId, hours + minutes / 60);
+  }
+  return new Map(
+    workCenters.map((w) => [
+      w.workCenterId,
+      dayLoadOf(
+        date,
+        loadHours.get(w.workCenterId)!,
+        hasCapacityCalendar(w) ? (resourceDayMinutes(lookups, w, date) / 60) * w.capacityFactor : null
+      ),
+    ])
+  );
+}
+
 export function computeCapacity(
   input: CapacityInput,
   // offDays (full-day holidays) and queueDays (Standardkötid) only matter for

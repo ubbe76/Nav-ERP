@@ -793,6 +793,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Körplan
   "run-plan-order-changed": "Körplanen har ändrats — listan har lästs om.",
   "run-plan-subcontract-resource": "Resursen är en legoresurs — körplanen visar bara egna resurser.",
+  // Dagplan
+  "day-plan-date-out-of-range": "Dagplanen visar i dag och sex veckor framåt — välj en annan dag.",
   "plan-date-no-capacity": serverMessage("Resursen har ingen kapacitet den dagen — välj en annan dag."),
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
   "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",
