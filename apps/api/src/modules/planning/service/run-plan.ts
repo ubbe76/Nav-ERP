@@ -29,6 +29,7 @@ import {
   setupDoneOnCurrentResource,
   type CapacityOperationRow,
 } from "./capacity-calc.js";
+import { groupRunPlanByMaterial, type RunPlanMaterialGroup } from "./co-run.js";
 
 // A Planerad TO's operation on the resource: a capacity row that may lack an
 // mo_operations id (a plain planned TO's operations are still the article's
@@ -180,6 +181,10 @@ export interface RunPlanResult {
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];
+  // Material-läget: the listed rows per co-run material, and the open
+  // orders' operations without linked material (groupRunPlanByMaterial).
+  materialGroups: RunPlanMaterialGroup[];
+  unlinkedRowKeys: string[];
 }
 
 const addDays = (date: string, days: number) => {
@@ -335,15 +340,19 @@ export function buildRunPlan(input: {
     if (row.reorderable) group.reorderable = true;
   }
   const total = listed.reduce((sum, row) => sum + row.minutes, 0);
+  const rows: RunPlanRow[] = listed.map(({ minutes: _minutes, ...row }) => row);
+  const material = groupRunPlanByMaterial(rows);
 
   return {
     workCenter: { id: input.workCenter.id, code: input.workCenter.code, name: input.workCenter.name },
     today: input.today,
     toDate: input.toDate,
-    rows: listed.map(({ minutes: _minutes, ...row }) => row),
+    rows,
     days: groups.map(({ sum, ...g }) => ({ ...g, minutes: round2(sum), hours: round2(sum / 60) })),
     totalMinutes: round2(total),
     totalHours: round2(total / 60),
     stations: input.stations,
+    materialGroups: material.groups,
+    unlinkedRowKeys: material.unlinkedRowKeys,
   };
 }

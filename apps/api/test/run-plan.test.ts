@@ -371,6 +371,8 @@ describe("GET /planning/run-plan — resursväljaren, fel och behörighet", () =
         { id: w.kap.id, code: "100", name: "Kap" },
         { id: w.svets.id, code: "200", name: "Svets" },
       ],
+      materialGroups: [],
+      unlinkedRowKeys: [],
     });
     expect((await runPlan(cookie, `workCenterId=${w.kap.id}`)).stations).toEqual(bare.stations);
     // The same list, in the same order, as the terminal's stations.

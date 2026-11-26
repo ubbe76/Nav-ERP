@@ -16,6 +16,7 @@ import type {
   CapacityProductionGroup,
   CapacityWorkCenter,
 } from "./capacity-calc.js";
+import { groupRunPlanByMaterial, type RunPlanMaterialGroup } from "./co-run.js";
 import {
   buildRunPlan,
   runPlanStations,
@@ -49,6 +50,10 @@ export interface DayPlanResource {
   // The körplan's Ej planerad on the resource (a counter with a link).
   unplannedRows: number;
   present: DayPlanPresent[];
+  // Material-läget: carried + rows per co-run material, and the ones without
+  // linked material (groupRunPlanByMaterial).
+  materialGroups: RunPlanMaterialGroup[];
+  unlinkedRowKeys: string[];
 }
 
 export interface DayPlanResult {
@@ -128,6 +133,7 @@ export function buildDayPlan(input: {
     const carried = plan.rows.filter((row) =>
       date === today ? row.late : row.planned && row.plannedStartDate! < date && row.plannedEndDate! >= date
     );
+    const material = groupRunPlanByMaterial([...carried, ...rows]);
     return {
       workCenter: station,
       productionGroupId: workCenter.productionGroupId,
@@ -137,6 +143,8 @@ export function buildDayPlan(input: {
       rowHours: round2((minutesOf(carried) + minutesOf(rows)) / 60),
       unplannedRows: plan.rows.filter((row) => row.date === null).length,
       present: input.present.get(station.id) ?? [],
+      materialGroups: material.groups,
+      unlinkedRowKeys: material.unlinkedRowKeys,
     };
   });
 

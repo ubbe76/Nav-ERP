@@ -74,6 +74,8 @@ const resource = (over: Partial<DayPlanResource> = {}): DayPlanResource => ({
   rowHours: 0,
   unplannedRows: 0,
   present: [],
+  materialGroups: [],
+  unlinkedRowKeys: [],
   ...over,
 });
 

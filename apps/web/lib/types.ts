@@ -7673,6 +7673,22 @@ export interface RunPlanStation {
   name: string;
 }
 
+// Material-läget: one ingoing material (purchased, linked to the operation,
+// something left) with the listed operations that draw it.
+export interface RunPlanMaterialGroup {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  // The sum of the rows' remaining quantities of the article.
+  totalRemainingQuantity: number;
+  usableOnHand: number;
+  // The usable balance does not cover the group together.
+  short: boolean;
+  // RunPlanRow.key, in the order of the list — each operation once.
+  rowKeys: string[];
+}
+
 export interface RunPlanResult {
   workCenter: RunPlanStation | null;
   today: string;
@@ -7682,6 +7698,9 @@ export interface RunPlanResult {
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];
+  materialGroups: RunPlanMaterialGroup[];
+  // The open orders' operations without linked purchased material.
+  unlinkedRowKeys: string[];
 }
 
 // Dagplan (GET /planning/day-plan): every resource's work one day.
@@ -7700,6 +7719,9 @@ export interface DayPlanResource {
   unplannedRows: number;
   // På plats — only today.
   present: { employeeId: string; name: string }[];
+  // Material-läget, grouped over carried + rows.
+  materialGroups: RunPlanMaterialGroup[];
+  unlinkedRowKeys: string[];
 }
 
 export interface DayPlanResult {

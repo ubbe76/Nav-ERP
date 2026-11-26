@@ -291,6 +291,13 @@ describe("buildDayPlan — rows", () => {
     expect(kap.rows[0]!.activeStamps).toEqual([{ employeeId: "e-1", name: "Anna", paused: true }]);
     expect(kap.carried.map((r) => [r.orderNumber, r.materialLinked])).toEqual([["TO-0", true]]);
     expect(result.totals).toEqual({ rows: 4, hours: 3.33, unlinkedOperations: 1, shortMaterials: 2 });
+    // Material-läget: carried + rows grouped per material (co-run.ts).
+    expect(kap.materialGroups.map((g) => [g.articleNumber, g.totalRemainingQuantity, g.rowKeys])).toEqual([
+      ["PLÅT-2", 8, ["op-ok", "op-short"]],
+      ["RÖR-30", 4, ["op-short"]],
+    ]);
+    expect(kap.unlinkedRowKeys).toEqual(["op-none"]);
+    expect(resource(result, "svets")).toMatchObject({ materialGroups: [], unlinkedRowKeys: [] });
   });
 });
 

@@ -106,9 +106,9 @@ import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./cap
 import {
   longOperationWarnings,
   operationsWithPlan,
+  planOperationMove,
   planProduction,
   type OperationPlan,
-  type PlanOperation,
   type PlanOrder,
   type PlanWarning,
 } from "./production-plan.js";
@@ -2881,7 +2881,18 @@ export function createPlanningService(
       const workCenters = await repo.runPlanWorkCenters();
       const stations = runPlanStations(workCenters);
       if (!query.workCenterId) {
-        return { workCenter: null, today, toDate, rows: [], days: [], totalMinutes: 0, totalHours: 0, stations };
+        return {
+          workCenter: null,
+          today,
+          toDate,
+          rows: [],
+          days: [],
+          totalMinutes: 0,
+          totalHours: 0,
+          stations,
+          materialGroups: [],
+          unlinkedRowKeys: [],
+        };
       }
       const workCenter = workCenters.find((w) => w.id === query.workCenterId);
       if (!workCenter) return null;
@@ -3126,38 +3137,12 @@ export function createPlanningService(
         if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
         const stamped = await repo.stampedOperationIds(tx);
 
-        const orderOps: PlanOperation[] = [];
-        const fixed: CapacityOperationRow[] = [];
-        for (const o of world.operations.filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)) {
-          const started = startedOf(o, stamped);
-          const replan =
-            o.moOperationId === opId ||
-            o.operationStatus === "done" ||
-            (o.sequenceNo > op.sequenceNo && input.moveFollowing && !o.planLocked);
-          if (replan) orderOps.push({ ...o, started });
-          // A lego operation always walks with the order: the engine never
-          // books it, but it takes its place in the chain (its Ledtid and
-          // its gap) exactly as in Planera — left out, the gaps after it
-          // were counted one short (another day than the next Planera gives
-          // with a Standardkötid in half days) and a move to before the lego
-          // is back gave no sequence warning.
-          else if (world.workCenters.get(o.workCenterId)?.type === "subcontract") orderOps.push({ ...o, started });
-          // Kept as it is: planned ⇒ fixed load and the sequence floor, like a
-          // lock but reported as "ligger fast" rather than "låst"; unplanned
-          // ⇒ its due-date bucket, untouched.
-          else if (hasPlan(o)) orderOps.push({ ...o, started, fixed: true });
-          else fixed.push(o);
-        }
-        const result = planProduction({
-          today: world.today,
-          offDays: world.offDays,
-          workCenters: world.workCenters,
-          schedule: world.schedule,
-          queueDays: world.queueDays,
-          orders: [{ id: op.manufacturingOrderId, orderNumber: op.orderNumber, dueDate: target.dueDate, operations: orderOps }],
-          existingOperations: [...world.operations.filter((o) => o.manufacturingOrderId !== op.manufacturingOrderId), ...fixed],
-          forceStart: { operationId: opId, date: input.date },
-          longOperationWeeks: world.longOperationWeeks,
+        // The rule itself (which of the order's operations move, follow or
+        // lie fast) is planOperationMove — shared with Samkör.
+        const result = planOperationMove(world, stamped, {
+          operationId: opId,
+          date: input.date,
+          moveFollowing: input.moveFollowing,
         });
         // The forced day took nothing (no capacity that day: a weekend, a
         // röd dag, a free day in the schedule) — the book went on to the
@@ -3174,7 +3159,11 @@ export function createPlanningService(
         const row = placed
           ? (await repo.setOperationLock(tx, opId, true))!
           : { plannedStartDate: null, plannedEndDate: null, planLocked: false };
-        const seqOf = new Map(orderOps.map((o) => [o.moOperationId, o.sequenceNo]));
+        const seqOf = new Map(
+          world.operations
+            .filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)
+            .map((o) => [o.moOperationId, o.sequenceNo])
+        );
         const following = [
           ...result.plans
             .filter((p) => p.operationId !== opId)
