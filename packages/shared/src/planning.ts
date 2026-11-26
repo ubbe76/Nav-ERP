@@ -321,3 +321,43 @@ export const unlockOrdersSchema = z.object({
     .refine((ids) => new Set(ids).size === ids.length, { message: "A manufacturing order may only be listed once" }),
 });
 export type UnlockOrdersInput = z.infer<typeof unlockOrdersSchema>;
+
+// POST /manufacturing-orders/:id/replan-structure[/preview] — Planera om
+// strukturen (planeringsverktyget etapp 5): the top TO and the chosen
+// halvfabrikat-TOs under it planned again, children before parents, and
+// locked. `dueDate` = the top's new färdigdatum (null = leave it);
+// `moveComponentDueDates` writes Flytta halvfabrikatens suggestions for the
+// chosen TOs; `includeOrderIds` = the chosen halvfabrikat (the top is always
+// in). The preview may leave them out = the default choice. `expected` is
+// what the preview answered (the tree's TOs with their due dates and planned
+// days) — sent back unchanged; anything else under the lock is 409
+// replan-structure-changed. No number fields.
+const replanIncludeOrderIds = z
+  .array(z.string().uuid())
+  .max(200)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "A manufacturing order may only be listed once" });
+const replanStructureBase = z.object({
+  dueDate: businessDateSchema.nullable(),
+  moveComponentDueDates: z.boolean(),
+});
+export const replanStructurePreviewSchema = replanStructureBase.extend({ includeOrderIds: replanIncludeOrderIds.optional() });
+export type ReplanStructurePreviewInput = z.infer<typeof replanStructurePreviewSchema>;
+export const replanStructureSchema = replanStructureBase.extend({
+  includeOrderIds: replanIncludeOrderIds,
+  expected: z
+    .array(
+      z.object({
+        manufacturingOrderId: z.string().uuid(),
+        dueDate: businessDateSchema.nullable(),
+        plannedStartDate: businessDateSchema.nullable(),
+        plannedEndDate: businessDateSchema.nullable(),
+      })
+    )
+    .min(1)
+    // The whole tree, chosen or not — Strukturvyn's own bound on a tree.
+    .max(600)
+    .refine((rows) => new Set(rows.map((r) => r.manufacturingOrderId)).size === rows.length, {
+      message: "A manufacturing order may only be listed once",
+    }),
+});
+export type ReplanStructureInput = z.infer<typeof replanStructureSchema>;

@@ -14,6 +14,8 @@ import {
   listRequirementsQuerySchema,
   missingComponentsSchema,
   moveOperationSchema,
+  replanStructurePreviewSchema,
+  replanStructureSchema,
   runPlanPdfQuerySchema,
   runPlanOrderSchema,
   runPlanQuerySchema,
@@ -44,6 +46,8 @@ import {
   OperationPlanChangedError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
+  ReplanStructureChangedError,
+  ReplanStructureNotPlannableError,
   RunPlanOrderChangedError,
   RunPlanSubcontractResourceError,
   SalesOrderNotFoundError,
@@ -539,6 +543,40 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     } catch (err) {
       if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
+    }
+  });
+
+  // Planera om strukturen (etapp 5): the TO and the chosen halvfabrikat-TOs
+  // under it planned again, children before parents, and locked. The preview
+  // computes the same answer and writes nothing — it still needs the write
+  // rule and is NOT readOnlySafe (as Samkör's and Flytta's). Module default
+  // write = tillverkning. 409 replan-structure-changed carries the fresh
+  // preview in `result` (the tree or its dates are not the ones confirmed,
+  // or a chosen TO may not be chosen); 409 replan-structure-not-plannable
+  // when a chosen TO does not fit within the horizon; 409
+  // invalid-status-transition for a TO that is no longer open; 404 for a TO
+  // that does not exist. Nothing is written in any of them.
+  const replanErrors = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof ReplanStructureChangedError) return reply.code(409).send({ ...errorBody(err), result: err.result });
+    if (err instanceof ReplanStructureNotPlannableError) return reply.code(409).send({ ...errorBody(err), orderNumbers: err.orderNumbers });
+    if (err instanceof InvalidStatusTransitionError) return reply.code(409).send({ ...errorBody(err), orderNumber: err.orderNumber });
+    throw err;
+  };
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/replan-structure/preview", async (req, reply) => {
+    const input = replanStructurePreviewSchema.parse(req.body);
+    try {
+      return await service.previewReplanStructure(req.params.id, input);
+    } catch (err) {
+      return replanErrors(err, reply);
+    }
+  });
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/replan-structure", async (req, reply) => {
+    const input = replanStructureSchema.parse(req.body);
+    try {
+      return await service.replanStructure(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return replanErrors(err, reply);
     }
   });
 

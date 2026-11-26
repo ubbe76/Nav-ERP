@@ -13,6 +13,8 @@ import type {
   ListRequirementsQuery,
   MoveOperationInput,
   Paged,
+  ReplanStructureInput,
+  ReplanStructurePreviewInput,
   RunPlanOrderInput,
   RunPlanPdfQuery,
   RunPlanQuery,
@@ -75,6 +77,7 @@ import {
   computeCapacity,
   isLockedOperation,
   orderPlanStatus,
+  orderPlannedRange,
   operationStarted,
   plannedDateRange,
   remainingOperationMinutes,
@@ -149,6 +152,16 @@ import {
   type StructureResult,
   type StructureRootRow,
 } from "./structure-tree.js";
+import {
+  planStructure,
+  replanOrders,
+  replanSelection,
+  replanStructureOutcome,
+  replanTree,
+  REPLAN_MAX_INCLUDED,
+  sameReplanExpected,
+  type ReplanStructureResult,
+} from "./structure-replan.js";
 import { isCoRunMaterial, linkedOperationMaterials } from "../../manufacturing/service/operation-materials.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
 import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
@@ -445,6 +458,26 @@ export class OperationPlanChangedError extends Error {
   constructor(public orderNumber: string, public sequenceNo: number) {
     super(`Operation ${sequenceNo} på ${orderNumber} har flyttats sedan vyn lästes — läs om och försök igen`);
     this.name = "OperationPlanChangedError";
+  }
+}
+
+// Planera om strukturen: the tree or its dates are not what the preview
+// showed — a TO more or less under the top, another färdigdatum, other
+// planned days, or a chosen TO that may not be chosen. Nothing is written;
+// the body carries the fresh preview (as missing-components-changed). 409.
+export class ReplanStructureChangedError extends Error {
+  constructor(public result: ReplanStructureResult) {
+    super("Strukturen eller planen har ändrats sedan förhandsvisningen — den har räknats om");
+    this.name = "ReplanStructureChangedError";
+  }
+}
+
+// Planera om strukturen: a chosen TO does not fit within the plan horizon
+// (S32) — its parent would have no day to stand on. Nothing is written. 409.
+export class ReplanStructureNotPlannableError extends Error {
+  constructor(public orderNumbers: string[]) {
+    super(`Kapaciteten räcker inte inom två år för ${orderNumbers.join(", ")} — strukturen kan inte planeras om`);
+    this.name = "ReplanStructureNotPlannableError";
   }
 }
 
@@ -1748,13 +1781,10 @@ export function createPlanningService(
     for (const op of capacity.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
     for (const [orderId, ops] of byOrder) {
       const status = orderPlanStatus(ops, { today, offDays: world.offDays, workCenters: world.workCenters, queueDays: world.queueDays });
-      const dates = ops
-        .filter((op) => op.operationStatus === "pending" && hasPlan(op))
-        .flatMap((op) => op.plannedDays!.map((d) => d.date))
-        .sort();
+      const range = orderPlannedRange(ops);
       summaries.set(orderId, {
-        plannedStartDate: dates[0] ?? null,
-        plannedEndDate: dates[dates.length - 1] ?? null,
+        plannedStartDate: range.start,
+        plannedEndDate: range.end,
         late: status.late,
         plannedFinish: status.planned ? status.plannedFinish : null,
       });
@@ -2617,14 +2647,17 @@ export function createPlanningService(
   //      and the planned finish from the same rows) and ONE
   //      stampedOperationIds.
   // A planned, closed or done TO is a node without children, like coverage.
-  async function getStructure(query: StructureQuery): Promise<StructureResult> {
-    const today = todayFn();
+  // The tree's TO levels as they are loaded — shared by Strukturvyn and
+  // Planera om strukturen (the same peggings, the same material rows).
+  // `onLevel` sees each pegged level with its world.
+  function structureLevels(onLevel?: (ids: string[], world: PeggedParents) => void) {
     const demandsByOrder = new Map<string, StructureDemand[]>();
     const orders = new Map<string, StructureOrderFacts>();
     const expanded = new Set<string>();
     // One pegged level: every TO's head, its material rows with what covers
     // them and Halvfabrikat sent — all from the level's own world.
     const addLevel = (ids: string[], world: PeggedParents) => {
+      onLevel?.(ids, world);
       const headById = new Map(world.heads.map((h) => [h.id, h]));
       for (const id of ids) {
         expanded.add(id);
@@ -2649,6 +2682,24 @@ export function createPlanningService(
         });
       }
     };
+    // ONE pegParents per TO level from `level` (at TO depth `depth`) down to
+    // STRUCTURE_MAX_DEPTH.
+    const descend = async (level: string[], depth: number, dbc?: Tx) => {
+      for (; level.length > 0 && depth <= STRUCTURE_MAX_DEPTH; depth += 1) {
+        const ids = level;
+        addLevel(ids, await pegParents(ids, {}, dbc));
+        level = nextStructureLevel(
+          ids.flatMap((id) => demandsByOrder.get(id) ?? []),
+          expanded
+        );
+      }
+    };
+    return { demandsByOrder, orders, expanded, addLevel, descend };
+  }
+
+  async function getStructure(query: StructureQuery): Promise<StructureResult> {
+    const today = todayFn();
+    const { demandsByOrder, orders, expanded, addLevel, descend } = structureLevels();
 
     let root: StructureInput["root"];
     // The TOs of the next level to peg and their depth (TO levels below the root).
@@ -2703,14 +2754,7 @@ export function createPlanningService(
         depth = 2;
       }
     }
-    for (; level.length > 0 && depth <= STRUCTURE_MAX_DEPTH; depth += 1) {
-      const ids = level;
-      addLevel(ids, await pegParents(ids));
-      level = nextStructureLevel(
-        ids.flatMap((id) => demandsByOrder.get(id) ?? []),
-        expanded
-      );
-    }
+    await descend(level, depth);
 
     const plans = await loadOrderPlans([...expanded]);
     for (const [id, facts] of orders) facts.plan = plans.summaries.get(id) ?? null;
@@ -2730,6 +2774,110 @@ export function createPlanningService(
     const tree = buildStructureTree({ ...input, offDays: plans.world?.offDays ?? new Set<string>() });
     if (plans.world && tree.axis.to <= plans.horizonTo) return tree;
     return buildStructureTree({ ...input, offDays: new Set(await repo.fullDayHolidaysBetween(tree.axis.from, tree.axis.to)) });
+  }
+
+  // --- Planera om strukturen (planeringsverktyget etapp 5) ----------------
+  // What the preview and the write share, writing nothing (structure-replan.ts
+  // owns the rules, planStructure the placing — Planera's engine, one TO at
+  // a time, children before parents):
+  //   1. the tree from the top with Strukturvyn's own loader (one pegParents
+  //      per TO level), every read through `dbc`;
+  //   2. the choice (replanSelection: the default, or includeOrderIds);
+  //   3. with `lock`: the chosen TOs' operations FOR UPDATE in id order —
+  //      never the order row (the caller holds the production_plan lock);
+  //   4. the plan world and the stamps, read AFTER the locks;
+  //   5. planStructure;
+  //   6. the färdigdatum in memory: the top's new one, and with
+  //      moveComponentDueDates each chosen halvfabrikat's NEW klar-dag (the
+  //      reservation's rule: a TO it creates is due the day it is ready) —
+  //      then planStructure once more with those dates, so Sen and the
+  //      warnings are counted on them (the placing never reads a due date:
+  //      the days are the same);
+  //   7. the answer.
+  // `dbc` undefined = outside a transaction (the preview). Throws, in this
+  // order: unknown top (404), a top that is not open (409
+  // invalid-status-transition), an includeOrderIds that may not be chosen
+  // (409 replan-structure-changed with the answer for the valid part).
+  type ReplanRequest = { dueDate: string | null; moveComponentDueDates: boolean; includeOrderIds?: string[] };
+  async function prepareReplanStructure(dbc: Tx | undefined, topId: string, input: ReplanRequest, opts: { lock: boolean }) {
+    // "delas med": the other demands a halvfabrikat-TO covers, per place in
+    // the tree (parent|child) — Går till of the TO in the pegging its parent
+    // was pegged with.
+    const sharedByLink = new Map<string, string[]>();
+    const levels = structureLevels((ids, world) => {
+      for (const parentId of ids) {
+        for (const { pegging, demand } of parentDemands(world, parentId)) {
+          for (const a of demand.allocations) {
+            const supply = supplyOf(pegging, a);
+            const childId = supply.kind === "manufacturing_order" ? (supply.row?.documentId ?? null) : null;
+            if (childId === null || sharedByLink.has(`${parentId}|${childId}`)) continue;
+            const others = goesToOf(pegging, childId)
+              .goesTo.filter((g) => g.documentId !== parentId)
+              .map((g) => g.documentNumber ?? "lagret");
+            sharedByLink.set(`${parentId}|${childId}`, [...new Set(others)]);
+          }
+        }
+      }
+    });
+    const topWorld = await pegParents([topId], {}, dbc);
+    const head = topWorld.heads.find((h) => h.id === topId);
+    if (!head) throw new ManufacturingOrderNotFoundError(topId);
+    if (!OPEN_MO_STATUSES.has(head.status)) throw new InvalidStatusTransitionError(head.orderNumber, head.status);
+    levels.addLevel([topId], topWorld);
+    await levels.descend(nextStructureLevel(levels.demandsByOrder.get(topId) ?? [], levels.expanded), 1, dbc);
+
+    const tree = replanTree(topId, levels.orders, levels.demandsByOrder);
+    const selection = replanSelection(tree, input.includeOrderIds);
+    const chosenIds = tree.map((n) => n.manufacturingOrderId).filter((id) => selection.included.has(id));
+    if (opts.lock && dbc) await repo.lockOrdersOperations(dbc, [...chosenIds].sort());
+    const world = await loadPlanWorld(dbc);
+    const stamped = await repo.stampedOperationIds(dbc);
+
+    // The färdigdatum that would be written — only where it changes.
+    const dueDates = new Map<string, { before: string | null; after: string; late: boolean }>();
+    if (input.dueDate !== null && input.dueDate !== head.dueDate) {
+      dueDates.set(topId, { before: head.dueDate, after: input.dueDate, late: false });
+    }
+    const ordersWithDates = () =>
+      replanOrders(tree, selection.included, levels.demandsByOrder, (id) => {
+        const due = dueDates.get(id);
+        return due ? due.after : (levels.orders.get(id)?.dueDate ?? null);
+      });
+    let plan = planStructure(world, stamped, ordersWithDates());
+    if (input.moveComponentDueDates) {
+      for (const node of tree) {
+        const id = node.manufacturingOrderId;
+        const finish = plan.finishOf.get(id) ?? null;
+        // A TO beyond the horizon has no klar-dag: its date is left alone.
+        if (id === topId || !selection.included.has(id) || finish === null || finish === node.dueDate) continue;
+        dueDates.set(id, { before: node.dueDate, after: finish, late: false });
+      }
+      plan = planStructure(world, stamped, ordersWithDates());
+    }
+    const result = replanStructureOutcome({
+      tree,
+      included: selection.included,
+      sharedWith: new Map(
+        tree.flatMap((n) =>
+          n.parentOrderId === null ? [] : [[n.manufacturingOrderId, sharedByLink.get(`${n.parentOrderId}|${n.manufacturingOrderId}`) ?? []] as const]
+        )
+      ),
+      dueDates,
+      world,
+      capacity: world.capacity,
+      stamped,
+      plan,
+      notes: selection.capped
+        ? [`Fler än ${REPLAN_MAX_INCLUDED} halvfabrikat kan inte planeras om på en gång — resten är inte valda`]
+        : [],
+    });
+    if (!selection.valid) throw new ReplanStructureChangedError(result);
+    return { head, plan, dueDates, result };
+  }
+  // The färdigdatum changed between the read and the order rows' lock: the
+  // write is rolled back and answered with a preview read again.
+  class ReplanDueDateRace {
+    constructor(public manufacturingOrderId: string) {}
   }
 
   // --- Skapa saknade halvfabrikat (pegging #9, etapp 3) -------------------
@@ -3992,6 +4140,121 @@ export function createPlanningService(
         });
       }
       return { unlocked: result.map(({ sequenceNos, ...order }) => ({ ...order, operations: sequenceNos.length })) };
+    },
+
+    // Planera om strukturen, the preview: what the write would do, on the
+    // plan as it is right now — no transaction, no production_plan lock,
+    // nothing written.
+    async previewReplanStructure(topId: string, input: ReplanStructurePreviewInput): Promise<ReplanStructureResult> {
+      return (await prepareReplanStructure(undefined, topId, input, { lock: false })).result;
+    },
+
+    // Planera om strukturen — the top TO and the chosen halvfabrikat-TOs
+    // planned again (children before parents, each from the day its
+    // material is ready) and locked on their days; with the färdigdatum the
+    // dialog chose. ONE transaction.
+    // Lock order: production_plan (advisory) → the chosen TOs' operations
+    // (FOR UPDATE, by id) → their order rows (setDueDatesInTx, by id) —
+    // operation before order, as the reports (operation → order) and the
+    // operation edits (advisory → operations → order). The writers that
+    // start on the order row (Flytta halvfabrikaten, the header PATCH,
+    // Makulera/Slutför/Förbruka) never take an operation after it, so no
+    // cycle. Never a kundorder row.
+    // 409 replan-structure-changed when the tree or its dates are not the
+    // ones the preview showed (`expected`), 409
+    // replan-structure-not-plannable when a chosen TO does not fit within
+    // the horizon — nothing written. Other load is not tested: the answer
+    // shows the actual outcome. Händelselogg after commit.
+    async replanStructure(topId: string, input: ReplanStructureInput, userId: string | null): Promise<ReplanStructureResult> {
+      let written: Awaited<ReturnType<typeof prepareReplanStructure>>;
+      try {
+        written = await repo.transaction(async (tx) => {
+          await lockProductionPlan(tx);
+          const prepared = await prepareReplanStructure(tx, topId, input, { lock: true });
+          if (!sameReplanExpected(prepared.result.expected, input.expected)) throw new ReplanStructureChangedError(prepared.result);
+          if (prepared.plan.blocked.length > 0) {
+            throw new ReplanStructureNotPlannableError(prepared.plan.blocked.map((b) => b.orderNumber));
+          }
+          const moves = [...prepared.dueDates].map(([manufacturingOrderId, due]) => ({
+            manufacturingOrderId,
+            dueDate: due.after,
+            expectedDueDate: due.before,
+          }));
+          if (moves.length > 0) {
+            const outcome = await deps.manufacturing.setDueDatesInTx(tx, moves);
+            if (!outcome.ok) {
+              switch (outcome.reason) {
+                case "not_found":
+                  throw new ManufacturingOrderNotFoundError(outcome.manufacturingOrderId);
+                case "invalid_status":
+                  throw new InvalidStatusTransitionError(outcome.orderNumber, outcome.status);
+                case "due_date_changed":
+                  throw new ReplanDueDateRace(outcome.manufacturingOrderId);
+              }
+            }
+          }
+          // ONE write for the whole tree (run_position dropped where the
+          // start day changes, as always), then the locks.
+          await repo.writeOperationPlans(tx, { plans: prepared.plan.plans, clear: prepared.plan.clear, plannedAt: new Date() });
+          await repo.setOperationLocks(tx, prepared.plan.lockIds, true);
+          // The answer was computed before any write — nothing between the
+          // commit and the händelselogg can throw.
+          return prepared;
+        });
+      } catch (err) {
+        if (!(err instanceof ReplanDueDateRace)) throw err;
+        throw new ReplanStructureChangedError((await prepareReplanStructure(undefined, topId, input, { lock: false })).result);
+      }
+      // The starts move the proposals' dates.
+      cache = null;
+      const { result } = written;
+      const planned = result.orders.filter((o) => o.included);
+      for (const order of planned) {
+        const withDays = order.operations.filter((op) => op.after.start !== null);
+        const changed = order.operations.some(
+          (op) => op.before.start !== op.after.start || op.before.end !== op.after.end || (op.after.start !== null && !op.wasLocked)
+        );
+        if (changed) {
+          const warnings = result.warnings.filter((w) => w.manufacturingOrderId === order.manufacturingOrderId).map((w) => w.message);
+          await audit.log({
+            entityType: "manufacturing_order",
+            entityId: order.orderNumber,
+            action: "structure_replanned",
+            detail: {
+              forOrder: result.top.orderNumber,
+              plannedStartDate: order.planned.after.start,
+              plannedEndDate: order.planned.after.end,
+              before: { plannedStartDate: order.planned.before.start, plannedEndDate: order.planned.before.end },
+              floorDate: order.floor?.date ?? null,
+              // ONE text — Historik writes lists as raw JSON.
+              operations: withDays
+                .map((op) => `op ${op.sequenceNo} ${op.after.start}${op.after.end !== op.after.start ? `–${op.after.end}` : ""}`)
+                .join(", "),
+              unlocked: order.operations.filter((op) => op.wasLocked).length,
+              ...(warnings.length > 0 ? { warnings: warnings.join("; ") } : {}),
+            },
+            userId,
+          });
+        }
+        const due = written.dueDates.get(order.manufacturingOrderId);
+        if (due) {
+          await audit.log({
+            entityType: "manufacturing_order",
+            entityId: order.orderNumber,
+            action: "updated",
+            detail: { before: { dueDate: due.before }, after: { dueDate: due.after }, reason: "structure_replan", forOrder: result.top.orderNumber },
+            userId,
+          });
+        }
+      }
+      await audit.log({
+        entityType: "production_plan",
+        entityId: null,
+        action: "structure_replanned",
+        detail: { top: result.top.orderNumber, orders: planned.map((o) => o.orderNumber).join(", "), count: planned.length },
+        userId,
+      });
+      return result;
     },
 
     getStructure,

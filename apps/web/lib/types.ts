@@ -5979,6 +5979,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   order_plan_unlocked: "Planeringen upplåst",
   run_order_changed: "Körordning ändrad",
   co_run: "Operationer samkörda",
+  structure_replanned: "Strukturen omplanerad",
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
@@ -7963,6 +7964,73 @@ export interface StructureResult {
 // POST /planning/unlock-orders — Lås upp hela ordern / Lås upp strukturen.
 export interface UnlockOrdersResult {
   unlocked: { manufacturingOrderId: string; orderNumber: string; operations: number }[];
+}
+
+// POST /manufacturing-orders/:id/replan-structure[/preview] — Planera om
+// strukturen. The preview and the write answer the same shape; the write
+// sends the preview's `expected` back unchanged.
+export interface ReplanStructureRequest {
+  dueDate: string | null; // the top's new färdigdatum; null = leave it
+  moveComponentDueDates: boolean;
+  includeOrderIds?: string[]; // the chosen halvfabrikat; left out (preview only) = the default
+}
+export interface ReplanExpectedOrder {
+  manufacturingOrderId: string;
+  dueDate: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+}
+export interface ReplanPlanWarning {
+  kind: "late" | "horizon" | "sequence" | "unscheduled_resource" | "long_operation";
+  manufacturingOrderId: string;
+  orderNumber: string;
+  sequenceNo?: number;
+  workCenterCode?: string;
+  dueDate?: string | null;
+  plannedFinish?: string | null;
+  remainingHours?: number;
+  message: string;
+}
+export interface ReplanDateRange {
+  start: string | null;
+  end: string | null;
+}
+export interface ReplanStructureOrder {
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleNumber: string;
+  articleName: string;
+  level: number; // 0 = the top
+  parentOrderId: string | null;
+  exclusive: boolean;
+  selectable: boolean; // open, and its parent is chosen
+  included: boolean;
+  sharedWith: string[];
+  dueDate: { before: string | null; after: string | null; late: boolean };
+  planned: { before: ReplanDateRange; after: ReplanDateRange };
+  plannedFinish: string | null;
+  lateAfter: boolean;
+  floor: { date: string; source: { kind: string; documentNumber: string } | null } | null;
+  operations: {
+    moOperationId: string;
+    sequenceNo: number;
+    workCenterCode: string;
+    subcontract: boolean;
+    started: boolean;
+    wasLocked: boolean;
+    before: ReplanDateRange;
+    after: ReplanDateRange;
+  }[];
+}
+export interface ReplanStructureResult {
+  today: string;
+  top: { manufacturingOrderId: string; orderNumber: string };
+  orders: ReplanStructureOrder[]; // the whole tree's TOs, depth first
+  overloadedDays: { workCenterCode: string; date: string; loadHours: number; availableHours: number | null }[];
+  warnings: ReplanPlanWarning[];
+  notes: string[];
+  blocked: { manufacturingOrderId: string; orderNumber: string }[];
+  expected: ReplanExpectedOrder[];
 }
 
 // POST /planning/operations/:opId/move/preview — what Flytta would do, with

@@ -442,6 +442,20 @@ export function plannedDateRange(op: Pick<CapacityOperationRow, "plannedDays">):
   return { start: dates[0]!, end: dates[dates.length - 1]! };
 }
 
+// An order's planned days as the TO list shows them: the first and the last
+// stored day among its PENDING operations with a plan (null = none). ONE
+// expression for the plan summaries (orderPlanSummaries) and for Planera om
+// strukturen's before/after and its `expected`.
+export function orderPlannedRange(
+  operations: readonly Pick<CapacityOperationRow, "operationStatus" | "plannedDays">[]
+): { start: string | null; end: string | null } {
+  const dates = operations
+    .filter((op) => op.operationStatus === "pending" && !!op.plannedDays && op.plannedDays.length > 0)
+    .flatMap((op) => op.plannedDays!.map((d) => d.date))
+    .sort();
+  return { start: dates[0] ?? null, end: dates[dates.length - 1] ?? null };
+}
+
 // The day an operation is due to start, NOT clamped to today (the körplan's
 // dagnyckel — a day before today is Försenad): the plan's first day when
 // planned, else the MO's due date — the very day operationLoadDays buckets
