@@ -7,6 +7,7 @@ import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
+import { DeliveryTimeBox } from "./DeliveryTimeBox";
 import { DeliveryOutlookCell, DeliveryOutlookHead, deliveryOutlookDetail, useDeliveryOutlook } from "./DeliveryOutlook";
 import { OUTLOOK_ORDER_STATUSES } from "../../lib/deliveryOutlook";
 import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
@@ -792,6 +793,22 @@ export function SalesOrderDetail({
       />
 
       {showOutlook && <DeliveryOutlookHead state={deliveryOutlook} />}
+
+      {/* Leveranstid on the quote card (S23): an estimate that books nothing;
+          Använd datumet sets Förväntat leveransdatum like the dialog does. */}
+      {order.status === "quote" && rows.length > 0 && (
+        <DeliveryTimeBox
+          request={{ salesOrderId: order.id }}
+          withCustomer
+          onUseDate={useCheckedDate}
+          rowsWithOwnDate={rows.filter((r) => r.expectedDeliveryDate).length}
+          refreshKey={JSON.stringify([
+            order.customerId,
+            order.revision,
+            rows.map((r) => [r.id, r.articleId, r.quantityOrdered, r.unitId ?? null, r.configuration ?? null]),
+          ])}
+        />
+      )}
 
       {customerChange && (
         <FormNotice style={{ marginBottom: 12 }}>

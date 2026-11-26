@@ -29,6 +29,7 @@ import { addDaysIso, stockholmToday } from "../../lib/date";
 import { useCustomerDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
+import { DeliveryTimeBox } from "./DeliveryTimeBox";
 import { useDimensions } from "../../lib/dimensions";
 import { DimensionFields } from "../economy/DimensionSelect";
 import type { DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
@@ -481,6 +482,18 @@ export function NewQuoteForm({
           </Button>
         </div>
       </div>
+
+      <DeliveryTimeBox
+        request={checkRows.length > 0 ? checkRequest : null}
+        withCustomer={customer !== null}
+        rowsWithOwnDate={perRowDates ? rows.filter((r) => r.deliveryDate).length : 0}
+        onUseDate={(date) => {
+          // Same as the check dialog: a date taken from the estimate counts as
+          // typed by hand (the delivery-day suggestion no longer overwrites it).
+          setDateTouched(true);
+          setExpectedDeliveryDate(date);
+        }}
+      />
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending || pricingInFlight}>

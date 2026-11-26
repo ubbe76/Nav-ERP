@@ -558,6 +558,16 @@ Själva kontrollen är en beräkning som läser och räknar — den ändrar inge
 
 Ger [alternativa resurser](/hjalp/artiklar#alternativa-resurser) ett tidigare datum visar dialogen båda datumen och låter dig välja — se [Alternativa resurser i kontrollen](#alternativa-resurser-i-kontrollen).
 
+### Rutan Leveranstid
+
+I **Ny offert**, **Ny kundorder** och på offertkortet (status Offert) räknas kontrollen också automatiskt, utan att du behöver öppna dialogen. Rutan **Leveranstid** under raderna visar till exempel *Tidigast leverans 12 dec (avsändning 10 dec)*, eller *Tidigast avsändning 10 dec* när ingen kund är vald.
+
+- Rutan räknar om en stund efter att du slutat ändra raderna, antalet eller kunden. Medan den räknar står det förra svaret kvar, nedtonat, med *Räknar…* under.
+- **Använd datumet** sätter leveransdatumet till det föreslagna. Rutan fyller aldrig i datumet själv.
+- **Visa hur** öppnar dialogen Leveranstidskontroll med hela kedjan: lager, inköp och operationer per rad.
+- Rutan är en beräkning och bokar ingenting. På en bekräftad order visar kortet i stället [leveransläget](#leveranslage).
+- Rutan visas för den som har behörighet till Försäljning eller Tillverkning, precis som knappen **Leveranstidskontroll**.
+
 Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Knappen visas bara när kontrollen räknats med en kund — utan kund är datumet avsändningsdagen och dialogen visar i stället texten "Välj kund för att räkna med kundens transportdagar." Raderna på ordern ändras aldrig — har några rader ett [eget leveransdatum](#leveransdatum-per-rad) behåller de det, och dialogen säger hur många de är. Kräver behörigheten Försäljning eller Tillverkning.
 
 ### Skapa tillverkningsordrar för det som saknas
