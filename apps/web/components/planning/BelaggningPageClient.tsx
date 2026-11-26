@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { StatusPill } from "../ui/StatusPill";
@@ -9,8 +9,21 @@ import { ListFilterSelect, useListNavigation } from "../ui/ListControls";
 import { Button } from "../ui/Button";
 import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { MoveOperationDialog, type MoveTarget } from "./MoveOperationDialog";
-import { ArrowLeftRight, Clock, Lock } from "lucide-react";
-import { apiFetch } from "../../lib/api";
+import { moveOperationTo, previewMove } from "./dayPlanWrites";
+import { ArrowLeftRight, Clock, GripVertical, Lock } from "lucide-react";
+import { ApiError, apiFetch } from "../../lib/api";
+import {
+  OTHER_RESOURCE_TEXT,
+  draggableOrder,
+  dropAllowed,
+  dropDayText,
+  moveBody,
+  moveConfirmText,
+  moveLabel,
+  nextDropIndex,
+  startIndex,
+  type DropRefusal,
+} from "../../lib/capacityDrag";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
@@ -40,6 +53,38 @@ interface SwitchHandlers {
   canSwitch: boolean;
   onSwitched: (moOperationId: string) => void;
   onError: (message: string | null) => void;
+}
+
+// Dra en operation till en annan dag (day view only, S34). One operation is
+// "in the air" at a time: dragged with the mouse from its grip, or lifted
+// with the keyboard (the grip is a button) and steered with ←/→. `target` is
+// the day cell the drop would land on.
+interface ActiveMove {
+  order: CapacityCellOrder;
+  // The resource the operation is on — a move never changes it.
+  workCenterId: string;
+  keys: boolean;
+  target: { workCenterId: string; date: string } | null;
+}
+
+interface MoveDrag {
+  canPlan: boolean;
+  // Grips are drawn: Tillverkning, the day view and a fine pointer.
+  canDrag: boolean;
+  // …and usable: no read and no write is running.
+  ready: boolean;
+  days: CapacityDay[];
+  active: ActiveMove | null;
+  onDragStart: (order: CapacityCellOrder, workCenterId: string) => void;
+  onDragEnd: () => void;
+  onOver: (workCenterId: string, date: string) => void;
+  onLeave: (workCenterId: string, date: string) => void;
+  onDrop: (resource: CapacityResourceRow, date: string) => void;
+  // The grip pressed (Enter/space/click): lift the operation, or — already
+  // lifted — drop it on the chosen day.
+  onGrip: (order: CapacityCellOrder, resource: CapacityResourceRow) => void;
+  onStep: (resource: CapacityResourceRow, step: -1 | 1) => void;
+  onCancel: () => void;
 }
 
 const WEEK_OPTIONS = [4, 8, 13, 26];
@@ -132,9 +177,23 @@ export function BelaggningPageClient() {
   const [summaryList, setSummaryList] = useState<SummaryList | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  // Dra till en annan dag: the mouse only (a touch screen has Flytta…).
+  const [finePointer, setFinePointer] = useState(false);
+  const [activeMove, setActiveMove] = useState<ActiveMove | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveNotice, setMoveNotice] = useState<{ title: string; warnings: PlanWarning[] } | null>(null);
 
   useEffect(() => {
     apiFetch<ProductionGroup[]>("/api/v1/production-groups").then(setGroups).catch(() => setGroups([]));
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia("(pointer: fine)");
+    const update = () => setFinePointer(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
   }, []);
 
   const weeksRaw = Number(searchParams.get("weeks"));
@@ -211,6 +270,104 @@ export function BelaggningPageClient() {
   function openMove(resource: CapacityResourceRow, order: CapacityCellOrder) {
     setMoveTarget({ order, resource });
   }
+
+  // A drop (mouse or keyboard) on a day of the operation's own resource: the
+  // API's preview first, then the question with what it said, then the move.
+  // Nothing is written before the answer; a refusal in the preview (a day
+  // without capacity, moved since the matrix was read …) is shown as it is.
+  async function moveByDrop(order: CapacityCellOrder, date: string, refocus: boolean) {
+    if (!canPlan || moveBusy) return;
+    const body = moveBody(order, date);
+    setMoveError(null);
+    setMoveNotice(null);
+    setMoveBusy(true);
+    try {
+      const preview = await previewMove(order.moOperationId, body);
+      const ok = await confirmDialog(moveConfirmText(order, date, preview), { confirmLabel: "Flytta" });
+      if (!ok) return;
+      const res = await moveOperationTo(order.moOperationId, body.date, body.expectedStartDate);
+      // The Planera result no longer describes the plan.
+      setPlanResult(null);
+      setMoveNotice({
+        title: `Op ${order.sequenceNo} på ${order.orderNumber} är flyttad till ${weekdayShortDate(date)} och låst.`,
+        warnings: res.warnings,
+      });
+      setReloadTick((n) => n + 1);
+    } catch (err) {
+      setMoveError(apiErrorMessage(err, "Kunde inte flytta operationen"));
+      // Moved by someone else since the matrix was read: show it as it is.
+      if (err instanceof ApiError && err.code === "operation-plan-changed") setReloadTick((n) => n + 1);
+    } finally {
+      setMoveBusy(false);
+      // The keyboard's way back: the grip of the row, when it is still there.
+      if (refocus) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-grip="${order.moOperationId}"]`)?.focus(), 0);
+    }
+  }
+
+  function dayTarget(resource: CapacityResourceRow, date: string) {
+    const load = resource.dayLoads.find((d) => d.date === date);
+    return { kind: "day" as const, workCenterId: resource.workCenterId, date, availableHours: load ? load.availableHours : null };
+  }
+
+  const dataDays = data?.granularity === "day" ? data.days : [];
+  const canDrag = canPlan && data?.granularity === "day" && finePointer;
+  const moveReady = canDrag && !loading && !moveBusy && !planBusy;
+
+  // No move survives a read or a write: the grip is disabled meanwhile, so
+  // its dragend might never clear the marks.
+  useEffect(() => {
+    if (!moveReady) setActiveMove(null);
+  }, [moveReady]);
+
+  const moveDrag: MoveDrag = {
+    canPlan,
+    canDrag,
+    ready: moveReady,
+    days: dataDays,
+    active: activeMove,
+    onDragStart: (order, workCenterId) => {
+      if (!moveReady) return;
+      setMoveError(null);
+      setActiveMove({ order, workCenterId, keys: false, target: null });
+    },
+    onDragEnd: () => setActiveMove(null),
+    onOver: (workCenterId, date) =>
+      setActiveMove((prev) =>
+        !prev || (prev.target?.workCenterId === workCenterId && prev.target.date === date) ? prev : { ...prev, target: { workCenterId, date } }
+      ),
+    onLeave: (workCenterId, date) =>
+      setActiveMove((prev) =>
+        prev && !prev.keys && prev.target?.workCenterId === workCenterId && prev.target.date === date ? { ...prev, target: null } : prev
+      ),
+    onDrop: (resource, date) => {
+      const move = activeMove;
+      setActiveMove(null);
+      if (!move || !moveReady) return;
+      const verdict = dropAllowed(move.order, move.workCenterId, dayTarget(resource, date));
+      if (verdict.ok) void moveByDrop(move.order, date, false);
+      else if (verdict.reason === "other_resource") setMoveError(OTHER_RESOURCE_TEXT);
+    },
+    onGrip: (order, resource) => {
+      if (!moveReady) return;
+      const move = activeMove;
+      if (!move || !move.keys || move.order.moOperationId !== order.moOperationId) {
+        setMoveError(null);
+        setActiveMove({ order, workCenterId: resource.workCenterId, keys: true, target: null });
+        return;
+      }
+      setActiveMove(null);
+      if (!move.target) return;
+      if (dropAllowed(order, move.workCenterId, dayTarget(resource, move.target.date)).ok) void moveByDrop(order, move.target.date, true);
+    },
+    onStep: (resource, step) =>
+      setActiveMove((prev) => {
+        if (!prev || !prev.keys) return prev;
+        const from = prev.target ? dataDays.findIndex((d) => d.date === prev.target!.date) : startIndex(dataDays, prev.order);
+        const day = dataDays[nextDropIndex(dataDays, resource.dayLoads, from, step)];
+        return day ? { ...prev, target: { workCenterId: resource.workCenterId, date: day.date } } : prev;
+      }),
+    onCancel: () => setActiveMove(null),
+  };
 
   // After Byt till X the operation is Vald för hand and its förslag is gone:
   // drop it from Planera's notice and reload the matrix.
@@ -304,6 +461,21 @@ export function BelaggningPageClient() {
       <FormError margin="below">{loadError}</FormError>
       <FormError margin="below">{planError}</FormError>
       <FormError margin="below">{switchError}</FormError>
+      <FormError margin="below">{moveError}</FormError>
+      {moveNotice && (
+        <FormNotice className={styles.planNotice}>
+          <div>{moveNotice.title}</div>
+          {moveNotice.warnings.length > 0 && (
+            <ul className={styles.warningList}>
+              {moveNotice.warnings.map((w, i) => (
+                <li key={i}>
+                  <WarningLine warning={w} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </FormNotice>
+      )}
       {loading && data && <FormHint>Uppdaterar…</FormHint>}
 
       {planResult && (
@@ -388,6 +560,7 @@ export function BelaggningPageClient() {
                 canMove={canPlan}
                 onMove={openMove}
                 switchHandlers={switchHandlers}
+                moveDrag={moveDrag}
               />
             ))}
           </div>
@@ -417,6 +590,7 @@ function GroupBlock({
   canMove,
   onMove,
   switchHandlers,
+  moveDrag,
 }: {
   group: CapacityGroupBlock;
   granularity: "week" | "day";
@@ -426,6 +600,7 @@ function GroupBlock({
   canMove: boolean;
   onMove: (resource: CapacityResourceRow, order: CapacityCellOrder) => void;
   switchHandlers: SwitchHandlers;
+  moveDrag: MoveDrag;
 }) {
   return (
     <>
@@ -442,6 +617,7 @@ function GroupBlock({
           canMove={canMove}
           onMove={onMove}
           switchHandlers={switchHandlers}
+          moveDrag={moveDrag}
         />
       ))}
 
@@ -466,6 +642,7 @@ function ResourceBlock({
   canMove,
   onMove,
   switchHandlers,
+  moveDrag,
 }: {
   resource: CapacityResourceRow;
   granularity: "week" | "day";
@@ -475,8 +652,30 @@ function ResourceBlock({
   canMove: boolean;
   onMove: (resource: CapacityResourceRow, order: CapacityCellOrder) => void;
   switchHandlers: SwitchHandlers;
+  moveDrag: MoveDrag;
 }) {
   const isExpandedHere = expanded?.workCenterId === resource.workCenterId;
+  const active = moveDrag.active;
+
+  // A day cell as a drop target while an operation is in the air. Only the
+  // day cells get one — Senare, Odaterat and the Summa row never take a drop.
+  function dropFor(date: string | undefined): CellDrop | undefined {
+    if (!active || !date) return undefined;
+    const load = resource.dayLoads.find((d) => d.date === date);
+    const verdict = dropAllowed(active.order, active.workCenterId, {
+      kind: "day",
+      workCenterId: resource.workCenterId,
+      date,
+      availableHours: load ? load.availableHours : null,
+    });
+    return {
+      state: verdict.ok ? "ok" : verdict.reason,
+      over: active.target?.workCenterId === resource.workCenterId && active.target.date === date,
+      onOver: () => moveDrag.onOver(resource.workCenterId, date),
+      onLeave: () => moveDrag.onLeave(resource.workCenterId, date),
+      onDrop: () => moveDrag.onDrop(resource, date),
+    };
+  }
 
   return (
     <>
@@ -503,6 +702,7 @@ function ResourceBlock({
             granularity={granularity}
             active={expanded?.key === `${resource.workCenterId}:${key}`}
             onClick={cell.orders.length > 0 ? () => onCellClick(resource, key, label, cell) : undefined}
+            drop={granularity === "day" ? dropFor(moveDrag.days[i]?.date) : undefined}
           />
         );
       })}
@@ -531,6 +731,8 @@ function ResourceBlock({
           granularity={granularity}
           onMove={canMove ? (order) => onMove(resource, order) : undefined}
           switchHandlers={switchHandlers}
+          resource={resource}
+          moveDrag={moveDrag}
         />
       )}
     </>
@@ -586,20 +788,59 @@ function CellContent({ cell, flags = true, granularity }: { cell: CapacityCell; 
   );
 }
 
+// A day cell while an operation is dragged or lifted: what a drop here would
+// be (capacityDrag's dropAllowed) and whether it is the current target.
+interface CellDrop {
+  state: "ok" | DropRefusal;
+  over: boolean;
+  onOver: () => void;
+  onLeave: () => void;
+  onDrop: () => void;
+}
+
 function CellView({
   cell,
   active = false,
   summa = false,
   granularity,
   onClick,
+  drop,
 }: {
   cell: CapacityCell;
   granularity: "week" | "day";
   active?: boolean;
   summa?: boolean;
   onClick?: () => void;
+  drop?: CellDrop;
 }) {
   const clickable = !!onClick;
+  const ref = useRef<HTMLDivElement>(null);
+  const over = drop?.over ?? false;
+
+  // The keyboard's target may be scrolled out of the matrix.
+  useEffect(() => {
+    if (over) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [over]);
+
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!drop) return;
+    if (drop.state === "ok" || drop.state === "other_resource") {
+      // Another resource takes the drop only to say why not (S34): the page
+      // answers "Byt resurs görs på TO-kortet" and writes nothing.
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      drop.onOver();
+      return;
+    }
+    // No capacity that day (or the operation's own day): no drop at all.
+    e.dataTransfer.dropEffect = "none";
+  }
+
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (!drop) return;
+    e.preventDefault();
+    drop.onDrop();
+  }
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (!onClick) return;
@@ -611,7 +852,19 @@ function CellView({
 
   return (
     <div
+      ref={ref}
       className={styles.cell}
+      data-drop={drop?.state}
+      data-drop-over={drop ? over : undefined}
+      onDragOver={drop ? onDragOver : undefined}
+      onDragLeave={
+        drop
+          ? (e) => {
+              if (!(e.relatedTarget instanceof Node) || !e.currentTarget.contains(e.relatedTarget)) drop.onLeave();
+            }
+          : undefined
+      }
+      onDrop={drop ? onDrop : undefined}
       data-tone={toneFor(cell)}
       data-clickable={clickable}
       data-active={active}
@@ -623,6 +876,11 @@ function CellView({
       onKeyDown={clickable ? onKeyDown : undefined}
     >
       <CellContent cell={cell} flags={!summa} granularity={granularity} />
+      {/* Why this day takes no drop — unless the cell already says so. */}
+      {drop?.state === "no_capacity" && !(cell.loadPercent === null && cell.overloaded) && (
+        <span className={styles.dropLabel}>ingen kapacitet</span>
+      )}
+      {drop?.state === "other_resource" && over && <span className={styles.dropLabel}>annan resurs</span>}
     </div>
   );
 }
@@ -634,6 +892,8 @@ function ExpansionRow({
   granularity,
   onMove,
   switchHandlers,
+  resource,
+  moveDrag,
 }: {
   // The expanded resource — every order in its cells is an operation on it
   // (the förslag's "from", sent as Byt till's precondition).
@@ -643,18 +903,79 @@ function ExpansionRow({
   granularity: "week" | "day";
   onMove?: (order: CapacityCellOrder) => void;
   switchHandlers: SwitchHandlers;
+  resource: CapacityResourceRow;
+  moveDrag: MoveDrag;
 }) {
+  // The operation lifted with the keyboard on this resource, and where it
+  // would land — read out as the target moves.
+  const lifted = moveDrag.active?.keys && moveDrag.active.workCenterId === workCenterId ? moveDrag.active : null;
+  const liftedText = lifted
+    ? lifted.target
+      ? `${dropDayText(lifted.target.date, resource.dayLoads.find((d) => d.date === lifted.target!.date))} · Enter flyttar, Esc avbryter`
+      : `Op ${lifted.order.sequenceNo} på ${lifted.order.orderNumber}: välj dag med ← och →, Enter flyttar, Esc avbryter`
+    : "";
+
+  function onGripKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
+    if (!lifted) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      moveDrag.onStep(resource, e.key === "ArrowLeft" ? -1 : 1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      moveDrag.onCancel();
+    }
+  }
+
   return (
     <div className={styles.expansion}>
       {/* Sticky inside the horizontally scrolling matrix, so the list stays in
           view (and phone-wide) wherever the clicked cell was scrolled to. */}
       <div className={styles.expansionInner}>
         <div className={styles.expansionTitle}>{label}</div>
+        {moveDrag.canDrag && (
+          <div className={styles.liftHint} aria-live="polite">
+            {liftedText}
+          </div>
+        )}
         {orders.map((o) => {
           const dates = plannedDateLabel(o.plannedStartDate, o.plannedEndDate);
+          const isLifted = lifted?.order.moOperationId === o.moOperationId;
           return (
-            <div key={`${o.manufacturingOrderId}-${o.sequenceNo}`} className={styles.orderItem}>
+            <div
+              key={`${o.manufacturingOrderId}-${o.sequenceNo}`}
+              className={styles.orderItem}
+              data-moving={moveDrag.active?.order.moOperationId === o.moOperationId}
+            >
               <div className={styles.orderMain}>
+                {/* Dra till en annan dag: a mouse drags the grip; the keyboard
+                    presses it, steers with ←/→ and presses again. */}
+                {moveDrag.canDrag && draggableOrder(o, granularity, moveDrag.canPlan) && (
+                  <button
+                    type="button"
+                    className={styles.grip}
+                    data-grip={o.moOperationId}
+                    draggable={moveDrag.ready}
+                    aria-disabled={!moveDrag.ready}
+                    aria-pressed={isLifted}
+                    aria-label={`${moveLabel(o)} med piltangenterna`}
+                    title="Dra till en annan dag — eller tryck Enter och välj dag med piltangenterna"
+                    onClick={() => moveDrag.onGrip(o, resource)}
+                    onKeyDown={onGripKeyDown}
+                    onBlur={() => {
+                      if (isLifted) moveDrag.onCancel();
+                    }}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", o.moOperationId);
+                      const row = e.currentTarget.closest(`.${styles.orderItem}`);
+                      if (row) e.dataTransfer.setDragImage(row, 16, 16);
+                      moveDrag.onDragStart(o, workCenterId);
+                    }}
+                    onDragEnd={moveDrag.onDragEnd}
+                  >
+                    <GripVertical size={16} aria-hidden="true" />
+                  </button>
+                )}
                 <Link href={`/tillverkning/ordrar/${o.manufacturingOrderId}`} className={styles.rowLink}>
                   {o.orderNumber}
                 </Link>

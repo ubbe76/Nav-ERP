@@ -593,14 +593,32 @@ Gränsen — fyra veckor om inget annat valts — ställs in under **System → 
 
 ### Flytta och Lås upp
 
-Klicka på en cell och sedan **Flytta…** vid operationen. I dialogen **Flytta operation** väljer du **Dag** — ett datumfält där tidigaste dag är i dag (Stockholmsdagen; en dag som passerat kan inte väljas). Under fältet står den lediga tiden den dagen, till exempel *ledigt 3 h av 8*, eller *ingen kapacitet den dagen* på en helg eller röd dag — bara när dagen finns i den inlästa matrisen och resursen har ett schema eller timmar per dag (öka **Veckor** eller **Dagar** för att nå längre fram; flyttar du ändå går det bra). Kryssrutan **Flytta även efterföljande operationer** är förvald: orderns senare, olåsta operationer planeras om från den nya dagen. Klicka **Flytta**. Har resursen ingen kapacitet alls den valda dagen — en röd dag, ett veckoschema utan timmar den veckodagen eller en helg — flyttas ingenting och dialogen säger till exempel *110 har ingen kapacitet 12 nov — välj en annan dag*. Väljer du en dag som passerat flyttas ingenting heller.
+Klicka på en cell och sedan **Flytta…** vid operationen. I dialogen **Flytta operation** väljer du **Dag** — ett datumfält där tidigaste dag är i dag (Stockholmsdagen; en dag som passerat kan inte väljas). Under fältet står den lediga tiden den dagen, till exempel *ledigt 3 h av 8*, eller *ingen kapacitet den dagen* på en helg eller röd dag — bara när dagen finns i den inlästa matrisen och resursen har ett schema eller timmar per dag (öka **Veckor** eller **Dagar** för att nå längre fram; flyttar du ändå går det bra). Kryssrutan **Flytta även efterföljande operationer** är förvald: orderns senare, olåsta operationer planeras om från den nya dagen.
+
+**Dialogen visar vad flytten gör innan du flyttar.** Under kryssrutan står operationens nya dagar (*Planeras 2–3 dec*), vilka operationer som följer med och deras dagar (*Följer med: op 30 (4 dec)*), dagens last på resursen före och efter flytten (*Dagens last 4,2 h → 9,8 h av 8 h (överbelagd)*) och under **Observera:** de varningar flytten skulle ge — till exempel att ordern blir klar efter färdigdatumet. Raderna räknas om när du byter dag eller kryssar ur rutan (*Räknar…*); ingenting är flyttat förrän du klickar **Flytta**, och knappen går inte att klicka förrän förhandsvisningen är klar. Har någon annan flyttat operationen sedan sidan lästes säger dialogen *Operationen har flyttats sedan vyn lästes — den har lästs om. Försök igen.* — stäng dialogen och öppna den igen från den omlästa sidan.
+
+Klicka **Flytta**. Har resursen ingen kapacitet alls den valda dagen — en röd dag, ett veckoschema utan timmar den veckodagen eller en helg — flyttas ingenting och dialogen säger till exempel *110 har ingen kapacitet 12 nov — välj en annan dag* — redan i förhandsvisningen, så **Flytta** går inte att klicka. Väljer du en dag som passerat flyttas ingenting heller.
 
 - Operationen **börjar på den valda dagen även om dagen är full** — dagen blir då röd, så överlasten syns. Resten av tiden fortsätter på ledig kapacitet dagarna efter.
-- En flyttad operation blir **Låst**: **Planera** låter den ligga kvar. Varningar (sen order, operationer i fel ordning) visas i dialogen innan du stänger den.
+- En flyttad operation blir **Låst**: **Planera** låter den ligga kvar. Varningarna (sen order, operationer i fel ordning) står i dialogen redan före flytten och visas igen efter den, innan du stänger dialogen.
 - **Lås upp** (i samma dialog, för en låst operation) släpper låset. Dagen ligger kvar tills nästa **Planera**, som då planerar om operationen. Låset försvinner också när operationen blir klar.
 - En klar operation, en legooperation, en operation utan tid och en operation på en order som inte är frisläppt eller pågående går inte att flytta.
 
 Länken **Visa strukturen** vid operationen i den utfällda cellen öppnar [Struktur](#struktur) för tillverkningsordern: hela trädet under den, med halvfabrikatens planerade dagar.
+
+### Dra en operation till en annan dag
+
+I vyn **Dag** kan du, med rättigheten Tillverkning och en mus, dra en operation till en annan dag i stället för att öppna dialogen. Klicka på en cell så att operationerna fälls ut under resursen. Varje operation har ett grepp (⠿) längst till vänster: ta tag i det och dra till en annan dag **på samma resursrad**.
+
+- Medan du drar är resursens dagar inramade. En dag utan kapacitet — helg, röd dag eller en ledig dag i schemat — är nedtonad och märkt *ingen kapacitet*; den tar inte emot operationen, och ingenting händer om du släpper där. Kolumnerna **Senare** och **Odaterat** och raden **Summa** tar inte heller emot något. Släpper du på operationens egen startdag händer ingenting.
+- **Det går inte att dra till en annan resurs.** Släpper du på en annan resurs rad flyttas ingenting och sidan säger *Byt resurs görs på TO-kortet*.
+- När du släpper frågar sidan först: *Flytta op 20 på TO-1050 till ons 2 dec? Efterföljande operationer följer med och operationen låses.* Under frågan står samma förhandsvisning som i dialogen — de nya dagarna, operationerna som följer med, *Dagens last 4,2 h → 9,8 h av 8 h (överbelagd)* och varningarna under **Observera:**. **Flytta** genomför flytten, **Avbryt** lämnar allt som det var.
+- Flytten är samma som i dialogen **Flytta operation**: operationen börjar på den valda dagen även om dagen är full, efterföljande operationer följer alltid med, och operationen blir **Låst**. Vill du flytta utan de efterföljande, eller till en dag som inte syns i matrisen, använder du **Flytta…**.
+- Har någon annan flyttat operationen sedan sidan lästes flyttas ingenting; sidan säger till och läser om matrisen.
+
+**Med tangentbordet:** greppet är en knapp. Tabba till det och tryck **Enter** eller mellanslag för att lyfta operationen, välj dag med **←** och **→** (dagar utan kapacitet hoppas över; raden ovanför operationerna säger till exempel *ons 2 dec — ledigt 3 h av 8*) och tryck **Enter** igen för att släppa — samma fråga som med musen. **Esc** avbryter.
+
+**På telefon och pekskärm** finns inget grepp. Använd **Flytta…** vid operationen — dialogen gör samma sak och visar samma förhandsvisning. I vyn **Vecka** flyttar du också med **Flytta…**.
 
 ### Sammanfattningen
 

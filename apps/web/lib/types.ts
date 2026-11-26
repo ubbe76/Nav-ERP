@@ -7964,3 +7964,13 @@ export interface StructureResult {
 export interface UnlockOrdersResult {
   unlocked: { manufacturingOrderId: string; orderNumber: string; operations: number }[];
 }
+
+// POST /planning/operations/:opId/move/preview — what Flytta would do, with
+// nothing written: the operation's new days, the following operations, the
+// warnings, and the target day's load on the resource before and after.
+export interface MoveOperationPreview {
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null };
+  following: MoveOperationResult["following"];
+  warnings: PlanWarning[];
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
+}

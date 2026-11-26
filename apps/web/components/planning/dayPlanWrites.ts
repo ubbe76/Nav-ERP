@@ -4,7 +4,7 @@
 // the co-run pair is called only by CoRunDialog, which the pages mount for
 // users with Tillverkning.
 import { apiFetch } from "../../lib/api";
-import type { CoRunInput, CoRunResult, MoveOperationResult, RunPlanOrderResult, UnlockOperationResult } from "../../lib/types";
+import type { CoRunInput, CoRunResult, MoveOperationPreview, MoveOperationResult, RunPlanOrderResult, UnlockOperationResult } from "../../lib/types";
 
 // Ordningen inom dagen: the day's full list of reorderable operations.
 export function saveDayOrder(workCenterId: string, date: string, moOperationIds: string[]): Promise<RunPlanOrderResult> {
@@ -22,6 +22,20 @@ export function moveOperationTo(moOperationId: string, date: string, expectedSta
   return apiFetch<MoveOperationResult>(`/api/v1/planning/operations/${moOperationId}/move`, {
     method: "POST",
     body: JSON.stringify({ date, moveFollowing: true, expectedStartDate }),
+  });
+}
+
+// Flytta's preview — computes and writes nothing (a POST that only reads):
+// the operation's new days, the following operations, the warnings and the
+// day's load before and after. The same refusals as the move itself (a day
+// without capacity is 409 plan-date-no-capacity already here).
+export function previewMove(
+  moOperationId: string,
+  input: { date: string; moveFollowing: boolean; expectedStartDate: string | null }
+): Promise<MoveOperationPreview> {
+  return apiFetch<MoveOperationPreview>(`/api/v1/planning/operations/${moOperationId}/move/preview`, {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

@@ -35,3 +35,32 @@
   font-size: 13px;
   color: var(--color-text-primary);
 }
+
+/* The preview of the chosen day, shown before Flytta. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-bg);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.preview [data-overloaded="true"] {
+  font-weight: 600;
+}
+
+.previewHeading {
+  margin-top: var(--space-2);
+  font-weight: 600;
+}
+
+.preview .warnings {
+  margin-top: 0;
+}

@@ -1,22 +1,27 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { Modal } from "../ui/Modal";
-import { apiFetch } from "../../lib/api";
+import { ApiError, apiFetch } from "../../lib/api";
+import { dayLoadLine, followingLine, newDaysLine } from "../../lib/capacityDrag";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { stockholmToday } from "../../lib/date";
 import { plannedDateLabel } from "../../lib/planning";
 import type {
   CapacityCellOrder,
   CapacityDayLoad,
+  MoveOperationPreview,
   MoveOperationResult,
   PlanWarning,
   UnlockOperationResult,
 } from "../../lib/types";
+import { previewMove } from "./dayPlanWrites";
 import styles from "./MoveOperationDialog.module.css";
+
+const PREVIEW_DELAY_MS = 300;
 
 // What the dialog reads — Beläggning hands in its whole cell order and
 // resource row, Dagplan a körplan row and the day's load (lib/dayPlan.ts).
@@ -42,6 +47,9 @@ function formatHours(hours: number): string {
 
 // Flytta…: pick the day an operation should start on (not before today, a
 // Stockholm day). Moving locks the operation; Lås upp hands it back to Planera.
+// The dialog shows the API's preview for the chosen day — the new days, the
+// day's load before → after and the warnings — BEFORE Flytta (S33), and sends
+// the start day its opener showed as the move's precondition.
 export function MoveOperationDialog({
   target,
   today,
@@ -84,16 +92,65 @@ function MoveForm({
   const [warnings, setWarnings] = useState<PlanWarning[] | null>(null);
   // The operation's new planned dates, from the move response.
   const [movedDates, setMovedDates] = useState<{ start: string | null; end: string | null; locked: boolean } | null>(null);
+  // The preview of the shown choice (day + efterföljande); a late answer
+  // never replaces a newer one (request sequence).
+  const [preview, setPreview] = useState<{ date: string; moveFollowing: boolean; result: MoveOperationPreview } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const sequence = useRef(0);
+  const first = useRef(true);
+  const onChangedNow = useRef(onChanged);
+  onChangedNow.current = onChanged;
+  // The start day the opener showed (null = unplanned): moved since ⇒ 409
+  // operation-plan-changed, in the preview and in the move.
+  const expectedStartDate = order.plannedStartDate;
+  const moOperationId = order.moOperationId;
+  const validDate = date !== "" && date >= today;
+  const moved = warnings !== null;
+
+  useEffect(() => {
+    if (moved) return;
+    const seq = ++sequence.current;
+    setPreview(null);
+    setPreviewError(null);
+    if (!validDate) {
+      setPreviewing(false);
+      return;
+    }
+    setPreviewing(true);
+    const delay = first.current ? 0 : PREVIEW_DELAY_MS;
+    first.current = false;
+    const timer = window.setTimeout(() => {
+      previewMove(moOperationId, { date, moveFollowing, expectedStartDate })
+        .then((result) => {
+          if (seq !== sequence.current) return;
+          setPreview({ date, moveFollowing, result });
+        })
+        .catch((err: unknown) => {
+          if (seq !== sequence.current) return;
+          setPreviewError(apiErrorMessage(err, "Kunde inte förhandsvisa flytten"));
+          // Moved since the view was read: the view reads again.
+          if (err instanceof ApiError && err.code === "operation-plan-changed") onChangedNow.current();
+        })
+        .finally(() => {
+          if (seq === sequence.current) setPreviewing(false);
+        });
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [date, validDate, moveFollowing, moOperationId, expectedStartDate, moved]);
+
+  // Flytta needs a preview of exactly what is shown, without an error.
+  const shown = preview && preview.date === date && preview.moveFollowing === moveFollowing ? preview.result : null;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!date || date < today) return;
+    if (!validDate || !shown || previewError || busy) return;
     setError(null);
     setBusy(true);
     try {
       const res = await apiFetch<MoveOperationResult>(`/api/v1/planning/operations/${order.moOperationId}/move`, {
         method: "POST",
-        body: JSON.stringify({ date, moveFollowing }),
+        body: JSON.stringify({ date, moveFollowing, expectedStartDate }),
       });
       onChanged();
       if (res.warnings.length > 0) {
@@ -172,6 +229,26 @@ function MoveForm({
         <span>Flytta även efterföljande operationer</span>
       </label>
 
+      {!moved && previewing && <FormHint>Räknar…</FormHint>}
+      {!moved && <FormError>{previewError}</FormError>}
+      {!moved && shown && (
+        <div className={styles.preview} aria-live="polite">
+          {newDaysLine(shown) && <div>{newDaysLine(shown)}</div>}
+          {moveFollowing && followingLine(shown) && <div>{followingLine(shown)}</div>}
+          <div data-overloaded={shown.dayLoad.after.overloaded}>{dayLoadLine(shown.dayLoad)}</div>
+          {shown.warnings.length > 0 && (
+            <>
+              <div className={styles.previewHeading}>Observera:</div>
+              <ul className={styles.warnings}>
+                {shown.warnings.map((w, i) => (
+                  <li key={i}>{w.message}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
       <FormError>{error}</FormError>
       {warnings && (
         <>
@@ -186,7 +263,7 @@ function MoveForm({
 
       <FormActions>
         {warnings === null && (
-          <Button type="submit" variant="primary" disabled={busy || !date}>
+          <Button type="submit" variant="primary" disabled={busy || !validDate || !shown || previewError !== null}>
             {busy ? "Flyttar…" : "Flytta"}
           </Button>
         )}
