@@ -35,6 +35,7 @@ import {
   updatePurchaseOrderHeaderSchema,
   updatePurchaseOrderRowSchema,
   updateSupplierSchema,
+  copyCustomerToSupplierSchema,
   receiveGoodsSchema,
 } from "@navet/shared";
 import { supplierDeliveryDateQuerySchema, supplierPriceQuoteQuerySchema } from "@navet/shared";
@@ -76,6 +77,7 @@ import {
   PurchaseOrderHasDeviationsError,
   PurchaseOrderSupplierChangeStaleError,
   SupplierNotFoundError,
+  CustomerNotFoundError,
   LegoOperationNotFoundError,
   LegoOperationArticleMismatchError,
   LegoOperationClosedError,
@@ -167,6 +169,20 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
       // Momskoder: Momskod (förval) unknown, inactive or not a purchase code.
       if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
+      throw err;
+    }
+  });
+
+  // Kopiera till leverantör (partner-copy.ts): a new supplier from a
+  // customer's card — the module's write rule (Inköp), like POST /suppliers.
+  app.post("/suppliers/from-customer", async (req, reply) => {
+    const input = copyCustomerToSupplierSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.copyCustomerToSupplier(input, req.user?.id ?? null));
+    } catch (err) {
+      if (err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof DuplicateSupplierNumberError || err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
       throw err;
     }
   });

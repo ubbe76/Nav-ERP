@@ -82,6 +82,13 @@ import {
 } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
+  createCustomerSchema,
+  partnerCopyDeliveryAddresses,
+  partnerCopyFields,
+  type CopySupplierToCustomerInput,
+  type PartnerCopySource,
+} from "@navet/shared";
+import {
   roundToDecimals,
   type ChangeSalesOrderCustomerInput,
   type ChangeSalesOrderCustomerPreviewInput,
@@ -397,6 +404,22 @@ export class CustomerNotFoundError extends Error {
     super(`Customer ${id} not found`);
     this.name = "CustomerNotFoundError";
   }
+}
+
+// Kopiera till kund: the supplier to copy is read through SupplierCopyReader
+// — the sales module's own class, the derived code is the purchase module's
+// (supplier-not-found), as planning's CustomerNotFoundError.
+export class SupplierNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Supplier ${id} not found`);
+    this.name = "SupplierNotFoundError";
+  }
+}
+
+// Kopiera till kund (packages/shared/src/partner-copy.ts): what the supplier
+// card hands over — the purchase module's supplierCopySource, wired in app.ts.
+export interface SupplierCopyReader {
+  supplierCopySource(supplierId: string): Promise<PartnerCopySource | null>;
 }
 
 export class DuplicateCustomerNumberError extends Error {
@@ -731,7 +754,10 @@ export function createSalesService(
   // currency than SEK. Optional so the fixtures that never sell in another
   // currency need not wire it; without it such an order needs an explicit
   // exchangeRate (else 409 exchange-rate-unavailable).
-  rates: ExchangeRateReader | null = null
+  rates: ExchangeRateReader | null = null,
+  // Kopiera till kund: see SupplierCopyReader above. Optional like rates —
+  // only Kopiera till kund reads it.
+  suppliers: SupplierCopyReader | null = null
 ) {
   // Valuta: what a row on an order is priced in — the order's customer, its
   // currency and its rate (SEK at rate 1 for a SEK order). Påslag (#16 etapp
@@ -1518,6 +1544,34 @@ export function createSalesService(
       }
       await logCustomerMarkups(created.id, customerMarkups(null), customerMarkups(created), userId);
       await logCustomerInvoiceCustomer(created.id, null, created.invoiceCustomerId, userId);
+      return withVatTreatment(created);
+    },
+
+    // Kopiera till kund (partner-copy.ts): a NEW customer from the supplier's
+    // own data, with its contacts and delivery addresses in the customer's
+    // create transaction — a one-time copy, no link is kept. Parsed through
+    // createCustomerSchema like POST /customers, so every other field gets
+    // the new customer's defaults. The number comes from the series unless
+    // given (taken ⇒ 409 as on POST /customers).
+    async copySupplierToCustomer(input: CopySupplierToCustomerInput, userId: string | null = null) {
+      if (!suppliers) throw new Error("Kopiera till kund: SupplierCopyReader is not wired");
+      const source = await suppliers.supplierCopySource(input.supplierId);
+      if (!source) throw new SupplierNotFoundError(input.supplierId);
+      const customer = createCustomerSchema.parse({ ...partnerCopyFields(source), customerNumber: input.customerNumber });
+      let created;
+      try {
+        created = await repo.createCustomer(customer, { contacts: source.contacts, deliveryAddresses: partnerCopyDeliveryAddresses(source) });
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new DuplicateCustomerNumberError(input.customerNumber ?? "");
+        throw err;
+      }
+      await audit.log({
+        entityType: "customer",
+        entityId: created.id,
+        action: "copied_from_supplier",
+        detail: { customerNumber: created.customerNumber, supplierId: source.id, supplierNumber: source.number, supplierName: source.name },
+        userId,
+      });
       return withVatTreatment(created);
     },
 

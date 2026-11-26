@@ -51,6 +51,12 @@ import type {
   UpdateSupplierInput,
 } from "@navet/shared";
 import type { ChangePurchaseOrderSupplierInput, ChangePurchaseOrderSupplierPreviewInput, SupplierChangePreview } from "@navet/shared";
+import {
+  createSupplierSchema,
+  partnerCopyFields,
+  type CopyCustomerToSupplierInput,
+  type PartnerCopySource,
+} from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { InvalidStatusTransitionError as MoInvalidStatusTransitionError } from "../../manufacturing/service/manufacturing.service.js";
 import {
@@ -60,6 +66,7 @@ import {
   type LegoSnapshot,
   type PurchaseRepository,
 } from "../repository/purchase.repository.js";
+import type { SupplierCopyRelated } from "../repository/partner-copy.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import { mailSender, type MailService } from "../../mail/service/mail.service.js";
@@ -160,6 +167,23 @@ export class SupplierNotFoundError extends Error {
     super(`Supplier ${id} not found`);
     this.name = "SupplierNotFoundError";
   }
+}
+
+// Kopiera till leverantör: the customer to copy is read through
+// CustomerCopyReader — the purchase module's own class, the derived code is
+// the sales module's (customer-not-found).
+export class CustomerNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Customer ${id} not found`);
+    this.name = "CustomerNotFoundError";
+  }
+}
+
+// Kopiera till leverantör (packages/shared/src/partner-copy.ts): what the
+// customer card hands over — the sales repository's customerCopySource,
+// wired in app.ts.
+export interface CustomerCopyReader {
+  customerCopySource(customerId: string): Promise<PartnerCopySource | null>;
 }
 
 export class DuplicateSupplierNumberError extends Error {
@@ -702,7 +726,10 @@ export function createPurchaseService(
   // Valuta: today's rate for a new order in another currency. Optional so
   // the existing test call sites keep compiling; without it such an order
   // needs its rate sent (ExchangeRateUnavailableError otherwise).
-  rates: ExchangeRateReader | null = null
+  rates: ExchangeRateReader | null = null,
+  // Kopiera till leverantör: see CustomerCopyReader above. Optional like
+  // rates — only Kopiera till leverantör reads it.
+  customers: CustomerCopyReader | null = null
 ) {
   // Valuta: a new order's rate (SEK per 1 unit) — SEK is always 1 (another
   // explicit rate is a 400), an explicit rate wins, else today's rate from
@@ -1134,24 +1161,58 @@ export function createPurchaseService(
     await audit.log({ entityType: "purchase_order", entityId: orderNumber, action: "closed_automatically", userId });
   }
 
+  // POST /suppliers and Kopiera till leverantör (`related` = the copied
+  // contacts and delivery addresses, in the supplier's transaction).
+  async function insertSupplier(input: CreateSupplierInput, related?: SupplierCopyRelated) {
+    await validateRegisterRefs(input);
+    const book = await repo.vatCodeBook();
+    await validateDefaultVatCode(input.defaultVatCodeId, book);
+    // Kostnadsställe (förval): must exist and be active.
+    await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId });
+    const normalized = normalizeSupplierPaymentDetails(input);
+    const problems = supplierPaymentDetailsProblems(paymentDetailsOf(normalized), paymentContextOf(normalized));
+    if (Object.keys(problems).length > 0) throw new InvalidSupplierPaymentDetailsError(problems);
+    try {
+      return withDefaultVatCode(await repo.createSupplier(normalized, related), book);
+    } catch (err) {
+      // suppliers' only unique constraint is supplier_number (the copied
+      // contacts and addresses have at most one primary/default), so a
+      // 23505 here can mean nothing else.
+      if (isUniqueViolation(err)) throw new DuplicateSupplierNumberError(input.supplierNumber ?? "");
+      throw err;
+    }
+  }
+
   return {
     async createSupplier(input: CreateSupplierInput) {
-      await validateRegisterRefs(input);
-      const book = await repo.vatCodeBook();
-      await validateDefaultVatCode(input.defaultVatCodeId, book);
-      // Kostnadsställe (förval): must exist and be active.
-      await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId });
-      const normalized = normalizeSupplierPaymentDetails(input);
-      const problems = supplierPaymentDetailsProblems(paymentDetailsOf(normalized), paymentContextOf(normalized));
-      if (Object.keys(problems).length > 0) throw new InvalidSupplierPaymentDetailsError(problems);
-      try {
-        return withDefaultVatCode(await repo.createSupplier(normalized), book);
-      } catch (err) {
-        // suppliers' only unique constraint is supplier_number, so a 23505
-        // here can mean nothing else.
-        if (isUniqueViolation(err)) throw new DuplicateSupplierNumberError(input.supplierNumber ?? "");
-        throw err;
-      }
+      return insertSupplier(input);
+    },
+
+    // Kopiera till leverantör (partner-copy.ts): a NEW supplier from the
+    // customer's own data, with its contacts and delivery addresses — a
+    // one-time copy, no link is kept. Parsed through createSupplierSchema
+    // and checked like POST /suppliers; the number comes from the series
+    // unless given (taken ⇒ 409).
+    async copyCustomerToSupplier(input: CopyCustomerToSupplierInput, userId: string | null = null) {
+      if (!customers) throw new Error("Kopiera till leverantör: CustomerCopyReader is not wired");
+      const source = await customers.customerCopySource(input.customerId);
+      if (!source) throw new CustomerNotFoundError(input.customerId);
+      const supplier = createSupplierSchema.parse({ ...partnerCopyFields(source), supplierNumber: input.supplierNumber });
+      const created = await insertSupplier(supplier, { contacts: source.contacts, deliveryAddresses: source.deliveryAddresses });
+      await audit.log({
+        entityType: "supplier",
+        entityId: created.id,
+        action: "copied_from_customer",
+        detail: { supplierNumber: created.supplierNumber, customerId: source.id, customerNumber: source.number, customerName: source.name },
+        userId,
+      });
+      return created;
+    },
+
+    // Kopiera till kund: what the supplier card hands over (the sales
+    // service's SupplierCopyReader).
+    async supplierCopySource(id: string) {
+      return repo.supplierCopySource(id);
     },
 
     async updateSupplier(id: string, input: UpdateSupplierInput) {

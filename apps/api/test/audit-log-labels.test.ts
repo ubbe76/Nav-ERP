@@ -47,6 +47,10 @@ describe("händelseloggens etiketter", () => {
     ["entity", "article_group"],
     ["entity", "customer"],
     ["action", "markups_changed"],
+    // Kopiera till kund / Kopiera till leverantör.
+    ["entity", "supplier"],
+    ["action", "copied_from_supplier"],
+    ["action", "copied_from_customer"],
     // Pegging (#9).
     ["action", "component_orders_created"],
     // Prognos (#10).

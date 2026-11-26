@@ -4,6 +4,7 @@ import { AppShell } from "../../../components/AppShell";
 import { SplitView } from "../../../components/split/SplitView";
 import { PartnerTabs } from "../../../components/partners/PartnerTabs";
 import { NewQuoteFromCustomerButton } from "../../../components/sales/NewQuoteFromCustomerButton";
+import { CopyPartnerButton } from "../../../components/partners/CopyPartnerButton";
 import { apiGet } from "../../../lib/api";
 import type {
   ArticleGroup,
@@ -56,6 +57,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
             <div className={shellStyles.meta}>Kund</div>
           </div>
           <div className={shellStyles.topbarActions}>
+            <CopyPartnerButton side="customer" partner={customer} />
             <NewQuoteFromCustomerButton customer={customer} />
             <HelpLink chapter="forsaljning" anchor="kunder" label="Hjälp om kunder" />
           </div>

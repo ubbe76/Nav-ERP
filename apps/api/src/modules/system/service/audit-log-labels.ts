@@ -35,6 +35,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   customer_price: "Kundpris",
   // Påslag per nivå (#16): the varugrupp's and the customer's price markups.
   customer: "Kund",
+  supplier: "Leverantör",
   article_group: "Varugrupp",
   // Manufacturing/stock-count/auth/system (G1 Agent 2).
   manufacturing_order: "Tillverkningsorder",
@@ -63,6 +64,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   corrected: "Rättad",
   markups_changed: "Påslag ändrade",
   invoice_customer_changed: "Fakturakund ändrad",
+  // Kopiera till kund / Kopiera till leverantör (2026-11-26).
+  copied_from_supplier: "Kopierad från leverantör",
+  copied_from_customer: "Kopierad från kund",
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",

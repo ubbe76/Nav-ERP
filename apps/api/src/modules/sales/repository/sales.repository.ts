@@ -80,6 +80,7 @@ import {
 import { salesOrderLate } from "../../planning/repository/late-orders.js";
 import { documentKindSql } from "./document-kind.js";
 import { changeOrderCustomer, loadCustomerChangeFacts } from "./customer-change.js";
+import { customerCopySource, insertCustomerCopyRelated, type CustomerCopyRelated } from "./partner-copy.js";
 import {
   assertInvoiceCustomerForCustomer,
   billToCustomerIdSql,
@@ -645,7 +646,9 @@ export function createSalesRepository(db: Db) {
     // 409. Otherwise, self-healing allocation that steps past a manually
     // taken number instead of failing — see number-series.ts's
     // insertWithSeriesNumber for why and how.
-    async createCustomer(input: CreateCustomerInput) {
+    // Kopiera till kund: `related` = the contacts and delivery addresses
+    // copied from a supplier, written in the customer's own transaction.
+    async createCustomer(input: CreateCustomerInput, related?: CustomerCopyRelated) {
       // discountPercent is optional here — callers that bypass the zod
       // schema's .default(0) (every service-level test in this codebase,
       // and any other direct caller) never set it. String(undefined) would
@@ -677,12 +680,19 @@ export function createSalesRepository(db: Db) {
             .insert(customers)
             .values({ ...values, customerNumber })
             .returning();
+          if (related) await insertCustomerCopyRelated(tx, row!.id, related);
           await pluginEvents.emit(tx, { type: "customer.created", entityId: row!.id, entityNumber: row!.customerNumber });
           return row!;
         });
       return input.customerNumber !== undefined
         ? insert(input.customerNumber)
         : insertWithSeriesNumber(db, "customer", insert);
+    },
+
+    // Kopiera till leverantör: what the customer card hands over (the
+    // purchase module reads it through CustomerCopyReader).
+    async customerCopySource(id: string) {
+      return customerCopySource(db, id);
     },
 
     async updateCustomer(id: string, input: UpdateCustomerInput) {
@@ -769,7 +779,10 @@ export function createSalesRepository(db: Db) {
         ? or(
             ilike(customers.customerNumber, pattern),
             ilike(customers.name, pattern),
-            ilike(customers.contactName, pattern)
+            ilike(customers.contactName, pattern),
+            // The organisationsnummer too — Kopiera till kund/leverantör
+            // looks for the company on the other side by it.
+            ilike(customers.orgNumber, pattern)
           )
         : undefined;
       const [rows, totalRows] = await Promise.all([

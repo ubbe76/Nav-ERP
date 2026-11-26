@@ -28,6 +28,7 @@ import {
   updateCustomerArticleNumberSchema,
   updateCustomerPriceSchema,
   updateCustomerSchema,
+  copySupplierToCustomerSchema,
   updateDeliveryAddressSchema,
   updatePriceListRowSchema,
   updatePriceListSchema,
@@ -43,6 +44,7 @@ import type { SalesService } from "../service/sales.service.js";
 import {
   ContactNotFoundError,
   CustomerNotFoundError,
+  SupplierNotFoundError,
   DeliveryAddressNotFoundError,
   DeliveryNotFoundError,
   DeliveryOnShipmentError,
@@ -204,6 +206,19 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
       const refused = invoiceCustomerError(err, reply);
       if (refused) return refused;
+      throw err;
+    }
+  });
+
+  // Kopiera till kund (partner-copy.ts): a new customer from a supplier's
+  // card — the module's write rule (Försäljning), like POST /customers.
+  app.post("/customers/from-supplier", async (req, reply) => {
+    const input = copySupplierToCustomerSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.copySupplierToCustomer(input, req.user?.id ?? null));
+    } catch (err) {
+      if (err instanceof SupplierNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof DuplicateCustomerNumberError || err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
