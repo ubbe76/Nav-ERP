@@ -95,6 +95,7 @@ const dayPlan = (
 const resource = (result: ReturnType<typeof buildDayPlan>, id: string) => result.resources.find((r) => r.workCenter.id === id)!;
 
 const material = (over: Partial<RunPlanMaterial>): RunPlanMaterial => ({
+  materialRowId: "row-1",
   articleId: "m-1",
   articleNumber: "PLÅT-2",
   articleName: "Plåt 2 mm",

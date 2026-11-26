@@ -131,7 +131,7 @@ import {
   type RunPlanRow,
   type RunPlanStamp,
 } from "./run-plan.js";
-import { coRunOrder, groupRunPlanByMaterial, planCoRun, type CoRunPlan, type CoRunResult } from "./co-run.js";
+import { coRunOrder, coRunRunOrder, groupRunPlanByMaterial, planCoRun, type CoRunPlan, type CoRunResult } from "./co-run.js";
 import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
 import { isCoRunMaterial, linkedOperationMaterials } from "../../manufacturing/service/operation-materials.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
@@ -447,8 +447,12 @@ function dayPlanMaterialText(row: RunPlanRow): string {
   return row.materials
     .map((m) => {
       if (m.status === "available") return `${m.articleNumber} (finns)`;
-      if (m.supply) return `${m.articleNumber} (kommer ${m.supply.date ?? "utan datum"} ${m.supply.documentNumber})`;
-      return `${m.articleNumber} (saknas ${formatRunPlanQuantity(m.missingQuantity)}${m.unit ? ` ${m.unit}` : ""})`;
+      const missing = `saknas ${formatRunPlanQuantity(m.missingQuantity)}${m.unit ? ` ${m.unit}` : ""}`;
+      if (!m.supply) return `${m.articleNumber} (${missing})`;
+      // "kommer 2026-12-02 IO-88", an overdue supply "försenad 2026-11-25
+      // IO-88" — and what nothing covers of the row beside it.
+      const coming = `${m.supply.late ? "försenad" : "kommer"} ${m.supply.date ?? "utan datum"} ${m.supply.documentNumber}`;
+      return `${m.articleNumber} (${coming}${m.missingQuantity > 0 ? `, ${missing}` : ""})`;
     })
     .join("; ");
 }
@@ -1968,6 +1972,7 @@ export function createPlanningService(
           const usableOnHand = round4(onHand.get(m.articleId) ?? 0);
           const available = usableOnHand >= m.remainingQuantity;
           return {
+            materialRowId: m.rowId,
             articleId: m.articleId,
             articleNumber: m.articleNumber,
             articleName: m.articleName,
@@ -1998,7 +2003,13 @@ export function createPlanningService(
         if (!demandsOf.has(orderId)) demandsOf.set(orderId, parentDemands(world, orderId));
         for (const material of entry.materials) {
           if (material.status !== "short") continue;
-          const demands = demandsOf.get(orderId)!.filter((d) => d.articleId === material.articleId);
+          // The demand of exactly THIS material row (the overview's id of
+          // an mo_material row) — never the order's every row of the
+          // article: the same article on another operation, or unlinked,
+          // has its own demand and its own cover.
+          const demands = demandsOf
+            .get(orderId)!
+            .filter((d) => d.articleId === material.articleId && d.demand.id === `mat:${material.materialRowId}`);
           const uncovered = round4(demands.reduce((sum, d) => sum + d.demand.uncovered, 0));
           // The allocation that arrives LAST decides when the row is whole
           // (an undated one counts as last); stock is there already.
@@ -2014,12 +2025,18 @@ export function createPlanningService(
           }
           const supply = last ? supplyOf(last.pegging, last.allocation) : null;
           if (supply?.row?.documentId) {
+            // The pegging floors a passed ready date at today (a late supply
+            // is not done). Shown here it would say "kommer i dag" every
+            // day, so an overdue supply carries its OWN day and is marked.
+            const ownDate = world.readyDates.has(supply.id) ? (world.readyDates.get(supply.id) ?? null) : supply.row.date;
+            const late = ownDate != null && ownDate < world.today;
             material.missingQuantity = uncovered;
             material.supply = {
               kind: supply.kind as "purchase_order" | "manufacturing_order",
               documentId: supply.row.documentId,
               documentNumber: supply.row.documentNumber,
-              date: last!.allocation.readyDate,
+              date: late ? ownDate : last!.allocation.readyDate,
+              late,
               isDraft: supply.row.isDraft,
             };
           } else {
@@ -2091,24 +2108,33 @@ export function createPlanningService(
     prepared: CoRunPrepared,
     date: string,
     current: { id: string; runPosition: number | null }[]
-  ): { id: string; runPosition: number | null }[] {
+  ): CoRunDayOperation[] {
     const positionOf = new Map(current.map((op) => [op.id, op.runPosition]));
     return prepared.plan.operationsAfter
       .filter(
         (op) =>
           op.workCenterId === prepared.workCenter.id && op.operationStatus === "pending" && plannedDateRange(op)?.start === date
       )
-      .map((op) => ({ id: op.moOperationId, runPosition: positionOf.get(op.moOperationId) ?? null }));
+      .map((op) => ({
+        id: op.moOperationId,
+        orderNumber: op.orderNumber,
+        sequenceNo: op.sequenceNo,
+        runPosition: positionOf.get(op.moOperationId) ?? null,
+      }));
   }
+  type CoRunDayOperation = { id: string; orderNumber: string; sequenceNo: number; runPosition: number | null };
 
-  // The answer of both routes. `dayOperations` = the day's operations after
-  // the co-run (read back under the lock by the write, in memory by the
-  // preview) — coRunOrder gives the places from them.
-  async function buildCoRunResult(
-    prepared: CoRunPrepared,
-    date: string,
-    dayOperations: { id: string; runPosition: number | null }[]
-  ): Promise<CoRunResult> {
+  // The answer of both routes, in two parts. `dayOperations` = the day's
+  // operations after the co-run (read back under the lock by the write, in
+  // memory by the preview) — coRunRunOrder gives the places from them.
+  //
+  // coRunOutcomeOf is everything but the materials: no load, nothing that
+  // reads the database — the write computes it BEFORE commit (a throw rolls
+  // the co-run back instead of answering 500 on a committed write) and logs
+  // from it. It never assumes an operation is in the planned world: the day
+  // read back under the lock can hold one the world did not (its order
+  // became open in between).
+  function coRunOutcomeOf(prepared: CoRunPrepared, date: string, dayOperations: CoRunDayOperation[]): Omit<CoRunResult, "materials"> {
     const { workCenter, today, operationIds, selected, world, plan } = prepared;
     const before = new Map(world.operations.map((o) => [o.moOperationId, o]));
     const after = new Map(plan.operationsAfter.map((o) => [o.moOperationId, o]));
@@ -2116,7 +2142,8 @@ export function createPlanningService(
 
     const operations = operationIds.map((id) => {
       const row = selected.get(id)!;
-      const range = plannedDateRange(after.get(id)!);
+      const planned = after.get(id);
+      const range = planned ? plannedDateRange(planned) : null;
       return {
         moOperationId: id,
         manufacturingOrderId: row.manufacturingOrderId,
@@ -2137,7 +2164,8 @@ export function createPlanningService(
       if (isSelected.has(id)) continue;
       const op = after.get(id);
       if (!op) continue;
-      const from = plannedDateRange(before.get(id)!);
+      const was = before.get(id);
+      const from = was ? plannedDateRange(was) : null;
       const to = plannedDateRange(op);
       if ((from?.start ?? null) === (to?.start ?? null) && (from?.end ?? null) === (to?.end ?? null)) continue;
       following.push({
@@ -2162,6 +2190,29 @@ export function createPlanningService(
         overloaded: false,
       };
 
+    return {
+      workCenter: { id: workCenter.id, code: workCenter.code, name: workCenter.name },
+      date,
+      operations,
+      following,
+      dayLoad: { before: loadOf(world.operations), after: loadOf(plan.operationsAfter) },
+      lateOrders: plan.warnings
+        .filter((w) => w.kind === "late")
+        .map((w) => ({
+          manufacturingOrderId: w.manufacturingOrderId,
+          orderNumber: w.orderNumber,
+          dueDate: w.dueDate ?? null,
+          plannedFinish: w.plannedFinish ?? null,
+        })),
+      warnings: plan.warnings,
+      runOrder: coRunRunOrder(dayOperations, operationIds),
+    };
+  }
+
+  // The answer's materials — the only part that loads (the write runs it
+  // after commit AND after the händelselogg).
+  async function coRunMaterials(prepared: CoRunPrepared): Promise<CoRunResult["materials"]> {
+    const { workCenter, today, operationIds, selected, plan } = prepared;
     // The selected operations' rows as the körplan builds them (buildRunPlan
     // over their orders — no T.o.m., so an operation beyond the horizon is
     // in too) with the extras, grouped by the Material-läge's own function.
@@ -2181,27 +2232,7 @@ export function createPlanningService(
     );
     const materialRows = operationIds.map((id) => rowOf.get(id)).filter((row): row is RunPlanRow => row !== undefined);
 
-    return {
-      workCenter: { id: workCenter.id, code: workCenter.code, name: workCenter.name },
-      date,
-      operations,
-      following,
-      dayLoad: { before: loadOf(world.operations), after: loadOf(plan.operationsAfter) },
-      lateOrders: plan.warnings
-        .filter((w) => w.kind === "late")
-        .map((w) => ({
-          manufacturingOrderId: w.manufacturingOrderId,
-          orderNumber: w.orderNumber,
-          dueDate: w.dueDate ?? null,
-          plannedFinish: w.plannedFinish ?? null,
-        })),
-      warnings: plan.warnings,
-      materials: groupRunPlanByMaterial(materialRows).groups,
-      runOrder: coRunOrder(dayOperations, operationIds).map((id) => {
-        const op = after.get(id)!;
-        return { moOperationId: id, orderNumber: op.orderNumber, sequenceNo: op.sequenceNo, selected: isSelected.has(id) };
-      }),
-    };
+    return groupRunPlanByMaterial(materialRows).groups;
   }
 
   // The listed operations of a run plan's rows: a Planerad TO's operation
@@ -3382,7 +3413,8 @@ export function createPlanningService(
       const prepared = await prepareCoRun(undefined, input, { lock: false });
       if (!prepared) return null;
       const current = await repo.runPlanDayOperations(undefined, prepared.workCenter.id, input.date, { lock: false });
-      return buildCoRunResult(prepared, input.date, coRunDayOperationsAfter(prepared, input.date, current));
+      const outcome = coRunOutcomeOf(prepared, input.date, coRunDayOperationsAfter(prepared, input.date, current));
+      return { ...outcome, materials: await coRunMaterials(prepared) };
     },
 
     // Samkör — the selected operations moved to ONE day with Flytta's rule
@@ -3404,11 +3436,12 @@ export function createPlanningService(
         const current = await repo.runPlanDayOperations(tx, prepared.workCenter.id, input.date, { lock: true });
         const order = coRunOrder(current, prepared.operationIds);
         if (order.length > 0) await repo.writeRunPositions(tx, order);
-        return { prepared, current };
+        // The answer (all but the materials) is computed BEFORE commit:
+        // nothing between the commit and the händelselogg can throw.
+        return { prepared, result: coRunOutcomeOf(prepared, input.date, current) };
       });
       if (!written) return null;
-      const { prepared } = written;
-      const result = await buildCoRunResult(prepared, input.date, written.current);
+      const { prepared, result } = written;
       // The same event as Flytta for every operation a move was run on (one
       // beyond the horizon lost its days: logged too, with no days), marked
       // as part of a co-run; one already on the day was not moved.
@@ -3445,7 +3478,7 @@ export function createPlanningService(
         },
         userId,
       });
-      return result;
+      return { ...result, materials: await coRunMaterials(prepared) };
     },
 
     // Lås upp — the allocation stays until the next Planera. Idempotent.

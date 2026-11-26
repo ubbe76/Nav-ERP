@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "../../lib/api";
-import { coRunFollowingText, coRunLoadText, coRunOperationText, coRunPayload, materialGroupText } from "../../lib/coRun";
-import { materialText } from "../../lib/dayPlan";
+import { coRunFollowingText, coRunLoadText, coRunOperationText, coRunPayload, coRunSupplyText, materialGroupText } from "../../lib/coRun";
 import { formatStockholmDate } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { weekdayShortDate } from "../../lib/planning";
@@ -43,8 +42,8 @@ export function CoRunDialog({
   onClose: () => void;
   // The plan changed (or may have): the page reads again.
   onChanged: () => void;
-  // 409 co-run-changed on the write: the dialog closes and the page shows
-  // the message, reads again and clears the selection.
+  // 409 co-run-changed on the preview or the write: the dialog closes and
+  // the page shows the message, reads again and clears the selection.
   onConflict: (message: string) => void;
 }) {
   return (
@@ -82,6 +81,10 @@ function CoRunForm({
   // after a short pause.
   const sequence = useRef(0);
   const first = useRef(true);
+  // Read when the answer lands — the effect must not run again (and ask for
+  // another preview) because the page passed a new callback.
+  const onConflictNow = useRef(onConflict);
+  onConflictNow.current = onConflict;
   const validDate = date !== "" && date >= today;
 
   useEffect(() => {
@@ -105,7 +108,11 @@ function CoRunForm({
         })
         .catch((err: unknown) => {
           if (seq !== sequence.current) return;
-          setPreviewError(apiErrorMessage(err, "Kunde inte förhandsvisa samkörningen"));
+          const message = apiErrorMessage(err, "Kunde inte förhandsvisa samkörningen");
+          // The chosen operations are not where the list showed them: no
+          // other day helps — the same way out as on the write.
+          if (err instanceof ApiError && err.code === "co-run-changed") onConflictNow.current(message);
+          else setPreviewError(message);
         })
         .finally(() => {
           if (seq === sequence.current) setPreviewing(false);
@@ -192,14 +199,6 @@ function CoRunForm({
 function CoRunSummary({ result, rows, written }: { result: CoRunResult; rows: RunPlanRow[]; written: boolean }) {
   // The article and the operation text come from the rows the list showed.
   const rowOf = useMemo(() => new Map(rows.map((row) => [row.moOperationId, row])), [rows]);
-  // "kommer d": where a chosen row's missing material is expected from.
-  const supplyOf = (articleId: string) => {
-    for (const row of rows) {
-      const material = row.materials.find((m) => m.articleId === articleId && m.status === "short" && m.supply);
-      if (material) return materialText(material);
-    }
-    return null;
-  };
   // Blir sena has the late orders; the list keeps the rest.
   const warnings = result.warnings.filter((w) => w.kind !== "late");
 
@@ -285,7 +284,8 @@ function CoRunSummary({ result, rows, written }: { result: CoRunResult; rows: Ru
           <h3 className={styles.heading}>Material</h3>
           <ul className={styles.list}>
             {result.materials.map((group) => {
-              const supply = group.short ? supplyOf(group.articleId) : null;
+              // "kommer d": where the chosen rows' missing material is expected from.
+              const supply = group.short ? coRunSupplyText(rows, group.articleId) : null;
               return (
                 <li key={group.articleId} className={styles.item}>
                   <span className={styles.what}>
@@ -294,7 +294,7 @@ function CoRunSummary({ result, rows, written }: { result: CoRunResult; rows: Ru
                   <span className={styles.outcome} data-tone={group.short ? "alert" : "muted"}>
                     {materialGroupText(group)}
                     {group.short ? " · räcker inte" : ""}
-                    {supply ? ` · ${supply.text}${supply.document ? ` · ${supply.document.number}` : ""}` : ""}
+                    {supply ? ` · ${supply}` : ""}
                   </span>
                 </li>
               );

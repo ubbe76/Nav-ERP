@@ -8,7 +8,7 @@ import {
   selectableForCoRun,
   selectedInListOrder,
 } from "../../lib/coRun";
-import { RUN_PLAN_STATUS_PILL, materialDocumentHref, materialText, runPlanStatusText } from "../../lib/dayPlan";
+import { RUN_PLAN_STATUS_PILL, materialDocumentHref, materialText, materialTone, runPlanStatusText } from "../../lib/dayPlan";
 import { formatStockholmDate } from "../../lib/date";
 import { formatQuantity } from "../../lib/format";
 import { weekdayShortDate } from "../../lib/planning";
@@ -127,7 +127,7 @@ export function MaterialGroups({
           {need && state && (
             <>
               <span className="num">{need.text}</span>
-              <span className={styles.state} data-tone={state.tone === "ok" ? "ok" : state.document ? "coming" : "short"}>
+              <span className={styles.state} data-tone={materialTone(state)}>
                 {state.text}
                 {state.document && (
                   <>
@@ -142,6 +142,7 @@ export function MaterialGroups({
                     {state.document.draft ? " (utkast)" : ""}
                   </>
                 )}
+                {state.rest ? ` · ${state.rest}` : ""}
               </span>
             </>
           )}

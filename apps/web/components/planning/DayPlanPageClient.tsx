@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical, Maximize, Minimize, Presentation, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { apiFetch } from "../../lib/api";
+import { ApiError, apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { runPlanView, type RunPlanView } from "../../lib/coRun";
 import {
@@ -105,6 +105,17 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
 
   const reload = useCallback(() => setReloadTick((n) => n + 1), []);
 
+  // The shown day has passed (the page stood open over midnight with ?dag=):
+  // the next reload answers 400 day-plan-date-out-of-range. Move on to today
+  // instead of freezing on yesterday — Mötesläget would otherwise show
+  // "Kunde inte läsa om" for ever. Only for a day that WAS shown: a typed
+  // address outside the window still gets its error.
+  const shownDate = useRef<string | null>(null);
+  shownDate.current = data?.date ?? null;
+  const showToday = useRef(() => {});
+  showToday.current = () =>
+    router.replace(dayPlanHref(pathname, { dag: null, grupp, visa: view === "material" ? "material" : null }), { scroll: false });
+
   useEffect(() => {
     let cancelled = false;
     const background = silent.current && hasData.current;
@@ -125,6 +136,10 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        if (dag && shownDate.current === dag && err instanceof ApiError && err.code === "day-plan-date-out-of-range") {
+          showToday.current();
+          return;
+        }
         if (background) setReloadFailed(true);
         else {
           setData(null);
@@ -165,6 +180,15 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     return () => query.removeEventListener("change", update);
   }, []);
 
+  // No drag survives a write or a reload: the handle is gone meanwhile, so
+  // its dragend would never clear the marks.
+  useEffect(() => {
+    if (busy || loading) {
+      setDrag(null);
+      setDrop(null);
+    }
+  }, [busy, loading]);
+
   // Helskärm only where the browser has it (not Safari on iPhone).
   useEffect(() => {
     if (!meeting) return;
@@ -194,6 +218,10 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   // Ordningen inom dagen: the day's full list of reorderable ids, as Körplan.
   async function reorder(resource: DayPlanResource, ids: string[], from: number, to: number) {
     if (!canWrite) return;
+    // A write or a reload is on its way: the list shown may be the old one
+    // (the same guard that disables Upp/Ned — also for a drop that began
+    // before it).
+    if (busy || loading) return;
     if (!data || from === to || from < 0 || to < 0 || from >= ids.length || to >= ids.length) return;
     setBusy(true);
     setError(null);
@@ -415,7 +443,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
                 meeting={meeting}
                 view={view}
                 canWrite={canWrite}
-                canDrag={canWrite && finePointer}
+                canDrag={canWrite && finePointer && !busy && !loading}
                 busy={busy || loading}
                 drag={drag}
                 drop={drop}

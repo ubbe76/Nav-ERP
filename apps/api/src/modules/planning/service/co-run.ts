@@ -42,9 +42,10 @@ export interface RunPlanMaterialGroup {
 }
 
 // The rows grouped per co-run material, in article number order. A row with
-// two materials stands in both groups. An operation can carry the same
-// article on two material rows (linkedOperationMaterials keeps one entry per
-// row): it stands ONCE in the group, and both quantities count in the total.
+// two materials stands in both groups. The database never gives an
+// operation the same article on two material rows (unique
+// mo_material_unique_per_operation), but the grouping tolerates it: the row
+// stands ONCE in the group and both quantities count in the total.
 // `unlinkedRowKeys` = the open orders' operations without linked purchased
 // material ("saknar kopplat material") — a Planerad TO's operation has no
 // material rows to link yet and is never listed there.
@@ -206,6 +207,23 @@ export function coRunOrder(current: { id: string; runPosition: number | null }[]
     .sort((a, b) => a.runPosition! - b.runPosition!)
     .map((op) => op.id);
   return [...ordered, ...selectedIds.filter((id) => onDay.has(id))];
+}
+
+// The answer's runOrder: coRunOrder's places with the names read from the
+// day's operations THEMSELVES — never looked up in the world the co-run was
+// planned on. The write reads the day back under the lock, and an operation
+// can lie there that the world never held (its order became open between
+// the world load and the day read): it is listed like any other.
+export function coRunRunOrder(
+  current: { id: string; orderNumber: string; sequenceNo: number; runPosition: number | null }[],
+  selectedIds: string[]
+): { moOperationId: string; orderNumber: string; sequenceNo: number; selected: boolean }[] {
+  const byId = new Map(current.map((op) => [op.id, op]));
+  const selected = new Set(selectedIds);
+  return coRunOrder(current, selectedIds).flatMap((id) => {
+    const op = byId.get(id);
+    return op ? [{ moOperationId: id, orderNumber: op.orderNumber, sequenceNo: op.sequenceNo, selected: selected.has(id) }] : [];
+  });
 }
 
 // --- Svaret -----------------------------------------------------------------

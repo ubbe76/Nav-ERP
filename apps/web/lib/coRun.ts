@@ -2,6 +2,7 @@
 // API owns the grouping (materialGroups / unlinkedRowKeys), the moves and the
 // order; these only say which rows may be chosen, what the dialog starts on,
 // what is sent and how the answer reads.
+import { materialLine, materialText } from "./dayPlan";
 import { formatQuantity } from "./format";
 import { plannedDateLabel, weekdayShortDate } from "./planning";
 import type { CapacityDayLoad, CoRunInput, CoRunResult, RunPlanMaterial, RunPlanMaterialGroup, RunPlanRow } from "./types";
@@ -117,6 +118,18 @@ export function rowMaterialNeed(row: Pick<RunPlanRow, "materials">, articleId: s
   const sum = own.reduce((total, m) => total + m.remainingQuantity, 0);
   // Four decimals, as the API rounds the group's total.
   return { text: withUnit(Number(sum.toFixed(4)), own[0]!.unit), material: own.find((m) => m.status === "short") ?? own[0]! };
+}
+
+// The dialog's "kommer d" of one material group: where the chosen rows'
+// missing material is expected from (the first short row with a supply, as
+// the list said it) and what nothing covers of the chosen rows together —
+// "kommer 2 dec · IO-88 · saknas 8 st". null = no supply on its way.
+export function coRunSupplyText(rows: readonly Pick<RunPlanRow, "materials">[], articleId: string): string | null {
+  const short = rows.flatMap((row) => row.materials.filter((m) => m.articleId === articleId && m.status === "short"));
+  const coming = short.find((m) => m.supply);
+  if (!coming) return null;
+  const missing = Number(short.reduce((total, m) => total + m.missingQuantity, 0).toFixed(4));
+  return materialLine(materialText({ ...coming, missingQuantity: missing }));
 }
 
 // One chosen operation in the dialog: "tors 26 nov → ons 2 dec", "ligger

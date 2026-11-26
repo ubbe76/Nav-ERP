@@ -1549,6 +1549,7 @@ export function createManufacturingRepository(db: Db) {
           ? []
           : db
               .select({
+                rowId: moMaterialConsumptions.id,
                 moOperationId: moMaterialConsumptions.moOperationId,
                 articleId: articles.id,
                 articleNumber: articles.articleNumber,

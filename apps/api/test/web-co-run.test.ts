@@ -6,6 +6,7 @@ import {
   coRunLoadText,
   coRunOperationText,
   coRunPayload,
+  coRunSupplyText,
   defaultCoRunDate,
   materialGroupText,
   materialSections,
@@ -54,6 +55,7 @@ const row = (over: Partial<RunPlanRow> = {}): RunPlanRow => ({
 });
 
 const material = (over: Partial<RunPlanMaterial> = {}): RunPlanMaterial => ({
+  materialRowId: "row-1",
   articleId: "a-1",
   articleNumber: "1001",
   articleName: "Plåt",
@@ -207,6 +209,22 @@ describe("the texts", () => {
     expect(both?.material).toBe(short);
     expect(rowMaterialNeed(row({ materials: [material({ articleId: "a-2" })] }), "a-1")).toBeNull();
   });
+  it("says where a group's missing material comes from and what nothing covers of the chosen rows", () => {
+    const supply = { kind: "purchase_order" as const, documentId: "po-1", documentNumber: "IO-88", date: "2026-12-02", late: false, isDraft: false };
+    const covered = material({ status: "short", missingQuantity: 0, supply });
+    expect(coRunSupplyText([row({ materials: [covered] })], "a-1")).toBe("kommer 2 dec · IO-88");
+    // The rows together: 3 + 5 that nothing covers.
+    const rows = [
+      row({ materials: [material({ materialRowId: "r-1", status: "short", missingQuantity: 3, supply })] }),
+      row({ key: "op-2", moOperationId: "op-2", materials: [material({ materialRowId: "r-2", status: "short", missingQuantity: 5 }), material({ articleId: "a-2", status: "short", missingQuantity: 9 })] }),
+    ];
+    expect(coRunSupplyText(rows, "a-1")).toBe("kommer 2 dec · IO-88 · saknas 8 st");
+    const late = [row({ materials: [material({ status: "short", missingQuantity: 0, supply: { ...supply, date: "2026-11-25", late: true } })] })];
+    expect(coRunSupplyText(late, "a-1")).toBe("försenad sedan 25 nov · IO-88");
+    // Nothing on its way, or nothing short: no text.
+    expect(coRunSupplyText(rows, "a-2")).toBeNull();
+    expect(coRunSupplyText([row({ materials: [material()] })], "a-1")).toBeNull();
+  });
   it("says where each chosen operation goes", () => {
     const base = { fromDate: "2026-11-26", plannedStartDate: "2026-12-02", plannedEndDate: "2026-12-02" };
     expect(coRunOperationText({ ...base, outcome: "moved" })).toBe("tors 26 nov → ons 2 dec");
@@ -282,6 +300,14 @@ describe("the Material view and Samkör in the pages", () => {
     expect(dialog.match(/if \(seq !== sequence\.current\) return;/g) ?? []).toHaveLength(2);
     // Samkör needs a preview of the day that is shown, without an error.
     expect(dialog).toContain("preview !== null && preview.date === date && previewError === null");
+  });
+
+  it("treats 409 co-run-changed alike on the preview and the write: the page's onConflict", () => {
+    expect(dialog.match(/err\.code === "co-run-changed"/g) ?? []).toHaveLength(2);
+    // The preview's branch sits in the preview's catch, after the sequence test.
+    expect(dialog).toMatch(/if \(seq !== sequence\.current\) return;\s+const message = apiErrorMessage\(err, "Kunde inte förhandsvisa samkörningen"\);[\s\S]{0,260}onConflictNow\.current\(message\);\s+else setPreviewError\(message\);/);
+    // Both pages close the dialog, say so in a notice and read again.
+    for (const page of [dayPlan, runPlan]) expect(page).toMatch(/onConflict=\{\(message\) => \{[\s\S]{0,260}setCoRunTarget\(null\);\s+setNotice\(/);
   });
 
   it("starts the dialog on the page's day in Dagplan and on the chosen rows' day in Körplan", () => {

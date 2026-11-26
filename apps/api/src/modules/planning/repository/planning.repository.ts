@@ -1449,6 +1449,7 @@ export function createPlanningRepository(db: Db) {
       if (operationIds.length === 0) return [];
       const rows = await db
         .select({
+          rowId: moMaterialConsumptions.id,
           moOperationId: moMaterialConsumptions.moOperationId,
           articleId: articles.id,
           articleNumber: articles.articleNumber,

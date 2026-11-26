@@ -116,13 +116,21 @@ export interface RunPlanMaterialSupply {
   kind: "purchase_order" | "manufacturing_order";
   documentId: string;
   documentNumber: string;
-  date: string | null; // null = undated
+  // The day the supply is expected; null = undated. For a supply whose own
+  // day has passed (`late`) it is THAT day, not today — an overdue IO must
+  // not read as "kommer i dag" every morning.
+  date: string | null;
+  // The supply's own day lies before today and it has still not arrived.
+  late: boolean;
   isDraft: boolean;
 }
 
 // One co-run material of the operation (B3: purchased, linked to the
 // operation, something left to draw) with what the shelf holds.
 export interface RunPlanMaterial {
+  // mo_material_consumptions.id — the order can carry the same article on
+  // another operation or unlinked; the pegging's demand is this row's.
+  materialRowId: string;
   articleId: string;
   articleNumber: string;
   articleName: string;
@@ -134,7 +142,10 @@ export interface RunPlanMaterial {
   // available ⇔ usableOnHand >= remainingQuantity (per row against the
   // whole balance — Materialbrist's base, not pegging).
   status: "available" | "short";
-  missingQuantity: number; // 0 when available
+  // 0 when available. Short without a supply: what the row lacks. Short
+  // WITH a supply: what neither the shelf nor any supply covers of THIS row
+  // (the pegging's uncovered) — shown beside "kommer" when above 0.
+  missingQuantity: number;
   supply: RunPlanMaterialSupply | null; // only when short
 }
 

@@ -1,12 +1,13 @@
-import { materialDocumentHref, materialText } from "../../lib/dayPlan";
+import { materialDocumentHref, materialText, materialTone } from "../../lib/dayPlan";
 import type { RunPlanRow } from "../../lib/types";
 import { GatedLink } from "../ui/GatedLink";
 import styles from "./RunPlanMaterials.module.css";
 
 // The material cell of a körplan row (Dagplan; Körplan in etapp 2): one line
 // per purchased material linked to the operation with something left to draw
-// — "finns", "saknas 4 st" or "kommer 2 dec · IO-88". The status is the
-// API's: usable stock against this row alone.
+// — "finns", "saknas 4 st", "kommer 2 dec · IO-88 · saknas 8 st" or
+// "försenad sedan 25 nov · IO-88". The status is the API's: usable stock
+// against this row alone.
 export function RunPlanMaterials({
   row,
   // false in Mötesläget: no links on a wall screen.
@@ -34,7 +35,7 @@ export function RunPlanMaterials({
             <span className={styles.article}>
               <span className="num">{m.articleNumber}</span> <span className={styles.name}>{m.articleName}</span>
             </span>
-            <span className={styles.state} data-tone={t.tone === "ok" ? "ok" : t.document ? "coming" : "short"}>
+            <span className={styles.state} data-tone={materialTone(t)}>
               {t.text}
               {t.document && (
                 <>
@@ -49,6 +50,7 @@ export function RunPlanMaterials({
                   {t.document.draft ? " (utkast)" : ""}
                 </>
               )}
+              {t.rest ? ` · ${t.rest}` : ""}
             </span>
           </li>
         );

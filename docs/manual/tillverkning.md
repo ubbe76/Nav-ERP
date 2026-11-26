@@ -642,6 +642,10 @@ På en telefon och i ett smalt fönster visas varje operation som ett kort i st�
 - *finns* — det användbara lagersaldot räcker till radens behov. Saldot räknas mot **varje rad för sig**: två operationer som behöver samma plåt kan båda visa *finns* fast saldot bara räcker till den ena. Saldo på en spärrad lagerplats räknas inte.
 - *saknas 4 st* — saldot räcker inte och inget är på väg.
 - *kommer 2 dec · IO-88* — saldot räcker inte, men materialet väntas på den inköpsordern (eller tillverkningsordern) det datumet. Numret är en länk till ordern. *kommer, utan datum* betyder att ordern saknar leveransdatum, och *(utkast)* att inköpsordern inte är skickad än.
+- *kommer 2 dec · IO-88 · saknas 8 st* — ordern täcker inte hela radens behov: 8 st finns varken på lagret eller på någon order.
+- *försenad sedan 25 nov · IO-88* — materialet skulle ha kommit den dagen men är inte inlevererat. Raden står i rött tills ordern är inlevererad eller har fått ett nytt datum.
+
+Ligger samma artikel på flera operationer i ordern gäller *kommer* och *saknas* den operationens egen materialrad, inte orderns hela behov av artikeln.
 - *—* — operationen saknar kopplat material. Koppla materialet till operationen i artikelns beredning om det ska synas här.
 - *uttaget* — allt kopplat material är redan uttaget.
 
@@ -654,7 +658,7 @@ Med **Visa** överst väljer du mellan **Körordning** och **Material**. I läge
 Som material räknas samma sak som i kolumnen [Material](#material): **köpt** material som är **kopplat till operationen i beredningen** och som det finns något kvar att ta ut av.
 
 - Varje material är en grupp med rubriken artikelnummer och benämning, *behov 14,5 st · användbart saldo 22 st* och antalet operationer. **Behov** är summan av gruppens rader. Räcker inte saldot till gruppen tillsammans står raden i rött med märket **räcker inte**. Klicka på rubriken för att fälla ihop eller fälla ut gruppen.
-- Under rubriken står gruppens operationer med **Dag**, **TO**, **Operation** och **Artikel**, **Antal kvar**, **Tid kvar (h)**, **Färdigdatum**, **Status** och **Behov** — radens eget behov av materialet och *finns*, *saknas 4 st* eller *kommer 2 dec · IO-88*.
+- Under rubriken står gruppens operationer med **Dag**, **TO**, **Operation** och **Artikel**, **Antal kvar**, **Tid kvar (h)**, **Färdigdatum**, **Status** och **Behov** — radens eget behov av materialet och *finns*, *saknas 4 st*, *kommer 2 dec · IO-88* eller *försenad sedan 25 nov · IO-88* (se [Material](#material)).
 - **Saldot räknas per rad, summan visar konkurrensen:** varje rad jämförs för sig mot hela det användbara saldot, så två rader kan båda visa *finns* fast saldot bara räcker till den ena. Det är gruppens summa — *behov* mot *användbart saldo* och märket **räcker inte** — som visar om materialet räcker till alla.
 - En operation som tar två material står i båda grupperna.
 - Sist kommer **Utan kopplat material (N)** — operationer som saknar kopplat köpt material. Gruppen är hopfälld och har texten *Koppla materialet till operationen i beredningen för att kunna samköra.* Därefter **Materialet uttaget (N)** för operationer där allt kopplat material redan är uttaget. Ingen av de två grupperna går att välja ur.
@@ -673,7 +677,7 @@ Dialogen **Samkör** visar vad som händer **innan** något ändras:
 - **Flyttas också** — efterföljande operationer i samma ordrar som följer med.
 - **Blir sena** — ordrar som blir klara efter sitt färdigdatum.
 - **Observera** — övriga varningar från planeringen.
-- **Material** — de valda operationernas material tillsammans: *behov* mot *användbart saldo*, och *räcker inte* när saldot inte täcker dem.
+- **Material** — de valda operationernas material tillsammans: *behov* mot *användbart saldo*, och *räcker inte* när saldot inte täcker dem. Är material på väg står det också, till exempel *kommer 2 dec · IO-88 · saknas 8 st* — det sista är det som ingen order täcker av de valda operationernas behov.
 - **Körordning** — dagens ordning efteråt, med de valda märkta *samkörs*. De läggs **intill varandra**, efter de operationer som redan är ordnade för hand den dagen, i den ordning listan visade dem.
 
 Har resursen ingen kapacitet den dagen (helg, röd dag eller ledig dag i schemat) står det i dialogen och **Samkör** är avstängd — välj en annan dag.
@@ -684,7 +688,7 @@ Har resursen ingen kapacitet den dagen (helg, röd dag eller ledig dag i schemat
 - **Ställtiden räknas per operation** även när jobben körs ihop — planen och kalkylen ändras inte av en samkörning.
 - Ingenting sparas om själva gruppen: en samkörning är de flyttade dagarna, låsen och platserna i körordningen. Ordningen ändrar du som vanligt med **Upp** och **Ned**.
 
-Har någon annan ändrat planen sedan listan lästes får du meddelandet *Planen har ändrats sedan listan lästes — den har lästs om. Välj operationerna igen.* Då är inget ändrat.
+Har någon annan ändrat planen sedan listan lästes får du meddelandet *Planen har ändrats sedan listan lästes — den har lästs om. Välj operationerna igen.* Då är inget ändrat. Det gäller också när dialogen öppnas eller du byter dag: dialogen stängs och listan läses om.
 
 ### Ordna dagen
 
@@ -718,9 +722,11 @@ En flyttad operation blir **Låst** och får ta dagens hela kapacitet, så dagen
 
 Går det inte att läsa om — nätverket är nere — står *Kunde inte läsa om* uppe till höger och den senaste bilden ligger kvar.
 
+Står läget öppet över midnatt på en vald dag går det över till **i dag** när dagen har passerat. En kommande dag ligger kvar.
+
 ### Skriv ut dagplanen
 
-**Skriv ut** öppnar utskriftsdialogen för dagen och gruppen som visas: en grupp per resurs med last och kapacitet i rubriken, först raderna kvar från tidigare och sedan dagens operationer numrerade i körordning, med materialet som text (*finns*, *saknas 4 st*, *kommer 2026-12-02 IO-88*).
+**Skriv ut** öppnar utskriftsdialogen för dagen och gruppen som visas: en grupp per resurs med last och kapacitet i rubriken, först raderna kvar från tidigare och sedan dagens operationer numrerade i körordning, med materialet som text (*finns*, *saknas 4 st*, *kommer 2026-12-02 IO-88*, *kommer 2026-12-02 IO-88, saknas 8 st*, *försenad 2026-11-25 IO-88*).
 
 ## Körplan
 

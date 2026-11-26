@@ -7,7 +7,9 @@ import {
   loadPercent,
   loadText,
   materialDocumentHref,
+  materialLine,
   materialText,
+  materialTone,
   moveTargetOf,
   reorderIds,
   reorderableIds,
@@ -53,6 +55,7 @@ const row = (over: Partial<RunPlanRow> = {}): RunPlanRow => ({
 });
 
 const material = (over: Partial<RunPlanMaterial> = {}): RunPlanMaterial => ({
+  materialRowId: "row-1",
   articleId: "a-1",
   articleNumber: "1001",
   articleName: "Plåt",
@@ -141,22 +144,53 @@ describe("loadText and loadPercent", () => {
 });
 
 describe("materialText", () => {
+  const supply = { kind: "purchase_order" as const, documentId: "po-1", documentNumber: "IO-88", date: "2026-12-02", late: false, isDraft: false };
   it("says finns for a row the usable stock covers", () => {
-    expect(materialText(material())).toEqual({ tone: "ok", text: "finns", document: null });
+    expect(materialText(material())).toEqual({ tone: "ok", text: "finns", document: null, overdue: false, rest: null });
+    expect(materialTone(materialText(material()))).toBe("ok");
   });
   it("says what is missing when nothing is on its way", () => {
     expect(materialText(material({ status: "short", missingQuantity: 4 })).text).toBe("saknas 4 st");
     expect(materialText(material({ status: "short", missingQuantity: 2.5, unit: null })).text).toBe("saknas 2,5");
+    const missing = materialText(material({ status: "short", missingQuantity: 4 }));
+    expect(missing.rest).toBeNull();
+    expect(materialTone(missing)).toBe("short");
+    expect(materialLine(missing)).toBe("saknas 4 st");
   });
   it("says when it comes, and on which document", () => {
-    const supply = { kind: "purchase_order" as const, documentId: "po-1", documentNumber: "IO-88", date: "2026-12-02", isDraft: false };
     const text = materialText(material({ status: "short", missingQuantity: 0, supply }));
-    expect(text).toEqual({ tone: "short", text: "kommer 2 dec", document: { kind: "purchase_order", id: "po-1", number: "IO-88", draft: false } });
+    expect(text).toEqual({
+      tone: "short",
+      text: "kommer 2 dec",
+      document: { kind: "purchase_order", id: "po-1", number: "IO-88", draft: false },
+      overdue: false,
+      rest: null,
+    });
+    expect(materialTone(text)).toBe("coming");
+    expect(materialLine(text)).toBe("kommer 2 dec · IO-88");
     expect(materialDocumentHref(text.document!)).toBe("/inkop/ordrar/po-1");
     const undated = materialText(material({ status: "short", supply: { ...supply, kind: "manufacturing_order", documentId: "mo-9", date: null, isDraft: true } }));
     expect(undated.text).toBe("kommer, utan datum");
     expect(undated.document?.draft).toBe(true);
     expect(materialDocumentHref(undated.document!)).toBe("/tillverkning/ordrar/mo-9");
+    expect(materialLine(undated)).toBe("kommer, utan datum · IO-88 (utkast)");
+  });
+  it("says what is still missing beside a supply that does not cover the row", () => {
+    const text = materialText(material({ status: "short", missingQuantity: 8, supply }));
+    expect(text.text).toBe("kommer 2 dec");
+    expect(text.rest).toBe("saknas 8 st");
+    expect(materialLine(text)).toBe("kommer 2 dec · IO-88 · saknas 8 st");
+    // Still on its way: the tone is the supply's, the text says the rest.
+    expect(materialTone(text)).toBe("coming");
+  });
+  it("an overdue supply is late since its own day — never 'kommer' today", () => {
+    const late = materialText(material({ status: "short", missingQuantity: 0, supply: { ...supply, date: "2026-11-25", late: true } }));
+    expect(late.text).toBe("försenad sedan 25 nov");
+    expect(late.overdue).toBe(true);
+    expect(materialTone(late)).toBe("short");
+    expect(materialLine(late)).toBe("försenad sedan 25 nov · IO-88");
+    const both = materialText(material({ status: "short", missingQuantity: 1.5, supply: { ...supply, date: "2026-11-25", late: true } }));
+    expect(materialLine(both)).toBe("försenad sedan 25 nov · IO-88 · saknas 1,5 st");
   });
 });
 
@@ -258,6 +292,22 @@ describe("Mötesläget never writes", () => {
     // Skriv ut sits in the page's toolbar, which Mötesläget replaces.
     expect(client.match(/<PrintButton/g) ?? []).toHaveLength(1);
     expect(client.indexOf("<PrintButton")).toBeGreaterThan(client.indexOf("className={styles.toolbar}"));
+  });
+
+  it("never drags or reorders while a write or a reload is on its way", () => {
+    // The same guard that disables Upp/Ned.
+    expect(client).toContain("canDrag={canWrite && finePointer && !busy && !loading}");
+    expect(client).toMatch(/async function reorder\([^)]*\) \{\n\s+if \(!canWrite\) return;\n(\s+\/\/[^\n]*\n)*\s+if \(busy \|\| loading\) return;/);
+  });
+
+  it("moves on to today when the shown day has passed, instead of keeping yesterday's picture", () => {
+    // Before the background branch: Mötesläget with ?dag= over midnight.
+    const outOfRange = client.indexOf('err.code === "day-plan-date-out-of-range"');
+    expect(outOfRange).toBeGreaterThan(0);
+    expect(outOfRange).toBeLessThan(client.indexOf("if (background) setReloadFailed(true);"));
+    // Only for a day that was shown — a typed address still gets its error.
+    expect(client).toContain("if (dag && shownDate.current === dag && err instanceof ApiError");
+    expect(client).toMatch(/showToday\.current = \(\) =>\s+router\.replace\(dayPlanHref\(pathname, \{ dag: null,/);
   });
 
   it("mounts Mötesläget read-only, without the confirmation dialog", () => {

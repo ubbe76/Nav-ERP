@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coRunOrder, groupRunPlanByMaterial, planCoRun } from "../src/modules/planning/service/co-run.js";
+import { coRunOrder, coRunRunOrder, groupRunPlanByMaterial, planCoRun } from "../src/modules/planning/service/co-run.js";
 import {
   operationsWithPlan,
   planOperationMove,
@@ -326,8 +326,35 @@ describe("coRunOrder", () => {
   });
 });
 
+describe("coRunRunOrder", () => {
+  const day = (id: string, runPosition: number | null, sequenceNo = 10) => ({ id, orderNumber: `TO-${id}`, sequenceNo, runPosition });
+
+  it("names the places from the day's own operations, the selected ones marked", () => {
+    expect(coRunRunOrder([day("a", 1), day("s1", null, 20), day("s2", 4)], ["s2", "s1"])).toEqual([
+      { moOperationId: "a", orderNumber: "TO-a", sequenceNo: 10, selected: false },
+      { moOperationId: "s2", orderNumber: "TO-s2", sequenceNo: 10, selected: true },
+      { moOperationId: "s1", orderNumber: "TO-s1", sequenceNo: 20, selected: true },
+    ]);
+  });
+
+  it("lists an operation the planned world never held — read back on the day under the lock — like any other", () => {
+    // "late-comer": its order became open between the world load and the
+    // day read. It has a place on the day and no row in the world; the
+    // answer is built from the day's rows alone, so nothing is looked up
+    // (the write answered 500 after commit on exactly this).
+    const order = coRunRunOrder([day("late-comer", 2), day("a", 1), day("s1", null)], ["s1", "not-placed"]);
+    expect(order.map((o) => [o.moOperationId, o.selected])).toEqual([
+      ["a", false],
+      ["late-comer", false],
+      ["s1", true],
+    ]);
+    expect(coRunRunOrder([], ["s1"])).toEqual([]);
+  });
+});
+
 describe("groupRunPlanByMaterial", () => {
   const material = (over: Partial<RunPlanMaterial> = {}): RunPlanMaterial => ({
+    materialRowId: "row-1",
     articleId: "m-2",
     articleNumber: "PLÅT-2",
     articleName: "Plåt 2 mm",

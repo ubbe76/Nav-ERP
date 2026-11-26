@@ -73,24 +73,51 @@ export function loadPercent(load: CapacityDayLoad): number | null {
 export interface MaterialText {
   // ok = on the shelf; short = the row cannot be drawn from the usable stock.
   tone: "ok" | "short";
-  // "finns", "saknas 4 st", "kommer 2 dec", "kommer, utan datum"
+  // "finns", "saknas 4 st", "kommer 2 dec", "kommer, utan datum",
+  // "försenad sedan 25 nov"
   text: string;
   // The document the missing material is expected on (IO or TO), if any.
   document: { kind: "purchase_order" | "manufacturing_order"; id: string; number: string; draft: boolean } | null;
+  // The supply's own day has passed: not "coming" any more.
+  overdue: boolean;
+  // With a supply on its way: what nothing covers of the row all the same
+  // ("saknas 8 st"), said after the document. null = the supply covers it.
+  rest: string | null;
 }
+
+const missingText = (quantity: number, unit: string | null): string => `saknas ${formatQuantity(quantity)}${unit ? ` ${unit}` : ""}`;
 
 // One material row of an operation as the page says it. The status is the
 // API's (usable stock against this row alone); the supply is the pegging's.
 export function materialText(m: RunPlanMaterial): MaterialText {
-  if (m.status === "available") return { tone: "ok", text: "finns", document: null };
+  if (m.status === "available") return { tone: "ok", text: "finns", document: null, overdue: false, rest: null };
   if (m.supply) {
+    // An overdue supply carries its own day — never "kommer <today>".
+    const text = !m.supply.date ? "kommer, utan datum" : m.supply.late ? `försenad sedan ${shortDate(m.supply.date)}` : `kommer ${shortDate(m.supply.date)}`;
     return {
       tone: "short",
-      text: m.supply.date ? `kommer ${shortDate(m.supply.date)}` : "kommer, utan datum",
+      text,
       document: { kind: m.supply.kind, id: m.supply.documentId, number: m.supply.documentNumber, draft: m.supply.isDraft },
+      overdue: m.supply.late,
+      rest: m.missingQuantity > 0 ? missingText(m.missingQuantity, m.unit) : null,
     };
   }
-  return { tone: "short", text: `saknas ${formatQuantity(m.missingQuantity)}${m.unit ? ` ${m.unit}` : ""}`, document: null };
+  return { tone: "short", text: missingText(m.missingQuantity, m.unit), document: null, overdue: false, rest: null };
+}
+
+// The colour of a material state: on the shelf, on its way, or missing — an
+// overdue supply is missing, not on its way.
+export function materialTone(t: Pick<MaterialText, "tone" | "document" | "overdue">): "ok" | "coming" | "short" {
+  if (t.tone === "ok") return "ok";
+  return t.document && !t.overdue ? "coming" : "short";
+}
+
+// The whole state as one text: "kommer 2 dec · IO-88 · saknas 8 st",
+// "försenad sedan 25 nov · IO-88 (utkast)". The cells render the same parts
+// with the document as a link.
+export function materialLine(t: Pick<MaterialText, "text" | "document" | "rest">): string {
+  const document = t.document ? `${t.document.number}${t.document.draft ? " (utkast)" : ""}` : null;
+  return [t.text, document, t.rest].filter((part): part is string => !!part).join(" · ");
 }
 
 // The card the supply's document number links to.

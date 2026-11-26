@@ -11,6 +11,7 @@ import {
 // terminal's order, and which of it is co-run material (B3).
 
 const row = (over: Partial<OperationMaterialRow>): OperationMaterialRow => ({
+  rowId: `r-${over.articleNumber ?? "X"}`,
   moOperationId: "op-1",
   articleId: `a-${over.articleNumber ?? "X"}`,
   articleNumber: "X",
@@ -31,7 +32,7 @@ describe("linkedOperationMaterials", () => {
     ]);
     expect([...linked.keys()].sort()).toEqual(["op-1", "op-2"]);
     expect(linked.get("op-1")).toEqual([
-      { articleId: "a-PLÅT-2", articleNumber: "PLÅT-2", articleName: "Material", articleType: "purchased", unit: "st", remainingQuantity: 10 },
+      { rowId: "r-PLÅT-2", articleId: "a-PLÅT-2", articleNumber: "PLÅT-2", articleName: "Material", articleType: "purchased", unit: "st", remainingQuantity: 10 },
     ]);
     expect(linked.get("op-2")![0]).toMatchObject({ articleNumber: "RÖR-30", unit: "m" });
   });
@@ -57,15 +58,20 @@ describe("linkedOperationMaterials", () => {
 
   it("keeps one entry per material row, also for the same article twice", () => {
     const linked = linkedOperationMaterials([
-      row({ articleNumber: "A", quantityPlanned: 2 }),
-      row({ articleNumber: "A", quantityPlanned: 3 }),
+      row({ rowId: "r-1", articleNumber: "A", quantityPlanned: 2 }),
+      row({ rowId: "r-2", articleNumber: "A", quantityPlanned: 3 }),
     ]);
-    expect(linked.get("op-1")!.map((m) => m.remainingQuantity)).toEqual([2, 3]);
+    // Each entry carries its own row id.
+    expect(linked.get("op-1")!.map((m) => [m.rowId, m.remainingQuantity])).toEqual([
+      ["r-1", 2],
+      ["r-2", 3],
+    ]);
   });
 });
 
 describe("isCoRunMaterial", () => {
   const material = (over: Partial<OperationMaterial>): OperationMaterial => ({
+    rowId: "r",
     articleId: "a",
     articleNumber: "A",
     articleName: "Material",

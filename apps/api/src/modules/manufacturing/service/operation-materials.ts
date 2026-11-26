@@ -5,6 +5,10 @@ import { round4 } from "@navet/shared";
 // operation list and the planning views (körplan, dagplan) share: the
 // terminal shows every linked row, the planning views add isCoRunMaterial.
 export interface OperationMaterialRow {
+  // mo_material_consumptions.id. Within ONE operation the article is unique
+  // (mo_material_unique_per_operation), but an order can carry it on several
+  // operations and unlinked — the row is what the pegging's demand is of.
+  rowId: string;
   moOperationId: string | null;
   articleId: string;
   articleNumber: string;
@@ -17,6 +21,7 @@ export interface OperationMaterialRow {
 }
 
 export interface OperationMaterial {
+  rowId: string;
   articleId: string;
   articleNumber: string;
   articleName: string;
@@ -41,6 +46,7 @@ export function linkedOperationMaterials(rows: OperationMaterialRow[]): Map<stri
     if (!row.moOperationId) continue;
     const materials = byOperation.get(row.moOperationId) ?? [];
     materials.push({
+      rowId: row.rowId,
       articleId: row.articleId,
       articleNumber: row.articleNumber,
       articleName: row.articleName,

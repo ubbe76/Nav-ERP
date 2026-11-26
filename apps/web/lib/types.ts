@@ -7624,11 +7624,17 @@ export interface RunPlanMaterialSupply {
   kind: "purchase_order" | "manufacturing_order";
   documentId: string;
   documentNumber: string;
-  date: string | null; // null = undated
+  // null = undated. For an overdue supply (`late`) its OWN day, not today.
+  date: string | null;
+  // The supply's own day has passed and it has still not arrived.
+  late: boolean;
   isDraft: boolean;
 }
 
 export interface RunPlanMaterial {
+  // The material row's id (the order can carry the same article on another
+  // operation — kommer/saknas are this row's own).
+  materialRowId: string;
   articleId: string;
   articleNumber: string;
   articleName: string;
@@ -7639,7 +7645,9 @@ export interface RunPlanMaterial {
   usableOnHand: number;
   // available ⇔ usableOnHand >= remainingQuantity — per row, not allocated.
   status: "available" | "short";
-  missingQuantity: number; // 0 when available
+  // 0 when available. With a supply: what neither the shelf nor any supply
+  // covers of this row — shown beside "kommer" when above 0.
+  missingQuantity: number;
   supply: RunPlanMaterialSupply | null; // only when short
 }
 

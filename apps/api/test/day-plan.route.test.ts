@@ -315,6 +315,7 @@ describe("GET /planning/day-plan — material", () => {
     expect(row.materials.map((m) => m.articleId)).toEqual([w.plat.id, w.ror.id, w.bult.id, w.lack.id]);
     const [plat, ror, bult, lack] = row.materials;
     expect(plat).toEqual({
+      materialRowId: plat!.materialRowId,
       articleId: w.plat.id,
       articleNumber: w.plat.articleNumber,
       articleName: "M1-PLAT",
@@ -343,7 +344,7 @@ describe("GET /planning/day-plan — material", () => {
       status: "short",
       // Covered by the shelf and the IO together.
       missingQuantity: 0,
-      supply: { kind: "purchase_order", documentId: io.id, documentNumber: io.orderNumber, date: pegged.readyDate, isDraft: false },
+      supply: { kind: "purchase_order", documentId: io.id, documentNumber: io.orderNumber, date: pegged.readyDate, late: false, isDraft: false },
     });
     expect(ror!.supply!.date).toBe(addDays(today, 3));
     // Nothing on its way: what is missing.
@@ -356,6 +357,103 @@ describe("GET /planning/day-plan — material", () => {
     expect(frameRow.materials).toEqual([]);
     expect(frameRow.materialLinked).toBe(false);
     expect(plan.totals).toMatchObject({ rows: 2, unlinkedOperations: 1, shortMaterials: 3 });
+  });
+
+  it("kommer and saknas are the material ROW's own — the same article on two operations of one order", async () => {
+    const w = await world();
+    const cookie = await adminCookie();
+    // DUBBEL carries M3-BULT on op 10 AND on op 30, both on Kap.
+    const twice = await articleService.createArticle(
+      parsed(createArticleSchema, { articleNumber: `DUBBEL-${crypto.randomUUID().slice(0, 8)}`, name: "DUBBEL", type: "manufactured", active: true })
+    );
+    for (const sequenceNo of [10, 30]) {
+      const op = await mfgService.createRoutingOperation(twice.id, { sequenceNo, workCenterId: w.kap.id, setupTime: 0, runTimePerUnit: 3 });
+      await articleService.addBomComponent(twice.id, { componentArticleId: w.bult.id, quantity: 1, routingOperationId: op.id });
+    }
+    const mo = await w.order(twice.id, 10, addDays(today, 30));
+    for (const op of mo.ops) await planOn(op.id, [{ date: today, minutes: 30 }]);
+    // The pegging takes the order's two rows of the article in row id order
+    // (same order, same need day): the FIRST row needs 5, the second 100.
+    const rows = [
+      ...(await db.execute<{ id: string; mo_operation_id: string }>(
+        sql`SELECT id, mo_operation_id FROM mo_material_consumptions WHERE manufacturing_order_id = ${mo.id} AND component_article_id = ${w.bult.id}`
+      )),
+    ].sort((a, b) => (a.id < b.id ? -1 : 1));
+    expect(rows).toHaveLength(2);
+    const [small, big] = rows as [(typeof rows)[number], (typeof rows)[number]];
+    expect(small.mo_operation_id).not.toBe(big.mo_operation_id);
+    await db.execute(sql`UPDATE mo_material_consumptions SET quantity_planned = 5 WHERE id = ${small.id}`);
+    await db.execute(sql`UPDATE mo_material_consumptions SET quantity_planned = 100 WHERE id = ${big.id}`);
+    // 3 on the shelf, 2 early and 90 late: the small row is whole with the
+    // early IO; the big one waits for the late IO and still lacks 10.
+    await w.stock(w.bult.id, w.shelf.id, 3);
+    const early = await purchaseOrder(w.bult.id, 2, addDays(today, 2));
+    const late = await purchaseOrder(w.bult.id, 90, addDays(today, 9));
+
+    const plan = await dayPlan(cookie);
+    const materials = resourceOf(plan, w.kap.id).rows.flatMap((row) => row.materials.map((m) => ({ ...m, moOperationId: row.moOperationId })));
+    expect(materials).toHaveLength(2);
+    const smallRow = materials.find((m) => m.materialRowId === small.id)!;
+    const bigRow = materials.find((m) => m.materialRowId === big.id)!;
+    expect(smallRow.moOperationId).toBe(small.mo_operation_id);
+    expect(bigRow.moOperationId).toBe(big.mo_operation_id);
+    // Not the order's every row of the article: that said IO "late" and 10
+    // missing on both.
+    expect(smallRow).toMatchObject({
+      remainingQuantity: 5,
+      usableOnHand: 3,
+      status: "short",
+      missingQuantity: 0,
+      supply: { documentId: early.id, documentNumber: early.orderNumber, date: addDays(today, 2), late: false },
+    });
+    expect(bigRow).toMatchObject({
+      remainingQuantity: 100,
+      usableOnHand: 3,
+      status: "short",
+      missingQuantity: 10,
+      supply: { documentId: late.id, documentNumber: late.orderNumber, date: addDays(today, 9), late: false },
+    });
+    // The same rows as the TO card's Täcks av.
+    const coverage = (await get(cookie, `/manufacturing-orders/${mo.id}/coverage`)).json() as ManufacturingOrderCoverage;
+    expect(coverage.materials.find((m) => m.rowId === `mat:${small.id}`)).toMatchObject({ uncovered: 0 });
+    expect(coverage.materials.find((m) => m.rowId === `mat:${big.id}`)).toMatchObject({ uncovered: 10 });
+  });
+
+  it("a supply that does not cover the row leaves the rest missing; an overdue supply keeps its own day", async () => {
+    const w = await world();
+    const cookie = await adminCookie();
+    const mo = await w.order(w.product.id, 10, addDays(today, 30));
+    await planOn(mo.op10.id, [{ date: today, minutes: 50 }]);
+    await w.stock(w.plat.id, w.shelf.id, 10);
+    await w.stock(w.lack.id, w.shelf.id, 10);
+    // M2 need 20: 5 on the shelf and an IO for 7 — 8 that nothing covers.
+    await w.stock(w.ror.id, w.shelf.id, 5);
+    const partial = await purchaseOrder(w.ror.id, 7, addDays(today, 3));
+    // M3 need 30: 4 on the shelf and an IO for the rest that should have
+    // come three days ago.
+    await w.stock(w.bult.id, w.shelf.id, 4);
+    const overdue = await purchaseOrder(w.bult.id, 30, addDays(today, -3));
+
+    const row = resourceOf(await dayPlan(cookie), w.kap.id).rows[0]!;
+    const ror = row.materials.find((m) => m.articleId === w.ror.id)!;
+    expect(ror).toMatchObject({
+      status: "short",
+      missingQuantity: 8,
+      supply: { documentId: partial.id, date: addDays(today, 3), late: false },
+    });
+    // Not "kommer <today>" (the pegging's floor): the IO's own day, marked.
+    const bult = row.materials.find((m) => m.articleId === w.bult.id)!;
+    expect(bult).toMatchObject({
+      status: "short",
+      missingQuantity: 0,
+      supply: { documentId: overdue.id, documentNumber: overdue.orderNumber, date: addDays(today, -3), late: true },
+    });
+
+    const text = pdfText((await get(cookie, "/planning/day-plan/pdf")).rawPayload).replace(/\s+/g, " ");
+    expect(text).toContain(`(kommer ${addDays(today, 3)}`);
+    expect(text).toContain("saknas 8");
+    expect(text).toContain(`(försenad ${addDays(today, -3)}`);
+    expect(text).not.toContain(`(kommer ${today}`);
   });
 
   it("an operation without linked material says so; a fully drawn row leaves the list but keeps the link", async () => {
