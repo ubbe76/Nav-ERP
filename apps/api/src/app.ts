@@ -578,7 +578,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     manufacturingService,
     auditRepository,
     // Valuta: today's rate for a new order in another currency.
-    exchangeRateService
+    exchangeRateService,
+    // Kopiera till leverantör: the customer card's data (sales repository).
+    { customerCopySource: (id) => salesRepository.customerCopySource(id) }
   );
   // Leverantörsfaktura (AP) — its own service in the purchase module, coupled
   // to suppliers/POs/number-series. verificationPoster books the L
@@ -706,7 +708,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // goods when deriving a row's momskod.
     { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId },
     // Valuta: today's rate for an order in another currency.
-    exchangeRateService
+    exchangeRateService,
+    // Kopiera till kund: the supplier card's data (purchase module).
+    { supplierCopySource: (id) => purchaseService.supplierCopySource(id) }
   );
   // Frakt på offert: prices for an order and its freight row — built after
   // salesService, which owns the row rules (setFreightRow).

@@ -5902,6 +5902,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   price_list: "Prislista",
   customer_price: "Kundpris",
   customer: "Kund",
+  supplier: "Leverantör",
   article_group: "Varugrupp",
   manufacturing_order: "Tillverkningsorder",
   stock_count_session: "Inventering",
@@ -5932,6 +5933,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   corrected: "Rättad",
   markups_changed: "Påslag ändrade",
   invoice_customer_changed: "Fakturakund ändrad",
+  // Kopiera till kund / Kopiera till leverantör (2026-11-26).
+  copied_from_supplier: "Kopierad från leverantör",
+  copied_from_customer: "Kopierad från kund",
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",

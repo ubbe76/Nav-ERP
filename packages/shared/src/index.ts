@@ -37,6 +37,7 @@ export * from "./planning.js";
 export * from "./purchase.js";
 export * from "./sales.js";
 export * from "./customer-change.js";
+export * from "./partner-copy.js";
 export * from "./shipping.js";
 export * from "./stock.js";
 export * from "./system.js";

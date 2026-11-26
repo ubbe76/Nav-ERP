@@ -4,6 +4,7 @@ import { AppShell } from "../../../components/AppShell";
 import { SplitView } from "../../../components/split/SplitView";
 import { PartnerTabs } from "../../../components/partners/PartnerTabs";
 import { NewOrderFromSupplierButton } from "../../../components/purchase/NewOrderFromSupplierButton";
+import { CopyPartnerButton } from "../../../components/partners/CopyPartnerButton";
 import { apiGet } from "../../../lib/api";
 import type { PartnerContact, RegisterEntry, Supplier, SupplierDeliveryAddress, SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
@@ -40,6 +41,7 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
             <div className={shellStyles.meta}>Leverantör</div>
           </div>
           <div className={shellStyles.topbarActions}>
+            <CopyPartnerButton side="supplier" partner={supplier} />
             <NewOrderFromSupplierButton supplier={supplier} />
             <HelpLink chapter="inkop" anchor="leverantorer" label="Hjälp om leverantörer" />
           </div>

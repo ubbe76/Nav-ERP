@@ -5,6 +5,7 @@ import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
 import { dispatchedQuantitySql } from "./dispatched-quantity.js";
 import { loadSupplierOrderDefaults, resolveOrderDefaults } from "./supplier-order-defaults.js";
 import { changeOrderSupplier, loadSupplierChangeFacts } from "./supplier-change.js";
+import { insertSupplierCopyRelated, supplierCopySource, type SupplierCopyRelated } from "./partner-copy.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import {
   articleSupplierPriceHistory,
@@ -340,7 +341,10 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
     // 409. Otherwise, self-healing allocation that steps past a manually
     // taken number instead of failing — see number-series.ts's
     // insertWithSeriesNumber for why and how.
-    async createSupplier(input: CreateSupplierInput) {
+    // Kopiera till leverantör: `related` = the contacts and delivery
+    // addresses copied from a customer, written in the supplier's own
+    // transaction.
+    async createSupplier(input: CreateSupplierInput, related?: SupplierCopyRelated) {
       // Tillägg: supplier.created commits with the supplier.
       const insert = (supplierNumber: string) =>
         db.transaction(async (tx) => {
@@ -348,12 +352,19 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
             .insert(suppliers)
             .values({ ...input, supplierNumber })
             .returning();
+          if (related) await insertSupplierCopyRelated(tx, row!.id, related);
           await pluginEvents.emit(tx, { type: "supplier.created", entityId: row!.id, entityNumber: row!.supplierNumber });
           return row!;
         });
       return input.supplierNumber !== undefined
         ? insert(input.supplierNumber)
         : insertWithSeriesNumber(db, "supplier", insert);
+    },
+
+    // Kopiera till kund: what the supplier card hands over (the sales
+    // module reads it through SupplierCopyReader).
+    async supplierCopySource(id: string) {
+      return supplierCopySource(db, id);
     },
 
     async updateSupplier(id: string, input: UpdateSupplierInput) {
@@ -400,7 +411,10 @@ export function createPurchaseRepository(db: Db, periods: PostingPeriodReader = 
         ? or(
             ilike(suppliers.supplierNumber, pattern),
             ilike(suppliers.name, pattern),
-            ilike(suppliers.contactName, pattern)
+            ilike(suppliers.contactName, pattern),
+            // The organisationsnummer too — Kopiera till kund/leverantör
+            // looks for the company on the other side by it.
+            ilike(suppliers.orgNumber, pattern)
           )
         : undefined;
       const [rows, totalRows] = await Promise.all([

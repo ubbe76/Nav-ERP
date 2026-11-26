@@ -17,7 +17,7 @@ Inköpsorderlistan och orderkorten ligger under **Inköp → Inköpsorder** (`/i
 
 ## Leverantörer
 
-**Inköp → Leverantörer** listar alla leverantörer med kolumnen **Lev.nr** först; sökrutan matchar leverantörsnummer och namn. **+ Ny leverantör** registrerar **Leverantörsnummer** (valfritt — lämnas fältet tomt tilldelas nästa nummer automatiskt ur nummerserien, se [Nummerserier](/hjalp/system#nummerserier)), namn, vårt kundnummer, valuta (3 bokstäver, t.ex. SEK/EUR) och adress med postnummer/postort/**Land** — kontaktpersoner läggs upp på leverantörskortets flik **Kontakter**. Knappen **Importera** läser in leverantörer, kontakter och leveransadresser från exportfiler (se [Importera leverantörer](#importera-leverantorer)).
+**Inköp → Leverantörer** listar alla leverantörer med kolumnen **Lev.nr** först; sökrutan matchar leverantörsnummer, namn, kontaktperson och organisationsnummer. **+ Ny leverantör** registrerar **Leverantörsnummer** (valfritt — lämnas fältet tomt tilldelas nästa nummer automatiskt ur nummerserien, se [Nummerserier](/hjalp/system#nummerserier)), namn, vårt kundnummer, valuta (3 bokstäver, t.ex. SEK/EUR) och adress med postnummer/postort/**Land** — kontaktpersoner läggs upp på leverantörskortets flik **Kontakter**. Knappen **Importera** läser in leverantörer, kontakter och leveransadresser från exportfiler (se [Importera leverantörer](#importera-leverantorer)).
 
 Klicka på leverantörens namn för att öppna **leverantörskortet** med fyra flikar:
 
@@ -27,6 +27,17 @@ Klicka på leverantörens namn för att öppna **leverantörskortet** med fyra f
 - **Kontakter** — flera kontakter per leverantör med namn, telefon, mobil, e-post och kommentar. En kontakt kan markeras som **Huvudkontakt** och visas då överst.
 
 Uppe till höger på kortet finns **+ Ny förfrågan** och **+ Ny inköpsorder** — båda skapas med leverantören förvald.
+
+### Kopiera till kund
+
+När ni också säljer till en leverantör behöver den läggas upp som kund. **Kopiera till kund** uppe till höger på leverantörskortet skapar en ny kund med leverantörens uppgifter, så att du slipper skriva in dem igen. Knappen visas för den som får lägga upp kunder (behörigheten Försäljning).
+
+- Kunden får leverantörens namn, adress (som besöksadress) med postnummer, postort och **Land**, organisationsnummer, VAT-nummer, kontaktperson, e-post, telefon, **Valuta** och **Språk**, alla kontakter (med huvudkontakten) och leveransadresserna. Leveransadresserna får leverantörens land.
+- Det som bara gäller affärerna åt ena hållet följer inte med: villkoren (leverans- och betalningsvillkor, speditör och kundnummer hos speditör), leveransdagarna, **Vårt kundnummer**, **E-post för inköpsorder**, **Frakt på vårt konto**, momskod, kostnadsställe och betalningsuppgifterna. Fyll i det som behövs på det nya kundkortet, till exempel fakturaadressen och betalningsvillkoret.
+- **Kundnummer** i dialogen är valfritt. Lämnas fältet tomt får kunden nästa nummer i nummerserien.
+- Finns redan en kund med samma organisationsnummer eller samma namn nämner dialogen den, med en länk. Du kan ändå skapa en ny.
+
+**Skapa kund** öppnar det nya kundkortet. Kopian är en engångskopia: ändringar på leverantören efteråt förs inte över till kunden, eller tvärtom. I [händelseloggen](/hjalp/system#handelselogg) står *Kopierad från leverantör* med leverantörens nummer och namn. Vägen åt andra hållet är **Kopiera till leverantör** på kundkortet, se [Kopiera till leverantör](/hjalp/forsaljning#kopiera-till-leverantor).
 
 ### Betalning
 
