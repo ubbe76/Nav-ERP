@@ -215,9 +215,14 @@ export type CoRunInput = z.infer<typeof coRunSchema>;
 // POST /planning/operations/:opId/move — Flytta: the operation starts on
 // `date` (the day's whole capacity, overload allowed) and is locked; with
 // moveFollowing the TO's later unlocked operations are replanned after it.
+// `expectedStartDate` = the start day the view showed (null = unplanned):
+// another stored start day under the lock refuses the move (409
+// operation-plan-changed). Left out (integrations) = no test. The same body
+// goes to …/move/preview, which answers what the move would do.
 export const moveOperationSchema = z.object({
   date: businessDateSchema,
   moveFollowing: z.boolean().default(true),
+  expectedStartDate: businessDateSchema.nullable().optional(),
 });
 export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
 

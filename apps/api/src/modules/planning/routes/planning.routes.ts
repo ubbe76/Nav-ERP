@@ -20,6 +20,7 @@ import {
   structureQuerySchema,
   unlockOrdersSchema,
   type CoRunInput,
+  type MoveOperationInput,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { abcExportColumns, requirementsExportColumns } from "../service/export-columns.js";
@@ -40,6 +41,7 @@ import {
   NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
+  OperationPlanChangedError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
   RunPlanOrderChangedError,
@@ -446,19 +448,34 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
   app.post("/planning/plan", async (req) => service.planProductionRun(req.user!.id));
 
   // Flytta: start the operation on a chosen day (locked); the TO's later
-  // unlocked operations follow when moveFollowing is set.
-  app.post<{ Params: { opId: string } }>("/planning/operations/:opId/move", async (req, reply) => {
-    const input = moveOperationSchema.parse(req.body);
-    try {
-      return await service.moveOperation(req.params.opId, input, req.user!.id);
-    } catch (err) {
-      if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
-      if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
-      if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
-      throw err;
-    }
-  });
+  // unlocked operations follow when moveFollowing is set. The preview
+  // answers what the same body would do and writes nothing — like Samkör's
+  // it still needs the write rule and is NOT readOnlySafe (a read-only
+  // account cannot move anyway). Both refuse alike; 409
+  // operation-plan-changed when expectedStartDate is sent and the stored
+  // start day is another one: nothing written, the web reads again.
+  const moveRoute = <T>(run: (opId: string, input: MoveOperationInput, userId: string) => Promise<T>) =>
+    async (req: FastifyRequest<{ Params: { opId: string } }>, reply: FastifyReply) => {
+      const input = moveOperationSchema.parse(req.body);
+      try {
+        return await run(req.params.opId, input, req.user!.id);
+      } catch (err) {
+        if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
+        if (err instanceof OperationPlanChangedError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
+        if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    };
+  app.post<{ Params: { opId: string } }>(
+    "/planning/operations/:opId/move",
+    moveRoute((opId, input, userId) => service.moveOperation(opId, input, userId))
+  );
+  app.post<{ Params: { opId: string } }>(
+    "/planning/operations/:opId/move/preview",
+    moveRoute((opId, input) => service.previewMoveOperation(opId, input))
+  );
 
   // Samkör: the chosen operations of one resource moved to one day with
   // Flytta's rule, laid next to each other and locked. The preview computes

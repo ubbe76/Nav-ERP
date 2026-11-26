@@ -253,7 +253,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     setError(null);
     setNotice(null);
     try {
-      const res = await moveOperationTo(row.moOperationId, date);
+      const res = await moveOperationTo(row.moOperationId, date, row.plannedStartDate);
       if (res.warnings.length > 0) {
         setNotice({
           title: `Op ${row.sequenceNo} på ${row.orderNumber} är flyttad till ${weekdayShortDate(date)}. Observera:`,

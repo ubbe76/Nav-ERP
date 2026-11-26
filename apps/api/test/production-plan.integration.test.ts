@@ -18,6 +18,7 @@ import {
   createPlanningService,
   OperationNotFoundError,
   OperationNotPlannableError,
+  OperationPlanChangedError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
   type ManufacturingPlanReader,
@@ -645,6 +646,143 @@ describe("Flytta and Lås upp", () => {
     await expect(planningService.moveOperation(b.op10.id, { date: W2, moveFollowing: true }, world.user.id)).rejects.toBeInstanceOf(
       OperationNotPlannableError
     );
+  });
+});
+
+// Etapp 6a: POST …/move/preview and the precondition expectedStartDate —
+// both go through prepareMove, the move's own tests and rule.
+describe("Flytta: the preview and expectedStartDate", () => {
+  // Everything a move could write.
+  async function written() {
+    const days = await db.execute(sql`SELECT mo_operation_id, plan_date::text, minutes::text FROM mo_operation_plan_days ORDER BY mo_operation_id, plan_date`);
+    const mirror = await db.execute(
+      sql`SELECT id, planned_start_date::text, planned_end_date::text, plan_locked, run_position, planned_at::text FROM mo_operations ORDER BY id`
+    );
+    return { days: [...days], mirror: [...mirror], events: auditEntries.length };
+  }
+  // The matrix's day cell for the resource: GET /planning/capacity?granularity=day.
+  async function matrixDayLoad(workCenterId: string, date: string) {
+    const capacity = await planningService.getCapacity({ weeks: 8, granularity: "day", days: 21 });
+    const resource = capacity.groups.flatMap((g) => g.resources).find((r) => r.workCenterId === workCenterId)!;
+    return resource.dayLoads.find((d) => d.date === date)!;
+  }
+
+  it("answers the move's days, following operations and warnings for the same input, with the day's load before and after — and writes nothing", async () => {
+    const world = await seedWorld();
+    await createOrder(world, 40, "2030-04-15"); // fills W1 on R1
+    const a = await createOrder(world, 60, "2030-04-30"); // 7.5 days from 03-11 on R1
+    const input = { date: "2030-03-04", moveFollowing: true, expectedStartDate: "2030-03-11" };
+    const before = await written();
+    const loadBefore = await matrixDayLoad(world.r1.id, "2030-03-04");
+    expect(loadBefore).toEqual({ date: "2030-03-04", loadHours: 8, availableHours: 8, overloaded: false });
+
+    const preview = await planningService.previewMoveOperation(a.op10.id, input);
+    expect(preview.operation).toEqual({ plannedStartDate: "2030-03-04", plannedEndDate: "2030-03-19" });
+    expect(preview.following).toEqual([{ moOperationId: a.op20.id, sequenceNo: 20, plannedStartDate: "2030-03-20", plannedEndDate: "2030-03-29" }]);
+    expect(preview.warnings).toEqual([]);
+    expect(preview.dayLoad.before).toEqual(loadBefore);
+    expect(preview.dayLoad.after).toEqual({ date: "2030-03-04", loadHours: 16, availableHours: 8, overloaded: true });
+    // Nothing written, nothing logged — and the same answer again.
+    expect(await written()).toEqual(before);
+    expect(await planningService.previewMoveOperation(a.op10.id, input)).toEqual(preview);
+
+    const moved = await planningService.moveOperation(a.op10.id, input, world.user.id);
+    expect(moved.operation).toEqual({ ...preview.operation, planLocked: true });
+    expect(moved.following).toEqual(preview.following);
+    expect(moved.warnings).toEqual(preview.warnings);
+    expect(await matrixDayLoad(world.r1.id, "2030-03-04")).toEqual(preview.dayLoad.after);
+  });
+
+  it("carries the move's warnings: a sequence break and a late order, without moveFollowing", async () => {
+    const world = await seedWorld();
+    const a = await createOrder(world, 20, "2030-03-15"); // 03-04…03-06 / 03-07…03-11
+    const input = { date: W3, moveFollowing: false };
+    const before = await written();
+    const preview = await planningService.previewMoveOperation(a.op10.id, input);
+    expect(preview.operation).toEqual({ plannedStartDate: "2030-03-18", plannedEndDate: "2030-03-20" });
+    expect(preview.following).toEqual([]);
+    expect(preview.warnings.map((w) => w.kind).sort()).toEqual(["late", "sequence"]);
+    // The target day was empty on R1; the operation takes the whole day.
+    expect(preview.dayLoad).toEqual({
+      before: { date: W3, loadHours: 0, availableHours: 8, overloaded: false },
+      after: { date: W3, loadHours: 8, availableHours: 8, overloaded: false },
+    });
+    expect(await written()).toEqual(before);
+    const moved = await planningService.moveOperation(a.op10.id, input, world.user.id);
+    expect(moved.operation).toEqual({ ...preview.operation, planLocked: true });
+    expect(moved.warnings).toEqual(preview.warnings);
+    expect(await matrixDayLoad(world.r1.id, W3)).toEqual(preview.dayLoad.after);
+  });
+
+  it("refuses in the preview what the move refuses — before any write", async () => {
+    const world = await seedWorld();
+    const a = await createOrder(world, 20, W4);
+    const before = await written();
+    await expect(planningService.previewMoveOperation(crypto.randomUUID(), { date: W2, moveFollowing: true })).rejects.toBeInstanceOf(
+      OperationNotFoundError
+    );
+    await expect(planningService.previewMoveOperation(a.op10.id, { date: "2030-03-01", moveFollowing: true })).rejects.toBeInstanceOf(
+      PlanDateInPastError
+    );
+    // A day without capacity: 409 plan-date-no-capacity already here.
+    const refused = planningService.previewMoveOperation(a.op10.id, { date: "2030-03-09", moveFollowing: true });
+    await expect(refused).rejects.toBeInstanceOf(PlanDateNoCapacityError);
+    await expect(refused).rejects.toMatchObject({ date: "2030-03-09", workCenterCode: "101" });
+    expect(await written()).toEqual(before);
+
+    await mfgService.reportOperationQuantities(a.op10.id, { quantityOk: 20, quantityScrapped: 0, markDone: true, createdBy: world.user.id });
+    await expect(planningService.previewMoveOperation(a.op10.id, { date: W2, moveFollowing: true })).rejects.toMatchObject({
+      name: "OperationNotPlannableError",
+      reason: "done",
+    });
+    const b = await createOrder(world, 20, W4);
+    await mfgService.cancel(b.order.id);
+    await expect(planningService.previewMoveOperation(b.op10.id, { date: W2, moveFollowing: true })).rejects.toBeInstanceOf(
+      OperationNotPlannableError
+    );
+  });
+
+  it("expectedStartDate: another stored start day ⇒ operation-plan-changed in both, nothing written; the right one and none at all move as before", async () => {
+    const world = await seedWorld();
+    const a = await createOrder(world, 20, W4); // op 10 on 03-04…03-06
+    // A place in the day's order, to see that it is left alone.
+    await db.update(moOperations).set({ runPosition: 3 }).where(eq(moOperations.id, a.op10.id));
+    const before = await written();
+    // The view showed another day, or an unplanned operation.
+    for (const expectedStartDate of ["2030-03-05", null]) {
+      const input = { date: W2, moveFollowing: true, expectedStartDate };
+      for (const run of [
+        () => planningService.moveOperation(a.op10.id, input, world.user.id),
+        () => planningService.previewMoveOperation(a.op10.id, input),
+      ]) {
+        const refused = run();
+        await expect(refused).rejects.toBeInstanceOf(OperationPlanChangedError);
+        await expect(refused).rejects.toMatchObject({ orderNumber: a.order.orderNumber, sequenceNo: 10 });
+      }
+    }
+    expect(await written()).toEqual(before);
+    expect(await opRow(a.op10.id)).toMatchObject({ plannedStartDate: "2030-03-04", plannedEndDate: "2030-03-06", planLocked: false });
+
+    // The day the view showed: moved.
+    const moved = await planningService.moveOperation(a.op10.id, { date: W2, moveFollowing: true, expectedStartDate: "2030-03-04" }, world.user.id);
+    expect(moved.operation).toEqual({ plannedStartDate: "2030-03-11", plannedEndDate: "2030-03-13", planLocked: true });
+    // The same request again is now stale: the first one moved it.
+    await expect(
+      planningService.moveOperation(a.op10.id, { date: W3, moveFollowing: true, expectedStartDate: "2030-03-04" }, world.user.id)
+    ).rejects.toBeInstanceOf(OperationPlanChangedError);
+    expect(await opRow(a.op10.id)).toMatchObject({ plannedStartDate: "2030-03-11", planLocked: true });
+    // Left out (integrations): no test, as before.
+    const again = await planningService.moveOperation(a.op10.id, { date: W3, moveFollowing: true }, world.user.id);
+    expect(again.operation).toEqual({ plannedStartDate: "2030-03-18", plannedEndDate: "2030-03-20", planLocked: true });
+
+    // An unplanned operation is expected as null.
+    const loose = await unplannedMfgService.createManufacturingOrder({ articleId: world.article.id, quantity: 8, dueDate: W4 }, world.user.id);
+    const looseOp = (await mfgService.listOperations(loose.id)).find((o) => o.sequenceNo === 10)!;
+    await expect(
+      planningService.previewMoveOperation(looseOp.id, { date: W2, moveFollowing: true, expectedStartDate: W4 })
+    ).rejects.toBeInstanceOf(OperationPlanChangedError);
+    const placed = await planningService.moveOperation(looseOp.id, { date: W2, moveFollowing: true, expectedStartDate: null }, world.user.id);
+    expect(placed.operation).toMatchObject({ plannedStartDate: "2030-03-11", planLocked: true });
   });
 });
 

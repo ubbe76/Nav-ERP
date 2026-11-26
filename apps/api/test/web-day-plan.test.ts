@@ -264,6 +264,15 @@ describe("Mötesläget never writes", () => {
     for (const name of WRITES) expect(writes).toContain(`export function ${name}(`);
   });
 
+  // Etapp 6a: the quick moves send the start day the row showed, so a move
+  // made on a stale page is refused (409 operation-plan-changed).
+  it("sends the row's planned start day as the move's precondition", () => {
+    expect(client).toContain("await moveOperationTo(row.moOperationId, date, row.plannedStartDate);");
+    const writes = web("components/planning/dayPlanWrites.ts");
+    expect(writes).toMatch(/export function moveOperationTo\(moOperationId: string, date: string, expectedStartDate: string \| null\)/);
+    expect(writes).toContain("JSON.stringify({ date, moveFollowing: true, expectedStartDate })");
+  });
+
   it("derives canWrite from !meeting", () => {
     expect(client).toMatch(/const canWrite = !meeting && can\(\["tillverkning"\]\);/);
   });

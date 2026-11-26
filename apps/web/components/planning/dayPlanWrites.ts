@@ -15,10 +15,13 @@ export function saveDayOrder(workCenterId: string, date: string, moOperationIds:
 }
 
 // I morgon / Lägg på i dag: Flytta with the following operations (locks).
-export function moveOperationTo(moOperationId: string, date: string): Promise<MoveOperationResult> {
+// `expectedStartDate` = the start day the row showed (null = unplanned) —
+// the server refuses the move with 409 operation-plan-changed when the
+// operation has been moved since the page was read.
+export function moveOperationTo(moOperationId: string, date: string, expectedStartDate: string | null): Promise<MoveOperationResult> {
   return apiFetch<MoveOperationResult>(`/api/v1/planning/operations/${moOperationId}/move`, {
     method: "POST",
-    body: JSON.stringify({ date, moveFollowing: true }),
+    body: JSON.stringify({ date, moveFollowing: true, expectedStartDate }),
   });
 }
 

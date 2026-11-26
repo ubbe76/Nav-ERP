@@ -79,6 +79,7 @@ import {
   plannedDateRange,
   remainingOperationMinutes,
   resourceDayLoads,
+  type CapacityDayLoad,
   type CapacityInput,
   type CapacityOperationRow,
   type CapacityResult,
@@ -437,6 +438,16 @@ export class CoRunChangedError extends Error {
   }
 }
 
+// Flytta with expectedStartDate: the operation's stored start day is another
+// than the one the view showed (someone moved it, or Planera ran, in
+// between). Nothing is written; the web reads again. 409.
+export class OperationPlanChangedError extends Error {
+  constructor(public orderNumber: string, public sequenceNo: number) {
+    super(`Operation ${sequenceNo} på ${orderNumber} har flyttats sedan vyn lästes — läs om och försök igen`);
+    this.name = "OperationPlanChangedError";
+  }
+}
+
 // Dagplan for a day outside its window: a passed day, or one more than
 // DAY_PLAN_MAX_AHEAD_DAYS ahead (S5 — Beläggning's day view at its widest). 400.
 export class DayPlanDateOutOfRangeError extends Error {
@@ -519,6 +530,18 @@ export interface MoveOperationResult {
   operation: PlannedOperationDates;
   following: { moOperationId: string; sequenceNo: number; plannedStartDate: string | null; plannedEndDate: string | null }[];
   warnings: PlanWarning[];
+}
+
+// POST /planning/operations/:opId/move/preview — what the move would do,
+// nothing written: the operation's and the following operations' new days
+// and the warnings exactly as the move answers them, plus the target day's
+// load on the operation's resource before and after (resourceDayLoads — the
+// matrix's bucket, overload from the flag).
+export interface MoveOperationPreview {
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null };
+  following: MoveOperationResult["following"];
+  warnings: PlanWarning[];
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
 }
 
 // The TO list's plan summary per order (min/max over the pending
@@ -2124,6 +2147,85 @@ export function createPlanningService(
     }
     return { materials, stamps };
   }
+  // One resource's load on one day in the plan world with `operations` in
+  // place of the loaded ones — resourceDayLoads, the matrix's bucket. Shared
+  // by the previews of Samkör and Flytta (before / after).
+  function worldDayLoad(
+    world: Awaited<ReturnType<typeof loadPlanWorld>>,
+    today: string,
+    workCenterId: string,
+    date: string,
+    operations: CapacityOperationRow[]
+  ): CapacityDayLoad {
+    return (
+      resourceDayLoads({ ...world.capacity, operations }, today, date).get(workCenterId) ?? {
+        date,
+        loadHours: 0,
+        availableHours: null,
+        overloaded: false,
+      }
+    );
+  }
+
+  // Flytta, the part the move and its preview share: the tests and the rule,
+  // in ONE order, writing nothing. `dbc` undefined = outside a transaction
+  // (the preview); the move passes its transaction and already holds the
+  // production_plan lock. The operation row is read without FOR UPDATE — the
+  // advisory lock is what every writer of the plan takes. Throws, in this
+  // order: unknown operation (404), a passed day (400), another stored start
+  // day than expectedStartDate (409 operation-plan-changed), what cannot be
+  // planned (409) and a day without capacity (409).
+  async function prepareMove(dbc: Tx | undefined, opId: string, input: MoveOperationInput) {
+    const op = await repo.planOperation(opId, dbc);
+    if (!op) throw new OperationNotFoundError(opId);
+    const today = todayFn();
+    if (input.date < today) throw new PlanDateInPastError(input.date, today);
+    // The precondition: the view's start day against the stored one. Left
+    // out = no test (integrations).
+    if (input.expectedStartDate !== undefined && input.expectedStartDate !== op.plannedStartDate) {
+      throw new OperationPlanChangedError(op.orderNumber, op.sequenceNo);
+    }
+    if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
+    if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
+    if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
+    const world = await loadPlanWorld(dbc);
+    const target = world.operations.find((o) => o.moOperationId === opId);
+    if (!target) throw new OperationNotPlannableError("order_not_open");
+    // Under the book's threshold nothing would be written (roundPlanDays).
+    if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
+    const stamped = await repo.stampedOperationIds(dbc);
+
+    // The rule itself (which of the order's operations move, follow or
+    // lie fast) is planOperationMove — shared with Samkör.
+    const result = planOperationMove(world, stamped, {
+      operationId: opId,
+      date: input.date,
+      moveFollowing: input.moveFollowing,
+    });
+    // The forced day took nothing (no capacity that day: a weekend, a
+    // röd dag, a free day in the schedule) — the book went on to the
+    // first day with capacity. Tested on the plan BEFORE the write, so
+    // nothing is written.
+    const ownPlan = result.plans.find((p) => p.operationId === opId);
+    if (ownPlan && ownPlan.startDate !== input.date) {
+      throw new PlanDateNoCapacityError(input.date, op.workCenterCode);
+    }
+    const seqOf = new Map(
+      world.operations
+        .filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)
+        .map((o) => [o.moOperationId, o.sequenceNo])
+    );
+    const following = [
+      ...result.plans
+        .filter((p) => p.operationId !== opId)
+        .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartDate: p.startDate, plannedEndDate: p.endDate })),
+      ...result.clear
+        .filter((id) => id !== opId && (seqOf.get(id) ?? 0) > op.sequenceNo)
+        .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartDate: null, plannedEndDate: null })),
+    ].sort((a, b) => a.sequenceNo - b.sequenceNo);
+    return { op, today, world, target, result, following };
+  }
+
   // --- Samkör (co-run.ts owns the rules) -----------------------------------
   // What the preview and the write share: the resource, the day and the
   // selected operations tested, the world loaded and the co-run planned in
@@ -2251,13 +2353,7 @@ export function createPlanningService(
     following.sort((a, b) => a.orderNumber.localeCompare(b.orderNumber, "sv", { numeric: true }) || a.sequenceNo - b.sequenceNo);
 
     // Dagens last: the same rule on the world before and after.
-    const loadOf = (ops: CapacityOperationRow[]) =>
-      resourceDayLoads({ ...world.capacity, operations: ops }, today, date).get(workCenter.id) ?? {
-        date,
-        loadHours: 0,
-        availableHours: null,
-        overloaded: false,
-      };
+    const loadOf = (ops: CapacityOperationRow[]) => worldDayLoad(world, today, workCenter.id, date, ops);
 
     return {
       workCenter: { id: workCenter.id, code: workCenter.code, name: workCenter.name },
@@ -3713,35 +3809,7 @@ export function createPlanningService(
     async moveOperation(opId: string, input: MoveOperationInput, userId: string | null): Promise<MoveOperationResult> {
       const moved = await repo.transaction(async (tx) => {
         await lockProductionPlan(tx);
-        const op = await repo.planOperation(opId, tx);
-        if (!op) throw new OperationNotFoundError(opId);
-        const today = todayFn();
-        if (input.date < today) throw new PlanDateInPastError(input.date, today);
-        if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
-        if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
-        if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
-        const world = await loadPlanWorld(tx);
-        const target = world.operations.find((o) => o.moOperationId === opId);
-        if (!target) throw new OperationNotPlannableError("order_not_open");
-        // Under the book's threshold nothing would be written (roundPlanDays).
-        if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
-        const stamped = await repo.stampedOperationIds(tx);
-
-        // The rule itself (which of the order's operations move, follow or
-        // lie fast) is planOperationMove — shared with Samkör.
-        const result = planOperationMove(world, stamped, {
-          operationId: opId,
-          date: input.date,
-          moveFollowing: input.moveFollowing,
-        });
-        // The forced day took nothing (no capacity that day: a weekend, a
-        // röd dag, a free day in the schedule) — the book went on to the
-        // first day with capacity. Tested on the plan BEFORE the write, so
-        // nothing is written.
-        const ownPlan = result.plans.find((p) => p.operationId === opId);
-        if (ownPlan && ownPlan.startDate !== input.date) {
-          throw new PlanDateNoCapacityError(input.date, op.workCenterCode);
-        }
+        const { op, result, following } = await prepareMove(tx, opId, input);
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
         // Locked only when it got a plan — beyond the horizon it is cleared
         // (the CHECK forbids a lock without days) and the warning says so.
@@ -3749,19 +3817,6 @@ export function createPlanningService(
         const row = placed
           ? (await repo.setOperationLock(tx, opId, true))!
           : { plannedStartDate: null, plannedEndDate: null, planLocked: false };
-        const seqOf = new Map(
-          world.operations
-            .filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)
-            .map((o) => [o.moOperationId, o.sequenceNo])
-        );
-        const following = [
-          ...result.plans
-            .filter((p) => p.operationId !== opId)
-            .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartDate: p.startDate, plannedEndDate: p.endDate })),
-          ...result.clear
-            .filter((id) => id !== opId && (seqOf.get(id) ?? 0) > op.sequenceNo)
-            .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartDate: null, plannedEndDate: null })),
-        ].sort((a, b) => a.sequenceNo - b.sequenceNo);
         return { op, operation: row, following, warnings: result.warnings };
       });
       await audit.log({
@@ -3782,6 +3837,26 @@ export function createPlanningService(
         userId,
       });
       return { operation: moved.operation, following: moved.following, warnings: moved.warnings };
+    },
+
+    // Flytta, the preview — what POST …/move would do with the same body,
+    // computed on the plan as it is right now: no transaction, no
+    // production_plan lock, nothing written and nothing logged. The same
+    // refusals as the move, in the same order (prepareMove).
+    async previewMoveOperation(opId: string, input: MoveOperationInput): Promise<MoveOperationPreview> {
+      const { today, world, target, result, following } = await prepareMove(undefined, opId, input);
+      // The operation's days as writeOperationPlans would mirror them
+      // (operationsWithPlan rounds with the writer's own roundPlanDays).
+      const operationsAfter = operationsWithPlan(world.operations, result);
+      const own = operationsAfter.find((o) => o.moOperationId === opId);
+      const range = own ? plannedDateRange(own) : null;
+      const loadOf = (ops: CapacityOperationRow[]) => worldDayLoad(world, today, target.workCenterId, input.date, ops);
+      return {
+        operation: { plannedStartDate: range?.start ?? null, plannedEndDate: range?.end ?? null },
+        following,
+        warnings: result.warnings,
+        dayLoad: { before: loadOf(world.operations), after: loadOf(operationsAfter) },
+      };
     },
 
     // Samkör, the preview — what POST /planning/co-run would do, computed
