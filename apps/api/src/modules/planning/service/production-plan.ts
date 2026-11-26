@@ -66,6 +66,16 @@ export interface PlanOrder {
   orderNumber: string;
   dueDate: string | null;
   operations: PlanOperation[];
+  // Materialet är klart den dagen (Planera om strukturen): the chain starts
+  // there instead of today — the first operation may use capacity ON that
+  // day, never before today. Left out = today, as before. The reservation's
+  // floor for a TO that already exists (delivery-time-check.ts,
+  // scheduleOperations: max(materialReady, t0)) — the same operationChain,
+  // never a second placement rule. The chain's ready day starts there too:
+  // the finish day is never before it, and the operation after one that
+  // lies earlier (påbörjad, locked, moved by hand) starts the working day
+  // after it at the earliest.
+  earliestStart?: string | null;
 }
 
 export interface PlanProductionInput {
@@ -179,7 +189,9 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
     // The chain: the first operation may use capacity from today, each next
     // one from the working day after the previous is ready + the queue time.
     // Done operations and operations without time never advance it (S7).
-    const chain = operationChain(today, input.queueDays, input.offDays);
+    // With earliestStart the chain starts on the day the material is ready.
+    const chainStart = order.earliestStart != null && order.earliestStart > today ? order.earliestStart : today;
+    const chain = operationChain(chainStart, input.queueDays, input.offDays);
     let horizonHit = false;
 
     // Sekvensbrott (S13): the operation starts before the previous one is
