@@ -23,11 +23,20 @@ import { compareArticleNumbers } from "../../manufacturing/service/operation-mat
 import { addDays } from "../../system/service/delivery-days.js";
 import { isoWeekOf } from "../../timereport/service/schedule.service.js";
 import type { PlanWorkCenter } from "./capacity-book.js";
-import { operationLoadDays, operationStarted, plannedDateRange, remainingOperationMinutes, type CapacityOperationRow } from "./capacity-calc.js";
+import {
+  isLockedOperation,
+  operationLoadDays,
+  operationStarted,
+  plannedDateRange,
+  remainingOperationMinutes,
+  subcontractDays,
+  type CapacityOperationRow,
+} from "./capacity-calc.js";
 import { moveCandidates } from "./component-moves.js";
 import type { OrderOutlook, OutlookRow } from "./delivery-outlook.js";
-import { ceilDays } from "./manufacturing-lead-time.js";
 import type { PegAllocation, PegDemand, Pegging, PegSupplyKind } from "./pegging.js";
+// Types only — the file stays free of database imports at run time.
+import type { CoverageGoesTo, OrderPlanSummary } from "./planning.service.js";
 
 export const STRUCTURE_MAX_DEPTH = 10; // TO levels below the root
 export const STRUCTURE_MAX_NODES = 600;
@@ -65,13 +74,8 @@ export interface StructureDemand {
   allocations: StructureAllocation[];
 }
 
-// The TO's plan summary — the service's OrderPlanSummary (same fields).
-export interface StructureOrderPlan {
-  plannedStartDate: string | null;
-  plannedEndDate: string | null;
-  late: boolean;
-  plannedFinish: string | null;
-}
+// The TO's plan summary — the TO list's (orderPlanSummaries).
+export type StructureOrderPlan = OrderPlanSummary;
 
 // A TO's head, its plan summary and Halvfabrikat sent, as loaded.
 export interface StructureOrderFacts {
@@ -88,18 +92,9 @@ export interface StructureOrderFacts {
   componentLate: boolean;
 }
 
-// Where the root TO's own output goes — the service's CoverageGoesTo (same
-// fields), one level up (S24).
-export interface StructureGoesTo {
-  kind: "sales_order" | "mo_material" | "mo_planned_material" | "stock";
-  documentId: string | null;
-  documentNumber: string | null;
-  partner: string | null;
-  needDate: string | null;
-  quantity: number;
-  late: boolean;
-  daysLate: number;
-}
+// Where the root TO's own output goes — the TO card's Går till, one level
+// up (S24).
+export type StructureGoesTo = CoverageGoesTo;
 
 export interface StructureRootRow {
   row: OutlookRow; // Leveransläget's row with its allocations
@@ -357,8 +352,8 @@ function structureOperation(
     workCenterName: wc?.name ?? "",
     status: op.operationStatus,
     subcontract,
-    // The days subcontractReadyDate (capacity-calc.ts) adds after the floor.
-    subcontractDays: subcontract ? ceilDays(Math.max(0, (wc?.leadTimeDays ?? 0) + (wc?.queueTimeDays ?? 0))) : null,
+    // The days subcontractReadyDate adds after the floor.
+    subcontractDays: subcontract ? subcontractDays(wc ?? {}) : null,
     started: operationStarted(op, input.stamped.has(op.moOperationId)),
     remainingHours: round2(remainingOperationMinutes(op) / 60),
     planLocked: op.planLocked ?? false,
@@ -368,7 +363,8 @@ function structureOperation(
   };
 }
 
-const lockedCount = (operations: StructureOperation[]) => operations.filter((op) => op.status === "pending" && op.planLocked).length;
+const lockedCount = (operations: StructureOperation[]) =>
+  operations.filter((op) => isLockedOperation({ operationStatus: op.status, planLocked: op.planLocked })).length;
 
 function structureAxis(today: string, offDays: ReadonlySet<string>, dates: (string | null)[]): StructureResult["axis"] {
   // A passed date is shown on today — the axis never starts before it.

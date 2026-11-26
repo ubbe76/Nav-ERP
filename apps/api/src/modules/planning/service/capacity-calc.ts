@@ -253,6 +253,10 @@ export interface CapacitySummary {
   // Förslag på resurs (#15): every open operation's förslag, by order number
   // and sequence (the räknare's list — not narrowed by the group filter).
   resourceSuggestions: ResourceSuggestion[];
+  // "N låsta": the pending operations with a locked plan (Flytta, Samkör,
+  // the reservation) among the loaded ones — not narrowed by the group
+  // filter either. Strukturvyn's node counter is the same predicate.
+  lockedOperations: number;
 }
 
 export interface CapacityResult {
@@ -458,6 +462,13 @@ export function operationLoadDays(op: CapacityOperationRow, today: string): { da
   return [{ date: loadBucketDay(op.dueDate, today), minutes }];
 }
 
+// Låst — a pending operation whose planned days Planera keeps (Flytta,
+// Samkör, the reservation). ONE predicate for Beläggning's "N låsta" and
+// Strukturvyn's counters.
+export function isLockedOperation(op: Pick<CapacityOperationRow, "operationStatus" | "planLocked">): boolean {
+  return op.operationStatus === "pending" && (op.planLocked ?? false);
+}
+
 // Påbörjad — ONE rule for Planera, Flytta, the replanning after a Byt and
 // the förslag's walk: something reported (OK or scrap) or an open/paused
 // stamp session. Such an operation is under way and starts TODAY whatever
@@ -501,11 +512,14 @@ export function subcontractReadyDate(
   floor: string,
   offDays: ReadonlySet<string>
 ): string {
-  return addWorkingDays(
-    nextWorkingDayOnOrAfter(floor, offDays),
-    ceilDays(Math.max(0, (wc.leadTimeDays ?? 0) + (wc.queueTimeDays ?? 0))),
-    offDays
-  );
+  return addWorkingDays(nextWorkingDayOnOrAfter(floor, offDays), subcontractDays(wc), offDays);
+}
+
+// A lego resource's Ledtid + Kötid in whole working days — the days
+// subcontractReadyDate adds after the floor, and Strukturvyn's text
+// "Lego · N dagar" (ONE expression for both).
+export function subcontractDays(wc: { leadTimeDays?: number | null; queueTimeDays?: number | null }): number {
+  return ceilDays(Math.max(0, (wc.leadTimeDays ?? 0) + (wc.queueTimeDays ?? 0)));
 }
 
 // The walk every reader of the chain makes, so none of them can count the
@@ -1028,6 +1042,14 @@ export function computeCapacity(
     weeks,
     days,
     groups,
-    summary: { plannedAt, overloadedCells, overloadedDays, lateOrders, unplannedOrders, resourceSuggestions },
+    summary: {
+      plannedAt,
+      overloadedCells,
+      overloadedDays,
+      lateOrders,
+      unplannedOrders,
+      resourceSuggestions,
+      lockedOperations: input.operations.filter(isLockedOperation).length,
+    },
   };
 }

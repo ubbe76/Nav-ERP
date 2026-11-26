@@ -294,3 +294,25 @@ export const articleForecastUpdateSchema = z.object({
     .refine((months) => new Set(months.map((m) => m.month)).size === months.length, { message: "each month at most once" }),
 });
 export type ArticleForecastUpdateInput = z.infer<typeof articleForecastUpdateSchema>;
+
+// GET /planning/structure — Strukturvyn (planeringsverktyget etapp 4): ONE
+// order's whole tree, opened on a tillverkningsorder or on a kundorder —
+// exactly one of the two.
+export const structureQuerySchema = z
+  .object({ manufacturingOrderId: z.string().uuid().optional(), salesOrderId: z.string().uuid().optional() })
+  .refine((q) => (q.manufacturingOrderId ? 1 : 0) + (q.salesOrderId ? 1 : 0) === 1, {
+    message: "exactly one of manufacturingOrderId and salesOrderId",
+  });
+export type StructureQuery = z.infer<typeof structureQuerySchema>;
+
+// POST /planning/unlock-orders — Lås upp hela ordern (one TO) / Lås upp
+// strukturen (every TO of the shown tree). Idempotent, so no `expected`:
+// removing a lock can never hurt. Each TO at most once.
+export const unlockOrdersSchema = z.object({
+  manufacturingOrderIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(200)
+    .refine((ids) => new Set(ids).size === ids.length, { message: "A manufacturing order may only be listed once" }),
+});
+export type UnlockOrdersInput = z.infer<typeof unlockOrdersSchema>;

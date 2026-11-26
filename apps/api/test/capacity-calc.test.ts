@@ -671,6 +671,7 @@ describe("computeCapacity — planned operations", () => {
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-u", orderNumber: "PO-U" }],
       resourceSuggestions: [],
+      lockedOperations: 1,
     });
   });
 
@@ -773,6 +774,7 @@ describe("computeCapacity — planned operations", () => {
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-1", orderNumber: "PO-1" }],
       resourceSuggestions: [],
+      lockedOperations: 0,
     });
   });
 });

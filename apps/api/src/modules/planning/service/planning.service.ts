@@ -16,6 +16,8 @@ import type {
   RunPlanOrderInput,
   RunPlanPdfQuery,
   RunPlanQuery,
+  StructureQuery,
+  UnlockOrdersInput,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { round4, roundToDecimals, roundUpToMultiple, SALES_ORDER_EDITABLE_STATUSES } from "@navet/shared";
@@ -71,6 +73,7 @@ import {
   mondayOf,
   capacityHorizon,
   computeCapacity,
+  isLockedOperation,
   orderPlanStatus,
   operationStarted,
   plannedDateRange,
@@ -133,6 +136,18 @@ import {
 } from "./run-plan.js";
 import { coRunOrder, coRunRunOrder, groupRunPlanByMaterial, planCoRun, type CoRunPlan, type CoRunResult } from "./co-run.js";
 import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
+import {
+  buildStructureTree,
+  exclusiveOrderIds,
+  nextStructureLevel,
+  structureDemands,
+  STRUCTURE_MAX_DEPTH,
+  type StructureDemand,
+  type StructureInput,
+  type StructureOrderFacts,
+  type StructureResult,
+  type StructureRootRow,
+} from "./structure-tree.js";
 import { isCoRunMaterial, linkedOperationMaterials } from "../../manufacturing/service/operation-materials.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
 import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
@@ -1692,10 +1707,18 @@ export function createPlanningService(
   // `dbc`: Skapa saknade halvfabrikat pegs under the plan lock in its own
   // transaction (undefined = the plain db, as every other read).
   async function orderPlanSummaries(orderIds: string[], dbc?: Tx): Promise<Map<string, OrderPlanSummary>> {
+    return (await loadOrderPlans(orderIds, dbc)).summaries;
+  }
+  // The load behind the summaries, with what it read: the orders' operations
+  // and the plan world (resources, full-day holidays out to `horizonTo`).
+  // Strukturvyn draws its bars from the very operations Sen was decided on —
+  // ONE loadCapacityInput for all of a tree's TOs. `world` is null when
+  // there is nothing to load.
+  async function loadOrderPlans(orderIds: string[], dbc?: Tx) {
     const summaries = new Map<string, OrderPlanSummary>();
-    if (orderIds.length === 0) return summaries;
     const today = todayFn();
     const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
+    if (orderIds.length === 0) return { summaries, operations: [] as CapacityOperationRow[], world: null, horizonTo };
     const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { orderIds });
     const world = planWorldOf(capacity, today);
     const byOrder = new Map<string, CapacityOperationRow[]>();
@@ -1713,7 +1736,7 @@ export function createPlanningService(
         plannedFinish: status.planned ? status.plannedFinish : null,
       });
     }
-    return summaries;
+    return { summaries, operations: capacity.operations, world, horizonTo };
   }
 
   // --- Pegging (#9) ----------------------------------------------------
@@ -1748,6 +1771,9 @@ export function createPlanningService(
   };
   type PeggedParents = PeggedArticles & {
     parents: CoverageParentsLoad["orders"];
+    // Every given TO that exists, whatever its status (`parents` are the
+    // open ones) — Strukturvyn draws a planned or closed TO as a node.
+    heads: CoverageParentsLoad["orders"];
     componentsOf: Map<string, string[]>;
   };
   async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}, dbc?: Tx): Promise<PeggedParents> {
@@ -1757,7 +1783,7 @@ export function createPlanningService(
     for (const o of parents) componentsOf.set(o.id, [...(load.materialComponents.get(o.id) ?? [])]);
     const articleIds = new Set<string>([...componentsOf.values()].flat());
     if (opts.withParentArticles) for (const o of parents) articleIds.add(o.articleId);
-    return { ...(await pegArticles([...articleIds], dbc)), parents, componentsOf };
+    return { ...(await pegArticles([...articleIds], dbc)), parents, heads: load.orders, componentsOf };
   }
   async function pegArticles(articleIds: string[], dbc?: Tx, extraOrderIds: string[] = []): Promise<PeggedArticles> {
     const today = todayFn();
@@ -1965,6 +1991,26 @@ export function createPlanningService(
     return out;
   }
   const supplyOf = (pegging: Pegging, allocation: PegAllocation) => pegging.supplies.find((s) => s.id === allocation.supplyId)!;
+  // Går till: where a TO's own output goes — the demands its supply row
+  // covers in its own article's pegging — and what is left for stock. The TO
+  // card's coverage and Strukturvyn's root share it.
+  function goesToOf(own: Pegging | undefined, manufacturingOrderId: string): { goesTo: CoverageGoesTo[]; surplus: number } {
+    const supply = own?.supplies.find((s) => s.id === `mo:${manufacturingOrderId}`);
+    const goesTo: CoverageGoesTo[] = (supply?.allocations ?? []).map((a) => {
+      const demand = own!.demands.find((d) => d.id === a.demandId)!;
+      return {
+        kind: (demand.row?.kind as CoverageGoesTo["kind"] | undefined) ?? "stock",
+        documentId: demand.row?.documentId ?? null,
+        documentNumber: demand.row?.documentNumber ?? null,
+        partner: demand.row?.partner ?? null,
+        needDate: demand.date,
+        quantity: a.quantity,
+        late: a.late,
+        daysLate: a.daysLate,
+      };
+    });
+    return { goesTo, surplus: supply?.surplus ?? 0 };
+  }
 
   // --- Körplanens och dagplanens extras ----------------------------------
   // What the körplan and the dagplan show per listed operation beyond the
@@ -2275,10 +2321,17 @@ export function createPlanningService(
   }
 
   async function componentLateOrders(orderIds: string[]): Promise<Set<string>> {
+    return (await pegLateParents(orderIds)).late;
+  }
+  // The same answer with the batch it was read from (null = nothing to
+  // peg): Strukturvyn's first TO level under a kundorder is exactly the TOs
+  // Leveransläget asked about, so it draws them from this world instead of
+  // pegging them a second time.
+  async function pegLateParents(orderIds: string[]): Promise<{ late: Set<string>; world: PeggedParents | null }> {
     const ids = [...new Set(orderIds)];
-    if (ids.length === 0) return new Set();
+    if (ids.length === 0) return { late: new Set(), world: null };
     const world = await pegParents(ids);
-    return new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id));
+    return { late: new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id)), world };
   }
 
   // --- Leveransläge (planeringsverktyget etapp 3) -------------------------
@@ -2299,9 +2352,23 @@ export function createPlanningService(
   // ("none"). Unknown ids are absent.
   type DeliveryOutlookEntry = { order: OutlookOrderHead; rows: OutlookRow[]; outlook: OrderOutlook };
   async function deliveryOutlooks(orderIds: string[] | "open"): Promise<Map<string, DeliveryOutlookEntry>> {
+    return (await loadDeliveryOutlooks(orderIds)).entries;
+  }
+  // The same answer with the worlds it was computed in: the ordinary rows'
+  // pegging (null when no order was found), the batch behind Halvfabrikat
+  // sent — every allocated TO pegged as a parent (null without any) — and
+  // each row's article type. Strukturvyn reads the rows' exclusive TOs from
+  // the very peggings the allocations came from, and its first TO level
+  // from the allocated TOs' batch.
+  async function loadDeliveryOutlooks(orderIds: string[] | "open"): Promise<{
+    entries: Map<string, DeliveryOutlookEntry>;
+    world: PeggedArticles | null;
+    allocatedWorld: PeggedParents | null;
+    articleTypeOfRow: Map<string, "manufactured" | "purchased" | "service">;
+  }> {
     const loaded = await repo.outlookRows(orderIds);
     const result = new Map<string, DeliveryOutlookEntry>();
-    if (loaded.length === 0) return result;
+    if (loaded.length === 0) return { entries: result, world: null, allocatedWorld: null, articleTypeOfRow: new Map() };
     // Tjänsteartiklar have no stock and no outlook.
     const lines = loaded.flatMap((l) => (l.row && l.row.articleType !== "service" ? [{ order: l.order, row: l.row }] : []));
 
@@ -2382,7 +2449,7 @@ export function createPlanningService(
 
     const allocatedOrderIds = new Set<string>();
     for (const d of drafts) for (const a of d.allocations) if (a.kind === "manufacturing_order" && a.documentId) allocatedOrderIds.add(a.documentId);
-    const componentLate = await componentLateOrders([...allocatedOrderIds]);
+    const { late: componentLate, world: allocatedWorld } = await pegLateParents([...allocatedOrderIds]);
 
     const rowsByOrder = new Map<string, OutlookRow[]>();
     const draftByRow = new Map(drafts.map((d) => [d.line.row.rowId, d]));
@@ -2428,13 +2495,145 @@ export function createPlanningService(
         outlook: orderOutlook(rows, l.order.promisedDate),
       });
     }
-    return result;
+    return { entries: result, world, allocatedWorld, articleTypeOfRow: new Map(lines.map((l) => [l.row.rowId, l.row.articleType])) };
   }
 
   // Leverans i fara (S18): the open kundorder with a row that is Sen, Saknar
   // täckning or covered by a TO with Halvfabrikat sent.
   async function deliveryRiskOrderIds(): Promise<string[]> {
     return [...(await deliveryOutlooks("open")).values()].filter((e) => e.outlook.atRisk).map((e) => e.order.salesOrderId);
+  }
+
+  // --- Strukturvy (planeringsverktyget etapp 4) ---------------------------
+  // ONE order's whole tree (structure-tree.ts owns the drawing; nothing is
+  // stored and no rule is new). The loads, whatever the size of the tree:
+  //   1. the root — a kundorder: loadDeliveryOutlooks([id]) (Leveransläget's
+  //      rows, and its pegging for the rows' exclusive TOs); a TO: its own
+  //      level below, with its article pegged too (Går till);
+  //   2. ONE pegParents per TO level — the level's TOs are the TO supplies
+  //      in the level above that are not expanded yet (the first level
+  //      under a kundorder is the batch Leveransläget already pegged for
+  //      Halvfabrikat sent — it is not pegged twice). The levels are
+  //      sequential (the next one is unknown until this one is pegged), at
+  //      most down to TO depth STRUCTURE_MAX_DEPTH: the deepest drawn level
+  //      is loaded too, for its heads and so the depth flag is exact;
+  //   3. ONE loadOrderPlans for every TO in the tree (the operations, Sen
+  //      and the planned finish from the same rows) and ONE
+  //      stampedOperationIds.
+  // A planned, closed or done TO is a node without children, like coverage.
+  async function getStructure(query: StructureQuery): Promise<StructureResult> {
+    const today = todayFn();
+    const demandsByOrder = new Map<string, StructureDemand[]>();
+    const orders = new Map<string, StructureOrderFacts>();
+    const expanded = new Set<string>();
+    // One pegged level: every TO's head, its material rows with what covers
+    // them and Halvfabrikat sent — all from the level's own world.
+    const addLevel = (ids: string[], world: PeggedParents) => {
+      const headById = new Map(world.heads.map((h) => [h.id, h]));
+      for (const id of ids) {
+        expanded.add(id);
+        const demands = structureDemands(
+          id,
+          parentDemands(world, id).map((d) => ({ article: world.overviews.get(d.articleId)!.article, pegging: d.pegging, demand: d.demand }))
+        );
+        demandsByOrder.set(id, demands);
+        const head = headById.get(id);
+        if (!head) continue;
+        orders.set(id, {
+          manufacturingOrderId: id,
+          orderNumber: head.orderNumber,
+          orderStatus: head.status,
+          articleId: head.articleId,
+          articleNumber: head.articleNumber,
+          articleName: head.articleName,
+          remainingQuantity: Math.max(0, round4(head.quantity - head.received)),
+          dueDate: head.dueDate,
+          plan: null, // set from the ONE capacity load below
+          componentLate: isComponentLate(world, id),
+        });
+      }
+    };
+
+    let root: StructureInput["root"];
+    // The TOs of the next level to peg and their depth (TO levels below the root).
+    let level: string[];
+    let depth = 1;
+    if (query.manufacturingOrderId) {
+      const id = query.manufacturingOrderId;
+      const world = await pegParents([id], { withParentArticles: true });
+      const head = world.heads.find((h) => h.id === id);
+      if (!head) throw new ManufacturingOrderNotFoundError(id);
+      addLevel([id], world);
+      // A TO that is not open has no own article in the world: no Går till.
+      root = { kind: "manufacturing_order", manufacturingOrderId: id, goesTo: goesToOf(world.peggings.get(head.articleId), id).goesTo };
+      level = nextStructureLevel(demandsByOrder.get(id) ?? [], expanded);
+    } else {
+      const id = query.salesOrderId!;
+      const loaded = await loadDeliveryOutlooks([id]);
+      const entry = loaded.entries.get(id);
+      if (!entry) throw new SalesOrderNotFoundError(id);
+      const rows: StructureRootRow[] = entry.rows.map((row) => {
+        const allocated = row.allocations.flatMap((a) => (a.kind === "manufacturing_order" && a.documentId ? [a.documentId] : []));
+        const pegging = loaded.world?.peggings.get(row.articleId);
+        const article = loaded.world?.overviews.get(row.articleId)?.article;
+        return {
+          row,
+          manufacturable: loaded.articleTypeOfRow.get(row.salesOrderRowId) === "manufactured",
+          // A configured row's linked TOs are all its own (S19); an ordinary
+          // row asks moveCandidates on the pegging its allocations came from.
+          exclusiveOrderIds: row.configured
+            ? new Set(allocated)
+            : pegging && article
+              ? exclusiveOrderIds(pegging, article, (d) => d.id === `so:${row.salesOrderRowId}`)
+              : new Set<string>(),
+        };
+      });
+      root = {
+        kind: "sales_order",
+        salesOrderId: id,
+        orderNumber: entry.order.orderNumber,
+        customerName: entry.order.customerName,
+        outlook: entry.outlook,
+        rows,
+      };
+      // The rows' TOs (depth 1) are the batch behind Halvfabrikat sent.
+      const first = [
+        ...new Set(entry.rows.flatMap((r) => r.allocations.flatMap((a) => (a.kind === "manufacturing_order" && a.documentId ? [a.documentId] : [])))),
+      ];
+      level = first;
+      if (loaded.allocatedWorld && first.length > 0) {
+        addLevel(first, loaded.allocatedWorld);
+        level = nextStructureLevel(first.flatMap((x) => demandsByOrder.get(x) ?? []), expanded);
+        depth = 2;
+      }
+    }
+    for (; level.length > 0 && depth <= STRUCTURE_MAX_DEPTH; depth += 1) {
+      const ids = level;
+      addLevel(ids, await pegParents(ids));
+      level = nextStructureLevel(
+        ids.flatMap((id) => demandsByOrder.get(id) ?? []),
+        expanded
+      );
+    }
+
+    const plans = await loadOrderPlans([...expanded]);
+    for (const [id, facts] of orders) facts.plan = plans.summaries.get(id) ?? null;
+    const stamped = plans.operations.length > 0 ? await repo.stampedOperationIds() : new Set<string>();
+    const input: Omit<StructureInput, "offDays"> = {
+      today,
+      root,
+      demandsByOrder,
+      orders,
+      operations: plans.operations,
+      workCenters: plans.world?.workCenters ?? new Map<string, PlanWorkCenter>(),
+      stamped,
+    };
+    // The axis' days off: the capacity load's full-day holidays reach the
+    // plan horizon. Only a tree without any open TO, or one whose axis ends
+    // beyond the horizon, reads the holidays for its own axis.
+    const tree = buildStructureTree({ ...input, offDays: plans.world?.offDays ?? new Set<string>() });
+    if (plans.world && tree.axis.to <= plans.horizonTo) return tree;
+    return buildStructureTree({ ...input, offDays: new Set(await repo.fullDayHolidaysBetween(tree.axis.from, tree.axis.to)) });
   }
 
   // --- Skapa saknade halvfabrikat (pegging #9, etapp 3) -------------------
@@ -3681,6 +3880,46 @@ export function createPlanningService(
       return { operation: unlocked.row };
     },
 
+    // Lås upp hela ordern / Lås upp strukturen (S27): every locked pending
+    // operation of the given TOs, in ONE transaction. Lock order as every
+    // writer of the plan: production_plan (advisory) → the operations FOR
+    // UPDATE in id order — never the order row. Idempotent, so no
+    // `expected`; the days stay until the next Planera, like Lås upp. An
+    // unknown TO refuses the whole request (404, nothing written).
+    // Händelselogg after commit, one row per TO that actually had a lock.
+    async unlockOrders(
+      input: UnlockOrdersInput,
+      userId: string | null
+    ): Promise<{ unlocked: { manufacturingOrderId: string; orderNumber: string; operations: number }[] }> {
+      const ids = input.manufacturingOrderIds;
+      const result = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const loaded = await repo.lockOrdersOperations(tx, ids);
+        const numberOf = new Map(loaded.orders.map((o) => [o.manufacturingOrderId, o.orderNumber]));
+        for (const id of ids) if (!numberOf.has(id)) throw new ManufacturingOrderNotFoundError(id);
+        const locked = loaded.operations.filter(isLockedOperation);
+        await repo.setOperationLocks(tx, locked.map((op) => op.moOperationId), false);
+        // In the request's order.
+        return ids.map((id) => ({
+          manufacturingOrderId: id,
+          orderNumber: numberOf.get(id)!,
+          sequenceNos: locked.filter((op) => op.manufacturingOrderId === id).map((op) => op.sequenceNo).sort((a, b) => a - b),
+        }));
+      });
+      for (const order of result) {
+        if (order.sequenceNos.length === 0) continue;
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: order.orderNumber,
+          action: "order_plan_unlocked",
+          detail: { operations: order.sequenceNos.map((n) => `op ${n}`).join(", "), count: order.sequenceNos.length },
+          userId,
+        });
+      }
+      return { unlocked: result.map(({ sequenceNos, ...order }) => ({ ...order, operations: sequenceNos.length })) };
+    },
+
+    getStructure,
     planNewOrderInTx,
     replanOrderInTx,
     orderPlanSummaries,
@@ -3748,28 +3987,14 @@ export function createPlanningService(
       });
       materials.sort((a, b) => a.articleNumber.localeCompare(b.articleNumber, "sv", { numeric: true }) || a.rowId.localeCompare(b.rowId));
 
-      const own = world.peggings.get(parent.articleId);
-      const supply = own?.supplies.find((s) => s.id === `mo:${parent.id}`);
-      const goesTo: CoverageGoesTo[] = (supply?.allocations ?? []).map((a) => {
-        const demand = own!.demands.find((d) => d.id === a.demandId)!;
-        return {
-          kind: (demand.row?.kind as CoverageGoesTo["kind"] | undefined) ?? "stock",
-          documentId: demand.row?.documentId ?? null,
-          documentNumber: demand.row?.documentNumber ?? null,
-          partner: demand.row?.partner ?? null,
-          needDate: demand.date,
-          quantity: a.quantity,
-          late: a.late,
-          daysLate: a.daysLate,
-        };
-      });
+      const { goesTo, surplus } = goesToOf(world.peggings.get(parent.articleId), parent.id);
       return {
         manufacturingOrderId,
         orderNumber: parent.orderNumber,
         status: parent.status,
         materials,
         goesTo,
-        surplus: supply?.surplus ?? 0,
+        surplus,
         componentLate: isComponentLate(world, parent.id),
         moves: await componentMoves(world, parent),
       };

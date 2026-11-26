@@ -17,6 +17,8 @@ import {
   runPlanPdfQuerySchema,
   runPlanOrderSchema,
   runPlanQuerySchema,
+  structureQuerySchema,
+  unlockOrdersSchema,
   type CoRunInput,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
@@ -490,6 +492,35 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return await service.unlockOperation(req.params.opId, req.user!.id);
     } catch (err) {
       if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Strukturvyn (etapp 4): one order's whole tree with the planned days,
+  // opened on a TO or a kundorder (exactly one of the two, else 400). Read
+  // like a TO (MO_READ — the TO card already shows the kundorder number and
+  // the customer to the same profiles); a GET, so a read-only account may
+  // read it. No prices in the answer.
+  app.get("/planning/structure", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = structureQuerySchema.parse(req.query);
+    try {
+      return await service.getStructure(query);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError || err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Lås upp hela ordern / Lås upp strukturen (S27): the locks of the given
+  // TOs' operations removed; the days stay until the next Planera.
+  // Idempotent. Module default write = tillverkning; 404 for a TO that does
+  // not exist (nothing written).
+  app.post("/planning/unlock-orders", async (req, reply) => {
+    const input = unlockOrdersSchema.parse(req.body);
+    try {
+      return await service.unlockOrders(input, req.user!.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
   });

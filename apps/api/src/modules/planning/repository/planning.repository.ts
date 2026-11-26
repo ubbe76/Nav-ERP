@@ -211,7 +211,10 @@ export interface CoverageParentsLoad {
     status: ManufacturingOrderStatus;
     articleId: string;
     articleNumber: string;
+    articleName: string;
     quantity: number;
+    // Inlevererat so far (Strukturvyn's rest = quantity − received).
+    received: number;
     dueDate: string | null;
   }[];
   // Per released/in-progress TO: the component articles with rest.
@@ -1607,6 +1610,32 @@ export function createPlanningRepository(db: Db) {
       }));
     },
 
+    // Lås upp hela ordern / strukturen (S27): the given TOs' heads (a plain
+    // read — the order row is NEVER locked here: advisory → operations is
+    // the plan's lock order) and ALL their operations FOR UPDATE in id
+    // order, with what decides whether there is a lock to remove. A TO that
+    // does not exist is absent from `orders`.
+    async lockOrdersOperations(tx: Tx, orderIds: string[]) {
+      if (orderIds.length === 0) return { orders: [], operations: [] };
+      const orders = await tx
+        .select({ manufacturingOrderId: manufacturingOrders.id, orderNumber: manufacturingOrders.orderNumber })
+        .from(manufacturingOrders)
+        .where(inArray(manufacturingOrders.id, orderIds));
+      const operations = await tx
+        .select({
+          moOperationId: moOperations.id,
+          manufacturingOrderId: moOperations.manufacturingOrderId,
+          sequenceNo: moOperations.sequenceNo,
+          operationStatus: moOperations.status,
+          planLocked: moOperations.planLocked,
+        })
+        .from(moOperations)
+        .where(inArray(moOperations.manufacturingOrderId, orderIds))
+        .orderBy(moOperations.id)
+        .for("update");
+      return { orders, operations };
+    },
+
     // Samkör's locks: ONE UPDATE for all of them. The caller only passes
     // operations that have a plan (the CHECK forbids a lock without days).
     async setOperationLocks(tx: Tx, ids: string[], locked: boolean): Promise<void> {
@@ -1777,7 +1806,9 @@ export function createPlanningRepository(db: Db) {
           status: manufacturingOrders.status,
           articleId: manufacturingOrders.articleId,
           articleNumber: articles.articleNumber,
+          articleName: articles.name,
           quantity: manufacturingOrders.quantity,
+          received: manufacturingOrders.quantityReceived,
           dueDate: manufacturingOrders.dueDate,
         })
         .from(manufacturingOrders)
@@ -1801,7 +1832,7 @@ export function createPlanningRepository(db: Db) {
         if (!list.includes(m.componentArticleId)) list.push(m.componentArticleId);
         materialComponents.set(m.manufacturingOrderId, list);
       }
-      return { orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity) })), materialComponents };
+      return { orders: orders.map((o) => ({ ...o, quantity: Number(o.quantity), received: Number(o.received) })), materialComponents };
     },
 
     // The phantom articles — with loadBomEdges the whole demand structure an

@@ -5974,6 +5974,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   component_orders_created: "Halvfabrikat skapade",
   operation_moved: "Operation flyttad",
   operation_unlocked: "Operation upplåst",
+  order_plan_unlocked: "Planeringen upplåst",
   run_order_changed: "Körordning ändrad",
   co_run: "Operationer samkörda",
   started: "Startad",
@@ -7845,3 +7846,119 @@ export interface CoRunResult {
 }
 
 // --- Strukturvy (planeringsverktyget etapp 4) --------------------------------
+// GET /planning/structure?manufacturingOrderId=|salesOrderId= — one order's
+// whole tree (structure-tree.ts in the API). Derived at every read.
+export interface StructureOperation {
+  moOperationId: string;
+  sequenceNo: number;
+  description: string | null;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  status: "pending" | "done";
+  subcontract: boolean;
+  // Lego: Ledtid + Kötid in whole working days ("Lego · N dagar"); null otherwise.
+  subcontractDays: number | null;
+  started: boolean;
+  remainingHours: number;
+  planLocked: boolean;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  // Hours per day, a passed day clamped to today. Empty for lego, a done
+  // operation and an unplanned undated one.
+  days: { date: string; hours: number }[];
+}
+
+// The coupling to the parent (the material row or the kundorder row).
+export interface StructureLink {
+  quantity: number;
+  needDate: string | null;
+  late: boolean;
+  undated: boolean;
+  daysLate: number;
+  exclusive: boolean;
+}
+
+export type StructureNode =
+  | { kind: "sales_row"; id: string; parentId: null; level: 0; row: OutlookRow; orderNumber: string; customerName: string }
+  | {
+      kind: "order";
+      id: string;
+      parentId: string | null;
+      level: number;
+      manufacturingOrderId: string;
+      orderNumber: string;
+      orderStatus: string;
+      articleId: string;
+      articleNumber: string;
+      articleName: string;
+      remainingQuantity: number;
+      dueDate: string | null;
+      plannedStartDate: string | null;
+      plannedEndDate: string | null;
+      plannedFinish: string | null;
+      late: boolean;
+      componentLate: boolean;
+      link: StructureLink | null; // null on the root
+      repeatOf: string | null; // the id of the node where the TO is drawn
+      lockedOperations: number;
+      operations: StructureOperation[];
+    }
+  | {
+      kind: "material";
+      id: string;
+      parentId: string;
+      level: number;
+      materialRowId: string;
+      articleId: string;
+      articleNumber: string;
+      articleName: string;
+      articleType: "manufactured" | "purchased" | "service";
+      needDate: string | null;
+      quantity: number;
+      uncovered: number;
+      fromStockOnly: boolean;
+    }
+  | {
+      kind: "supply";
+      id: string;
+      parentId: string;
+      level: number;
+      supply: "stock" | "purchase_order";
+      documentId: string | null;
+      documentNumber: string | null;
+      quantity: number;
+      readyDate: string | null;
+      late: boolean;
+      undated: boolean;
+      daysLate: number;
+      isDraft: boolean;
+    }
+  | { kind: "missing"; id: string; parentId: string; level: number; quantity: number; manufacturable: boolean };
+
+export interface StructureAxisDay {
+  date: string;
+  isoWeek: number;
+  weekday: number; // ISO: 1 = Monday … 7 = Sunday
+  off: boolean; // Saturday, Sunday or a full-day holiday
+}
+
+export interface StructureResult {
+  today: string;
+  root:
+    | { kind: "sales_order"; salesOrderId: string; orderNumber: string; customerName: string; outlook: OrderOutlook }
+    | { kind: "manufacturing_order"; manufacturingOrderId: string; orderNumber: string };
+  // Flat, depth first, with parentId/level.
+  nodes: StructureNode[];
+  // Only with a TO at the top: one level up.
+  goesTo: CoverageGoesTo[];
+  axis: { from: string; to: string; days: StructureAxisDay[] };
+  // cycle = the article numbers where the guard stopped the tree.
+  truncated: { depth: boolean; nodes: boolean; cycle: string[] };
+  totals: { orders: number; lateOrders: number; componentLate: number; lockedOperations: number; missing: number };
+}
+
+// POST /planning/unlock-orders — Lås upp hela ordern / Lås upp strukturen.
+export interface UnlockOrdersResult {
+  unlocked: { manufacturingOrderId: string; orderNumber: string; operations: number }[];
+}
