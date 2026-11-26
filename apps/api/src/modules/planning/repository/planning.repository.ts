@@ -36,6 +36,7 @@ import {
   stampSessions,
   stockTransactions,
   suppliers,
+  systemSettings,
   timeReports,
   units,
   weekScheduleDays,
@@ -151,6 +152,19 @@ export interface RequirementsLoad extends RequirementsInput {
 // IOs ARE loaded (they net as their own supply bucket), Skickad ones count
 // as ordinary supply (requirements-calc SUPPLY_PO_STATUSES).
 const OPEN_SALES: SalesOrderStatus[] = ["confirmed", "in_production"];
+
+// A TO linked to a kundorder row (linkedOrdersForRows).
+export interface LinkedRowOrder {
+  id: string;
+  orderNumber: string;
+  status: string;
+  quantity: number;
+  received: number;
+  dueDate: string | null;
+}
+// The Fraktartikel's system setting (freight-settings.service.ts owns it;
+// the planning repository only reads which article the freight row has).
+const FREIGHT_ARTICLE_SETTING_KEY = "freight_article_id";
 const OPEN_PO: PurchaseOrderStatus[] = ["draft", "sent", "confirmed", "partially_received"];
 const OPEN_MO: ManufacturingOrderStatus[] = ["planned", "released", "in_progress"];
 // Inquiry (förfrågan) statuses that still represent a live RFQ — cancelled
@@ -1813,6 +1827,113 @@ export function createPlanningRepository(db: Db) {
 
     // --- Leveranstidskontroll -------------------------------------------
 
+    // The TOs linked to a set of kundorder rows, per row, in order number
+    // order — the Leveranstidskontroll's and Leveransläget's configured
+    // rows share it. Cancelled ones count for nothing, as everywhere.
+    async linkedOrdersForRows(rowIds: string[], dbc: Db | Tx = db): Promise<Map<string, LinkedRowOrder[]>> {
+      const byRow = new Map<string, LinkedRowOrder[]>();
+      if (rowIds.length === 0) return byRow;
+      const linked = await dbc
+        .select({
+          rowId: manufacturingOrders.salesOrderRowId,
+          id: manufacturingOrders.id,
+          orderNumber: manufacturingOrders.orderNumber,
+          status: manufacturingOrders.status,
+          quantity: manufacturingOrders.quantity,
+          received: manufacturingOrders.quantityReceived,
+          dueDate: manufacturingOrders.dueDate,
+        })
+        .from(manufacturingOrders)
+        .where(and(inArray(manufacturingOrders.salesOrderRowId, rowIds), ne(manufacturingOrders.status, "cancelled")))
+        .orderBy(manufacturingOrders.orderNumber);
+      for (const l of linked) {
+        if (!l.rowId) continue;
+        byRow.set(l.rowId, [
+          ...(byRow.get(l.rowId) ?? []),
+          { id: l.id, orderNumber: l.orderNumber, status: l.status, quantity: Number(l.quantity), received: Number(l.received), dueDate: l.dueDate },
+        ]);
+      }
+      return byRow;
+    },
+
+    // Leveransläget (delivery-outlook.ts): the order heads and their rows
+    // that are a demand, in ONE query. With a list of ids every one of the
+    // orders comes back — a quote or a delivered order as a head without
+    // rows; with "open" every order in the demand statuses. A row is here
+    // when the artikelöversikt sees it as a demand (order Bekräftad/Under
+    // tillverkning, rest > 0 — buildArticleOverview's `so:<rowId>`), minus
+    // what is not goods: a ställkostnad row and the freight row (the
+    // Fraktartikel, freight-settings.service.ts' key); the service drops the
+    // tjänsteartiklar. Rows in the order card's order. No price columns.
+    async outlookRows(orderIds: string[] | "open", dbc: Db | Tx = db) {
+      if (orderIds !== "open" && orderIds.length === 0) return [];
+      const rows = await dbc
+        .select({
+          salesOrderId: salesOrders.id,
+          orderNumber: salesOrders.orderNumber,
+          orderStatus: salesOrders.status,
+          customerId: salesOrders.customerId,
+          customerName: customers.name,
+          headDeliveryDate: salesOrders.expectedDeliveryDate,
+          customerDelivery: {
+            deliveryWeekdays: customers.deliveryWeekdays,
+            deliveryDayMode: customers.deliveryDayMode,
+            transitDays: customers.transitDays,
+          },
+          rowId: salesOrderRows.id,
+          articleId: salesOrderRows.articleId,
+          articleNumber: articles.articleNumber,
+          articleName: articles.name,
+          articleType: articles.type,
+          // The row's effective Leveransdatum — the day the customer gets
+          // the goods (the service moves it to the ship date).
+          promisedDate: salesRowDeliveryDate,
+          quantityOrdered: salesOrderRows.quantityOrdered,
+          quantityDelivered: salesOrderRows.quantityDelivered,
+          configured: sql<boolean>`${salesOrderRows.configuration} is not null`,
+        })
+        .from(salesOrders)
+        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+        .leftJoin(
+          salesOrderRows,
+          and(
+            eq(salesOrderRows.salesOrderId, salesOrders.id),
+            inArray(salesOrders.status, OPEN_SALES),
+            sql`${salesOrderRows.quantityOrdered} > ${salesOrderRows.quantityDelivered}`,
+            isNull(salesOrderRows.setupForRowId),
+            sql`${salesOrderRows.articleId}::text is distinct from (select ${systemSettings.value} from ${systemSettings} where ${systemSettings.key} = ${FREIGHT_ARTICLE_SETTING_KEY})`
+          )
+        )
+        .leftJoin(articles, eq(articles.id, salesOrderRows.articleId))
+        .where(orderIds === "open" ? inArray(salesOrders.status, OPEN_SALES) : inArray(salesOrders.id, orderIds))
+        .orderBy(salesOrders.orderNumber, salesOrders.id, sql`${salesOrderRows.createdAt}`, sql`${salesOrderRows.id}`);
+      return rows.map((r) => ({
+        order: {
+          salesOrderId: r.salesOrderId,
+          orderNumber: r.orderNumber,
+          orderStatus: r.orderStatus,
+          customerId: r.customerId,
+          customerName: r.customerName,
+          promisedDate: r.headDeliveryDate,
+          customerDelivery: r.customerDelivery,
+        },
+        row:
+          r.rowId === null || r.articleId === null
+            ? null
+            : {
+                rowId: r.rowId,
+                articleId: r.articleId,
+                articleNumber: r.articleNumber!,
+                articleName: r.articleName!,
+                articleType: r.articleType!,
+                promisedDate: r.promisedDate,
+                quantityOrdered: Number(r.quantityOrdered),
+                quantityDelivered: Number(r.quantityDelivered),
+                configured: r.configured,
+              },
+      }));
+    },
+
     // The order a check is run for: its customer and open rows (restantal
     // and configuration). null = no such order.
     async deliveryCheckOrder(salesOrderId: string, dbc: Db | Tx = db) {
@@ -1838,35 +1959,11 @@ export function createPlanningRepository(db: Db) {
       // The TOs linked to the configured rows (a configured row's template
       // has no pool, so its own TOs are netted by uncoveredConfiguredQuantity
       // in the service — an ordinary row's linked TO is supply in the
-      // article overview). Cancelled ones count for nothing, as everywhere.
-      const configuredRowIds = rows.filter((r) => r.configuration !== null).map((r) => r.rowId);
-      const linked =
-        configuredRowIds.length === 0
-          ? []
-          : await dbc
-              .select({
-                rowId: manufacturingOrders.salesOrderRowId,
-                id: manufacturingOrders.id,
-                orderNumber: manufacturingOrders.orderNumber,
-                status: manufacturingOrders.status,
-                quantity: manufacturingOrders.quantity,
-                received: manufacturingOrders.quantityReceived,
-                dueDate: manufacturingOrders.dueDate,
-              })
-              .from(manufacturingOrders)
-              .where(and(inArray(manufacturingOrders.salesOrderRowId, configuredRowIds), ne(manufacturingOrders.status, "cancelled")))
-              .orderBy(manufacturingOrders.orderNumber);
-      const linkedByRow = new Map<
-        string,
-        { id: string; orderNumber: string; status: string; quantity: number; received: number; dueDate: string | null }[]
-      >();
-      for (const l of linked) {
-        if (!l.rowId) continue;
-        linkedByRow.set(l.rowId, [
-          ...(linkedByRow.get(l.rowId) ?? []),
-          { id: l.id, orderNumber: l.orderNumber, status: l.status, quantity: Number(l.quantity), received: Number(l.received), dueDate: l.dueDate },
-        ]);
-      }
+      // article overview).
+      const linkedByRow = await this.linkedOrdersForRows(
+        rows.filter((r) => r.configuration !== null).map((r) => r.rowId),
+        dbc
+      );
       return {
         ...order,
         rows: rows.map((r) => ({

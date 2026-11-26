@@ -7409,6 +7409,49 @@ export interface WorkInProgressReport {
 }
 
 
+// Leveransläge: GET /sales-orders/:id/delivery-outlook — will the order's
+// rows leave on the day they were promised (derived at every read).
+// Quantities are in the article's BASE unit. No prices.
+export type OutlookStatus = "on_time" | "late" | "undated" | "uncovered";
+export interface OutlookAllocation extends CoverageAllocation {
+  componentLate: boolean; // a TO with Halvfabrikat sent
+}
+export interface OutlookRow {
+  salesOrderRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  restQuantity: number;
+  configured: boolean;
+  promisedDate: string | null;
+  promisedShipDate: string | null;
+  allocations: OutlookAllocation[];
+  uncovered: number;
+  readyDate: string | null;
+  estimatedShipDate: string | null;
+  estimatedDeliveryDate: string | null;
+  status: OutlookStatus;
+  daysLate: number;
+  componentLate: boolean;
+  overdue: boolean;
+  atRisk: boolean;
+}
+export interface OrderOutlook {
+  status: OutlookStatus | "none";
+  daysLate: number;
+  atRisk: boolean;
+  promisedDate: string | null;
+  estimatedDeliveryDate: string | null;
+  counts: { late: number; uncovered: number; undated: number; componentLate: number };
+}
+export interface SalesOrderDeliveryOutlook extends OrderOutlook {
+  salesOrderId: string;
+  orderNumber: string;
+  orderStatus: string;
+  today: string;
+  rows: OutlookRow[];
+}
+
 // Pegging (#9): GET /manufacturing-orders/:id/coverage. Quantities are in the
 // component's BASE unit.
 export interface CoverageAllocation {

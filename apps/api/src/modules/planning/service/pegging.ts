@@ -82,9 +82,33 @@ export interface PegOptions {
   offDays?: ReadonlySet<string>;
 }
 
+// A supply's ready date floored at today: a passed date is not done, it is
+// today at the earliest. null = undated.
+export function pegReadyDate(date: string | null, today: string): string | null {
+  return date === null ? null : date < today ? today : date;
+}
+
+// The lateness rule (the header's "Late") for ONE supply against ONE demand
+// date — pegOverview's allocation flags, and Leveransläget's
+// (delivery-outlook.ts) for the allocations it builds itself. `readyDate` is
+// already floored (pegReadyDate).
+export function pegLateness(
+  supply: { kind: PegSupplyKind; readyDate: string | null },
+  demandDate: string | null,
+  offDays: ReadonlySet<string>,
+): { late: boolean; undated: boolean; daysLate: number } {
+  const dated = demandDate !== null && supply.readyDate !== null && supply.kind !== "stock";
+  const late = dated && supply.readyDate! > demandDate!;
+  return {
+    late,
+    undated: demandDate !== null && supply.readyDate === null,
+    daysLate: late ? workingDaysBetween(demandDate!, supply.readyDate!, offDays) : 0,
+  };
+}
+
 export function pegOverview(overview: ArticleOverview, opts: PegOptions): Pegging {
   const offDays = opts.offDays ?? new Set<string>();
-  const floor = (date: string | null) => (date === null ? null : date < opts.today ? opts.today : date);
+  const floor = (date: string | null) => pegReadyDate(date, opts.today);
 
   const supplies: PegSupply[] = [];
   const demands: PegDemand[] = [];
@@ -127,16 +151,12 @@ export function pegOverview(overview: ArticleOverview, opts: PegOptions): Peggin
       }
       const supply = supplies[s]!;
       const quantity = round4(Math.min(need, left));
-      const dated = demand.date !== null && supply.readyDate !== null && supply.kind !== "stock";
-      const late = dated && supply.readyDate! > demand.date!;
       const allocation: PegAllocation = {
         supplyId: supply.id,
         demandId: demand.id,
         quantity,
         readyDate: supply.readyDate,
-        late,
-        undated: demand.date !== null && supply.readyDate === null,
-        daysLate: late ? workingDaysBetween(demand.date!, supply.readyDate!, offDays) : 0,
+        ...pegLateness(supply, demand.date, offDays),
       };
       demand.allocations.push(allocation);
       supply.allocations.push(allocation);

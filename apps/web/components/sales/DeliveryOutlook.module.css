@@ -1,0 +1,112 @@
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.head[data-tone="stopped"] .headText {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+.head[data-tone="delayed"] .headText {
+  color: var(--status-delayed-text);
+  font-weight: 600;
+}
+.headLabel {
+  color: var(--color-text-muted);
+}
+.error {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.toggle {
+  max-width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-pill);
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* The pill may break in a narrow column instead of pushing the table out. */
+.toggle > span:first-child {
+  white-space: normal;
+  min-width: 0;
+}
+.chevron {
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  text-align: left;
+}
+.list li {
+  overflow-wrap: anywhere;
+}
+.late {
+  color: var(--status-stopped-text);
+}
+.note {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* The list opens under the row across the table on a wide screen
+   (Table's rowDetail) and inside the Leveransläge line of the stacked row
+   card on a phone (Table.module.css stacks at 640px) — the row card ends
+   with the prices and the buttons, too far from the mark. */
+.narrowOnly {
+  display: none;
+}
+.wide .list {
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  .narrowOnly {
+    display: block;
+  }
+  .cell {
+    align-items: flex-end;
+  }
+  .cell .list {
+    text-align: right;
+  }
+}

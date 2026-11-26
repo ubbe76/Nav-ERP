@@ -288,6 +288,20 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     }
   });
 
+  // Leveransläge: will the order's rows leave on the day they were
+  // promised (derived from the pegging at every read, nothing stored).
+  // DELIVERY_CHECK like the Leveranstidskontroll — the seller and the
+  // planner ask the same question; a GET, so a read-only account may ask
+  // too. No prices in the answer.
+  app.get<{ Params: { id: string } }>("/sales-orders/:id/delivery-outlook", { config: { access: DELIVERY_CHECK } }, async (req, reply) => {
+    try {
+      return await service.getSalesOrderDeliveryOutlook(req.params.id);
+    } catch (err) {
+      if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
   // Reservationen — Skapa tillverkningsordrar för det som saknas: the check
   // run again under the production_plan lock, one TO per shortage batch
   // planned in the days it booked, and the KO's Förväntat leveransdatum.

@@ -155,6 +155,17 @@ import {
 } from "./due-date-suggestion.js";
 import { uncoveredConfiguredQuantity } from "./configured-coverage.js";
 import {
+  configuredRowCoverage,
+  orderOutlook,
+  outlookRow,
+  type OrderOutlook,
+  type OutlookAllocation,
+  type OutlookOrderHead,
+  type OutlookRow,
+  type SalesOrderDeliveryOutlook,
+} from "./delivery-outlook.js";
+import {
+  deliveryFromShipDate,
   deliveryHolidayWindow,
   effectiveDeliverySettings,
   shipDateFor,
@@ -1719,29 +1730,41 @@ export function createPlanningService(
   // `withParentArticles`: the parents' own articles too (Går till). `dbc`:
   // every load bound to a transaction (Skapa saknade halvfabrikat under the
   // plan lock) — the loads already run one after the other.
-  type PeggedParents = {
+  // pegArticles is the article half on its own (Leveransläget pegs the
+  // kundorder rows' articles without any parent TO): a set of articles'
+  // overviews, their peggings and what they were computed with.
+  type PeggedArticles = {
     today: string;
-    parents: CoverageParentsLoad["orders"];
-    componentsOf: Map<string, string[]>;
     overviews: Map<string, ArticleOverview>;
     peggings: Map<string, Pegging>;
     // What the peggings were computed with — Flytta halvfabrikaten re-pegs a
     // re-dated overview with the same ready dates and holidays.
     readyDates: Map<string, string | null>;
     offDays: Set<string>;
+    // The plan summaries of every TO supply — and of `extraOrderIds`, so a
+    // caller with TOs of its own (Leveransläget's configured rows) shares
+    // the ONE capacity load.
+    summaries: Map<string, OrderPlanSummary>;
+  };
+  type PeggedParents = PeggedArticles & {
+    parents: CoverageParentsLoad["orders"];
+    componentsOf: Map<string, string[]>;
   };
   async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}, dbc?: Tx): Promise<PeggedParents> {
-    const today = todayFn();
     const load = await repo.coverageParents(parentIds, dbc);
     const parents = load.orders.filter((o) => OPEN_MO_STATUSES.has(o.status));
     const componentsOf = new Map<string, string[]>();
     for (const o of parents) componentsOf.set(o.id, [...(load.materialComponents.get(o.id) ?? [])]);
     const articleIds = new Set<string>([...componentsOf.values()].flat());
     if (opts.withParentArticles) for (const o of parents) articleIds.add(o.articleId);
-    const overviews = articleIds.size > 0 ? await loadOverviewInputs([...articleIds], dbc) : new Map<string, ArticleOverviewInput>();
+    return { ...(await pegArticles([...articleIds], dbc)), parents, componentsOf };
+  }
+  async function pegArticles(articleIds: string[], dbc?: Tx, extraOrderIds: string[] = []): Promise<PeggedArticles> {
+    const today = todayFn();
+    const overviews = articleIds.length > 0 ? await loadOverviewInputs(articleIds, dbc) : new Map<string, ArticleOverviewInput>();
     const built = new Map<string, ArticleOverview>([...overviews].map(([id, input]) => [id, buildArticleOverview(input)]));
 
-    const moSupplyIds = new Set<string>();
+    const moSupplyIds = new Set<string>(extraOrderIds);
     const dates: string[] = [today];
     for (const overview of built.values()) {
       for (const row of overview.rows) {
@@ -1766,7 +1789,7 @@ export function createPlanningService(
         ? new Set(await repo.fullDayHolidaysBetween(dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b)), dbc))
         : new Set<string>();
     const peggings = new Map<string, Pegging>([...built].map(([id, overview]) => [id, pegOverview(overview, { today, readyDates, offDays })]));
-    return { today, parents, componentsOf, overviews: built, peggings, readyDates, offDays };
+    return { today, overviews: built, peggings, readyDates, offDays, summaries };
   }
 
   // --- Flytta halvfabrikaten (pegging #9, etapp 2) ------------------------
@@ -2256,6 +2279,162 @@ export function createPlanningService(
     if (ids.length === 0) return new Set();
     const world = await pegParents(ids);
     return new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id));
+  }
+
+  // --- Leveransläge (planeringsverktyget etapp 3) -------------------------
+  // Will the kundorder rows leave on the day they were promised? Derived at
+  // every read from a FIXED number of loads, whatever the number of orders:
+  //   1. repo.outlookRows — the heads and their demand rows, one query;
+  //   2. repo.linkedOrdersForRows — the configured rows' own TOs (S19);
+  //   3. pegArticles — the ordinary rows' articles pegged in one batch, the
+  //      plan summaries of the configured rows' TOs in the same capacity
+  //      load. The row's demand is the pegging's `so:<rowId>` (the overview
+  //      row), so its allocations are the very ones the TO card's Går till
+  //      shows from the other side;
+  //   4. repo.deliveryContext — the delivery defaults and the holidays for
+  //      the ship dates and the estimated deliveries;
+  //   5. componentLateOrders — Halvfabrikat sent for every allocated TO, one
+  //      pegging batch more.
+  // A quote, a delivered order or any other status: a head without rows
+  // ("none"). Unknown ids are absent.
+  type DeliveryOutlookEntry = { order: OutlookOrderHead; rows: OutlookRow[]; outlook: OrderOutlook };
+  async function deliveryOutlooks(orderIds: string[] | "open"): Promise<Map<string, DeliveryOutlookEntry>> {
+    const loaded = await repo.outlookRows(orderIds);
+    const result = new Map<string, DeliveryOutlookEntry>();
+    if (loaded.length === 0) return result;
+    // Tjänsteartiklar have no stock and no outlook.
+    const lines = loaded.flatMap((l) => (l.row && l.row.articleType !== "service" ? [{ order: l.order, row: l.row }] : []));
+
+    const configuredIds = lines.filter((l) => l.row.configured).map((l) => l.row.rowId);
+    const linkedByRow = await repo.linkedOrdersForRows(configuredIds);
+    const linkedOpenIds = [...linkedByRow.values()].flat().map((o) => o.id);
+    const world = await pegArticles([...new Set(lines.filter((l) => !l.row.configured).map((l) => l.row.articleId))], undefined, linkedOpenIds);
+    const today = world.today;
+
+    // The ordinary rows' allocations, before Halvfabrikat sent is known.
+    type Draft = { line: (typeof lines)[number]; promisedShipDate: string | null; allocations: OutlookAllocation[]; uncovered: number };
+    const drafts: Draft[] = [];
+    const dates: string[] = [today];
+    for (const line of lines) {
+      if (line.row.promisedDate) dates.push(line.row.promisedDate);
+      if (line.row.configured) continue;
+      const pegging = world.peggings.get(line.row.articleId);
+      const demand = pegging?.demands.find((d) => d.id === `so:${line.row.rowId}`);
+      // The row came in (or left) between the two reads.
+      if (!pegging || !demand) continue;
+      drafts.push({
+        line,
+        promisedShipDate: demand.date,
+        allocations: demand.allocations.map((a) => {
+          const supply = supplyOf(pegging, a);
+          return {
+            kind: supply.kind,
+            documentId: supply.row?.documentId ?? null,
+            documentNumber: supply.row?.documentNumber ?? null,
+            quantity: a.quantity,
+            readyDate: a.readyDate,
+            late: a.late,
+            undated: a.undated,
+            daysLate: a.daysLate,
+            isDraft: supply.row?.isDraft ?? false,
+            componentLate: false,
+          };
+        }),
+        uncovered: demand.uncovered,
+      });
+    }
+    // A configured row's TO is ready on its planned finish, else its
+    // färdigdatum — the pegging's rule for a TO supply.
+    const linkedReady = (o: { id: string; dueDate: string | null }) => world.summaries.get(o.id)?.plannedFinish ?? o.dueDate;
+    for (const orders of linkedByRow.values()) {
+      for (const o of orders) {
+        const ready = linkedReady(o);
+        if (ready) dates.push(ready);
+      }
+    }
+    for (const d of drafts) for (const a of d.allocations) if (a.readyDate) dates.push(a.readyDate);
+
+    // Transit days are at most 60 working days (toShipDates).
+    const delivery = await repo.deliveryContext(deliveryHolidayWindow(dates, 60));
+    const settingsOf = (line: (typeof lines)[number]) => effectiveDeliverySettings(line.order.customerDelivery, "customer", delivery.defaults);
+    for (const line of lines) {
+      if (!line.row.configured) continue;
+      // The date the row's TO is planned by — shiftToShipDates' rule.
+      const promisedShipDate = line.row.promisedDate ? shipDateFor(line.row.promisedDate, settingsOf(line), delivery.offDays) : null;
+      const coverage = configuredRowCoverage({
+        today,
+        promisedShipDate,
+        quantityOrdered: line.row.quantityOrdered,
+        quantityDelivered: line.row.quantityDelivered,
+        linkedOrders: (linkedByRow.get(line.row.rowId) ?? []).map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          status: o.status,
+          quantity: o.quantity,
+          received: o.received,
+          readyDate: linkedReady(o),
+          componentLate: false,
+        })),
+        offDays: delivery.offDays,
+      });
+      drafts.push({ line, promisedShipDate, allocations: coverage.allocations, uncovered: coverage.uncovered });
+    }
+
+    const allocatedOrderIds = new Set<string>();
+    for (const d of drafts) for (const a of d.allocations) if (a.kind === "manufacturing_order" && a.documentId) allocatedOrderIds.add(a.documentId);
+    const componentLate = await componentLateOrders([...allocatedOrderIds]);
+
+    const rowsByOrder = new Map<string, OutlookRow[]>();
+    const draftByRow = new Map(drafts.map((d) => [d.line.row.rowId, d]));
+    // In the card's row order (the load's), whatever order the drafts were built in.
+    for (const line of lines) {
+      const d = draftByRow.get(line.row.rowId);
+      if (!d) continue;
+      const settings = settingsOf(line);
+      const row = outlookRow({
+        today,
+        row: {
+          salesOrderRowId: line.row.rowId,
+          articleId: line.row.articleId,
+          articleNumber: line.row.articleNumber,
+          articleName: line.row.articleName,
+          restQuantity: round4(line.row.quantityOrdered - line.row.quantityDelivered),
+          configured: line.row.configured,
+          promisedDate: line.row.promisedDate,
+          promisedShipDate: d.promisedShipDate,
+        },
+        allocations: d.allocations.map((a) =>
+          a.kind === "manufacturing_order" && a.documentId && componentLate.has(a.documentId) ? { ...a, componentLate: true } : a
+        ),
+        uncovered: d.uncovered,
+        // The Leveranstidskontroll's last step, for the order's customer.
+        deliver: (shipDate) => deliveryFromShipDate(shipDate, settings, delivery.offDays),
+      });
+      rowsByOrder.set(line.order.salesOrderId, [...(rowsByOrder.get(line.order.salesOrderId) ?? []), row]);
+    }
+    for (const l of loaded) {
+      if (result.has(l.order.salesOrderId)) continue;
+      const rows = rowsByOrder.get(l.order.salesOrderId) ?? [];
+      result.set(l.order.salesOrderId, {
+        order: {
+          salesOrderId: l.order.salesOrderId,
+          orderNumber: l.order.orderNumber,
+          orderStatus: l.order.orderStatus,
+          customerId: l.order.customerId,
+          customerName: l.order.customerName,
+          promisedDate: l.order.promisedDate,
+        },
+        rows,
+        outlook: orderOutlook(rows, l.order.promisedDate),
+      });
+    }
+    return result;
+  }
+
+  // Leverans i fara (S18): the open kundorder with a row that is Sen, Saknar
+  // täckning or covered by a TO with Halvfabrikat sent.
+  async function deliveryRiskOrderIds(): Promise<string[]> {
+    return [...(await deliveryOutlooks("open")).values()].filter((e) => e.outlook.atRisk).map((e) => e.order.salesOrderId);
   }
 
   // --- Skapa saknade halvfabrikat (pegging #9, etapp 3) -------------------
@@ -3507,6 +3686,23 @@ export function createPlanningService(
     orderPlanSummaries,
     operationResourceSuggestions,
     componentLateOrders,
+    deliveryOutlooks,
+    deliveryRiskOrderIds,
+
+    // Leveransläget on the kundorder card. An order that is no demand (a
+    // quote, delivered, …) answers "none" without rows.
+    async getSalesOrderDeliveryOutlook(salesOrderId: string): Promise<SalesOrderDeliveryOutlook> {
+      const entry = (await deliveryOutlooks([salesOrderId])).get(salesOrderId);
+      if (!entry) throw new SalesOrderNotFoundError(salesOrderId);
+      return {
+        salesOrderId,
+        orderNumber: entry.order.orderNumber,
+        orderStatus: entry.order.orderStatus,
+        today: todayFn(),
+        ...entry.outlook,
+        rows: entry.rows,
+      };
+    },
 
     // Pegging (#9) — the TO card's Täcks av / Går till: what covers each of
     // the TO's material needs, and which demands its own output goes to,

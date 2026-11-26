@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { ColumnResizeHandle } from "./ColumnResizeHandle";
 import { ColumnDragGrip } from "./ColumnDragGrip";
 import styles from "./Table.module.css";
@@ -48,6 +48,12 @@ interface TableProps<T extends { id: string }> {
   // into one of its fields (React's onFocus bubbles). Behovsberäkning points
   // the open Artikelöversikt panel at the row's article with it.
   onRowFocus?: (row: T) => void;
+  // An unfolded part under a row, across every column (the kundorder row's
+  // Leveransläge list). null/undefined = nothing is drawn. It scrolls with
+  // the table but its content stays at the left edge. Wide screens only:
+  // in the stacked row cards of a phone it is hidden (it would land after
+  // the card's last line) — the caller shows it inside a cell there.
+  rowDetail?: (row: T) => ReactNode;
 }
 
 // Placeholder widths, varied so the rows don't read as a solid block.
@@ -98,6 +104,7 @@ export function Table<T extends { id: string }>({
   loading = false,
   loadingRows = 5,
   onRowFocus,
+  rowDetail,
 }: TableProps<T>) {
   const gridTemplate = columns.map((c, i) => trackWidth(c.width, i, columns.length)).join(" ");
   const skeleton = loading && rows.length === 0;
@@ -149,22 +156,31 @@ export function Table<T extends { id: string }>({
         ))}
       {skeleton && <span className={styles.srOnly}>Hämtar …</span>}
       {rows.length === 0 && !skeleton && !entryRow && <div className={styles.empty}>{emptyText}</div>}
-      {rows.map((row) => (
-        <div
-          className={styles.row}
-          key={row.id}
-          data-row=""
-          data-highlighted={row.id === highlightedRowId || undefined}
-          onClick={onRowFocus ? () => onRowFocus(row) : undefined}
-          onFocus={onRowFocus ? () => onRowFocus(row) : undefined}
-        >
-          {columns.map((col) => (
-            <div key={col.key} className={styles.cell} data-align={col.align ?? "left"} data-label={col.label}>
-              {renderCell(row, col.key)}
+      {rows.map((row) => {
+        const detail = rowDetail?.(row);
+        return (
+          <Fragment key={row.id}>
+            <div
+              className={styles.row}
+              data-row=""
+              data-highlighted={row.id === highlightedRowId || undefined}
+              onClick={onRowFocus ? () => onRowFocus(row) : undefined}
+              onFocus={onRowFocus ? () => onRowFocus(row) : undefined}
+            >
+              {columns.map((col) => (
+                <div key={col.key} className={styles.cell} data-align={col.align ?? "left"} data-label={col.label}>
+                  {renderCell(row, col.key)}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ))}
+            {detail != null && detail !== false && (
+              <div className={styles.rowDetail}>
+                <div className={styles.rowDetailBody}>{detail}</div>
+              </div>
+            )}
+          </Fragment>
+        );
+      })}
       {entryRow && (
         <div className={styles.entryRow} data-entry-row="">
           {entryCells(columns, entryRow.span).map(({ col, span }) => (

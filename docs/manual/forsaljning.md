@@ -509,6 +509,41 @@ Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är k
 - **Offert (PDF)**, **Orderbekräftelse (PDF)** och **Plocklista (PDF)** (se [Plocklista](#plocklista)) laddar ner dokumenten utan att skicka något; orderbekräftelsen och plocklistan finns bara på orderkortet. Offertens och orderbekräftelsens radtabell har en egen kolumn **Rabatt**; cellen är tom för rader utan rabatt.
 - Kortets utskickshistorik visas under knapparna; hela loggen finns i [System → E-postlogg](/hjalp/system).
 
+## Leveransläge
+
+På kundorderkortet visas **Leveransläge** för en order i status **Bekräftad** eller **Under tillverkning**: kommer raderna att kunna lämna oss den dag som är lovad? Leveransläget syns för den som har behörigheten Försäljning eller Tillverkning. En offert har inget leveransläge — använd **Leveranstidskontroll** för att se när en offert kan levereras.
+
+**Under statusraden** står orderns läge på en rad:
+
+- *Leverans i tid (lovat 4 dec)* — alla rader med rest är täckta i tid.
+- *Beräknad leverans 8 dec (lovat 4 dec) · 3 arbetsdagar sen* — minst en rad blir klar för sent. Datumet är dagen kunden får godset om det skickas den dag den sista raden är klar, räknat med kundens leveransdagar och transportdagar. Kan något datum inte räknas fram för en annan rad står det *Leveransen är 3 arbetsdagar sen*.
+- *Saknar täckning på 1 rad* — det finns varken lager, inköpsorder eller tillverkningsorder för hela restantalet.
+- *Kan inte beräknas — tillgång utan datum* — raden täcks av en inköps- eller tillverkningsorder som saknar datum.
+
+Märket **Halvfabrikat sent** visas bredvid när en tillverkningsorder som täcker en rad väntar på ett halvfabrikat som blir klart för sent. Raden kan då stå som i tid, men tillverkningsorderns plan vet inte om förseningen — se [Täcks av och Går till](/hjalp/tillverkning#tacks-av-och-gar-till).
+
+**I radtabellen** har varje rad med rest ett märke i kolumnen **Leveransläge**:
+
+| Märke | Betyder |
+|---|---|
+| **I tid** | Hela restantalet är täckt och klart senast den dag raden måste skickas. En rad utan leveransdatum som är täckt är alltid i tid. |
+| **Sen N dagar** | Något av det som täcker raden blir klart efter avsändningsdagen. Antalet är arbetsdagar. |
+| **Saknar täckning** | Lager, inköpsordrar och tillverkningsordrar räcker inte till hela restantalet. |
+| **Tillgång utan datum** | Raden täcks av en inköps- eller tillverkningsorder utan datum. |
+
+Klicka på märket för att se vad som täcker raden, en rad per källa: *Lager 6 st*, *TO-1050 · 3 st · klar 3 dec · 2 dagar för sent*, *IO-88 · 6 st · 2 dec (utkast)* och *Saknas 4 st*. Ordernumren är länkar till inköps- respektive tillverkningsordern.
+
+Så räknas det:
+
+- **Avsändningsdagen** är radens leveransdatum (radens eget, annars orderns) flyttat bakåt med kundens transportdagar och leveransdagar — samma dag som artikelöversikten och behovsberäkningen planerar mot.
+- **Klart** är i dag för lager, ankomstdatumet för en inköpsorder och den planerade klar-dagen för en tillverkningsorder (färdigdatumet om den inte är planerad). Ett datum som har passerat räknas som i dag.
+- En tillgång är **i tid** när den är klar senast på avsändningsdagen. Lagret är aldrig sent.
+- Lager, inköpsordrar och tillverkningsordrar fördelas på behoven i datumordning — det tidigaste behovet får först. Spärrade lagerplatser räknas inte.
+- En **konfigurerad rad** (beställningsvara) täcks bara av sina egna tillverkningsordrar, de som är skapade från raden.
+- Tjänsteartiklar, fraktraden och ställkostnadsrader har inget leveransläge, och inte heller en rad som är helt levererad.
+
+Kopplingen är härledd och kan ändras när ett tidigare behov kommer in. Inget sparas: leveransläget räknas om varje gång kortet öppnas, och orderns leveransdatum ändras aldrig automatiskt.
+
 ## Leveranstidskontroll
 
 Leveranstidskontrollen räknar fram den **tidigaste avsändningsdagen** och det **tidigaste leveransdatumet** för en kundorder — utifrån vad som finns i lager, vad som redan är på väg in, ledtiden på material som måste köpas och produktionens lediga tid. Saldo på [spärrade lagerplatser](/hjalp/lager#sparrade-lagerplatser) räknas inte som lager. Den kan köras på en kundorder, på raderna i **Ny kundorder** eller på en fristående sida för artiklar och antal.
