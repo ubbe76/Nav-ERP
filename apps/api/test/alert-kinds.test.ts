@@ -34,6 +34,7 @@ describe("the catalog", () => {
       "invoice_scan_mail_failed",
       "recurring_verification_failed",
       "sales_order_late",
+      "sales_order_delivery_risk",
       "purchase_order_late",
       "manufacturing_order_late",
       "purchase_needed",
@@ -86,6 +87,7 @@ describe("visibleKinds", () => {
       "quote_followup",
       "einvoice_failed",
       "sales_order_late",
+      "sales_order_delivery_risk",
     ]);
     expect(visibleKinds(user(["tillverkning"]))).toEqual(["manufacturing_order_late", "manufacture_needed"]);
     expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative", "batch_expiry"]);

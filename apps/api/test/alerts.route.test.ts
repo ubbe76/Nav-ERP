@@ -130,6 +130,7 @@ describe("GET /alerts", () => {
       "quote_followup",
       "einvoice_failed",
       "sales_order_late",
+      "sales_order_delivery_risk",
       "purchase_order_late",
       "purchase_needed",
       "invoice_scans_pending",

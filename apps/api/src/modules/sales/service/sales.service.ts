@@ -22,6 +22,7 @@ import type {
   OrderRowConfigurationInput,
   PriceListRowInput,
   PriceQuoteQuery,
+  SalesOrderListOutlook,
   SalesOrderStatus,
   SendDocumentEmailInput,
   SendSalesOrderEmailInput,
@@ -55,7 +56,7 @@ import type { RegisterReferenceReader } from "../../register/service/register.se
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import { mailSender, type MailService } from "../../mail/service/mail.service.js";
 import { formatBatchInfo, formatBatchLabel, formatQuantity, formatSerialInfo, type DocumentPdfService, type PalletCardPdfInput } from "../../mail/service/document-pdf.js";
-import { documentLanguageOf, localized, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
+import { documentLanguageOf, localized, splitLateFilter, UNKNOWN_BATCH_LABEL, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import { salesOrderRowVat, salesOrderVatSummary } from "./order-vat.js";
 import {
@@ -319,6 +320,25 @@ export interface ArticleSelfCostReader {
   latestPreCalculationSelfCost(
     articleIds: string[]
   ): Promise<Map<string, { selfCostPerUnit: number; calculationId: string; calculatedAt: string; quantity: number }>>;
+}
+
+// Leverans i fara (leveransläget, planeringsverktyget etapp 3): the kundorder
+// list's filter `status=delivery_risk` and the mark on its rows. Served by
+// the planning service and bound late in app.ts (deliveryRiskRef, like the
+// article module's AbcClassReader) — sales must not depend on planning.
+// Absent (the fixtures): the filter answers an empty list without a query
+// and every row carries deliveryOutlook null.
+// Only a saving: the reader decides (it answers nothing for an order that is
+// no demand), this just spares the call for a page of quotes or closed orders.
+const DELIVERY_OUTLOOK_STATUSES: ReadonlySet<SalesOrderStatus> = new Set(["confirmed", "in_production"]);
+export interface DeliveryRiskReader {
+  // The open kundorder that are Leverans i fara — the same orders as the
+  // alert Kundordrar med leverans i fara — each with its outlook (the load
+  // that finds them has it, so the filtered page asks nothing more).
+  deliveryRiskOutlooks(): Promise<Map<string, SalesOrderListOutlook>>;
+  // The outlook of these orders; an order without one (a quote, delivered,
+  // no demand rows) is absent.
+  outlookByOrder(orderIds: string[]): Promise<Map<string, SalesOrderListOutlook>>;
 }
 
 // Frakt: the live shipment of each delivery (shipping module, injected —
@@ -757,7 +777,9 @@ export function createSalesService(
   rates: ExchangeRateReader | null = null,
   // Kopiera till kund: see SupplierCopyReader above. Optional like rates —
   // only Kopiera till kund reads it.
-  suppliers: SupplierCopyReader | null = null
+  suppliers: SupplierCopyReader | null = null,
+  // Leverans i fara: see DeliveryRiskReader above.
+  deliveryRisk: DeliveryRiskReader | null = null
 ) {
   // Valuta: what a row on an order is priced in — the order's customer, its
   // currency and its rate (SEK at rate 1 for a SEK order). Påslag (#16 etapp
@@ -2078,8 +2100,29 @@ export function createSalesService(
       };
     },
 
+    // `status=delivery_risk` (Leverans i fara) is resolved here from the
+    // planning service's ids and handed to the repository as `onlyIds`, so
+    // paging and `total` stay in SQL (the TO list's Sen works the same way);
+    // with `late` or a real status all apply. Every row carries the order's
+    // deliveryOutlook — one batch for the page's rows that are a demand, or
+    // the filter's own answer.
     async listSalesOrders(query: ListSalesOrdersQuery, today: string = stockholmToday()) {
-      return repo.listSalesOrders(query, today);
+      let outlooks: Map<string, SalesOrderListOutlook> | null = null;
+      let onlyIds: string[] | undefined;
+      if (splitLateFilter(query.status).deliveryRisk) {
+        if (!deliveryRisk) return { rows: [], total: 0 };
+        outlooks = await deliveryRisk.deliveryRiskOutlooks();
+        onlyIds = [...outlooks.keys()];
+      }
+      const result = await repo.listSalesOrders(query, today, { onlyIds });
+      if (!outlooks && deliveryRisk) {
+        const withOutlook = result.rows.filter((r) => DELIVERY_OUTLOOK_STATUSES.has(r.status)).map((r) => r.id);
+        if (withOutlook.length > 0) outlooks = await deliveryRisk.outlookByOrder(withOutlook);
+      }
+      return {
+        rows: result.rows.map((r) => ({ ...r, deliveryOutlook: outlooks?.get(r.id) ?? null })),
+        total: result.total,
+      };
     },
 
     // E3: enriches each row with its derived "I tillverkning" coverage —

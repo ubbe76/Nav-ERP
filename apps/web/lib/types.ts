@@ -2010,6 +2010,8 @@ export interface SalesOrder extends DocumentTermsFields {
   currency: string;
   exchangeRate: string;
   // List-only: earliest effective delivery date among open rows.
+  // Leveransläget (list only): derived at the read, null without one.
+  deliveryOutlook?: SalesOrderListOutlook | null;
   nextDeliveryDate?: string | null;
   expectedDeliveryDate: string | null;
   // Offertuppföljning: created as a quote (not a direct order), Giltig t.o.m.
@@ -7444,6 +7446,13 @@ export interface OrderOutlook {
   estimatedDeliveryDate: string | null;
   counts: { late: number; uncovered: number; undated: number; componentLate: number };
 }
+// The kundorder list's row mark (GET /sales-orders): the order's worst row
+// and Leverans i fara. null = no outlook (a quote, a closed order).
+export interface SalesOrderListOutlook {
+  status: OutlookStatus;
+  daysLate: number;
+  atRisk: boolean;
+}
 export interface SalesOrderDeliveryOutlook extends OrderOutlook {
   salesOrderId: string;
   orderNumber: string;
@@ -7834,3 +7843,5 @@ export interface CoRunResult {
   // The day's places afterwards: the ones already ordered, then the block.
   runOrder: { moOperationId: string; orderNumber: string; sequenceNo: number; selected: boolean }[];
 }
+
+// --- Strukturvy (planeringsverktyget etapp 4) --------------------------------

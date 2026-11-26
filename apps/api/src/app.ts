@@ -133,7 +133,7 @@ import { createRegisterRepository } from "./modules/register/repository/register
 import { createRegisterService } from "./modules/register/service/register.service.js";
 import { registerRoutes } from "./modules/register/routes/register.routes.js";
 import { createSalesRepository } from "./modules/sales/repository/sales.repository.js";
-import { createSalesService, type RowConfigurationReader } from "./modules/sales/service/sales.service.js";
+import { createSalesService, type DeliveryRiskReader, type RowConfigurationReader } from "./modules/sales/service/sales.service.js";
 import { markSalesOrderInProduction } from "./modules/sales/service/production-transition.js";
 import { salesRoutes } from "./modules/sales/routes/sales.routes.js";
 import { resolvePrice, type PriceChainQuery, type VariantPriceReader } from "./modules/sales/service/price-resolver.js";
@@ -205,6 +205,7 @@ import { createPluginsRepository } from "./modules/system/repository/plugins.rep
 import { createPluginDispatcher } from "./modules/system/service/plugin-dispatcher.js";
 import { createPluginsService } from "./modules/system/service/plugins.service.js";
 import { pluginKitRoutes, pluginRoutes } from "./modules/system/routes/plugins.routes.js";
+import { createDeliveryRiskReader } from "./modules/planning/service/delivery-risk.js";
 import { createAlertsRepository } from "./modules/alerts/repository/alerts.repository.js";
 import { createAlertsService } from "./modules/alerts/service/alerts.service.js";
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
@@ -685,6 +686,10 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     variantOf: (id) => rowConfigurationRef.current!.variantOf(id),
     resolveVariant: (t, s, u) => rowConfigurationRef.current!.resolveVariant(t, s, u),
   };
+  // Leverans i fara (leveransläget): served by the planning service, which
+  // is built after the sales service and takes it as a dependency — bound
+  // late like abcClassRef; sales never depends on planning.
+  const deliveryRiskRef: { current: DeliveryRiskReader | null } = { current: null };
   const salesService = createSalesService(
     salesRepository,
     registerService,
@@ -710,7 +715,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // Valuta: today's rate for an order in another currency.
     exchangeRateService,
     // Kopiera till kund: the supplier card's data (purchase module).
-    { supplierCopySource: (id) => purchaseService.supplierCopySource(id) }
+    { supplierCopySource: (id) => purchaseService.supplierCopySource(id) },
+    // Leverans i fara: the list's filter and row mark come from the planning
+    // service, built below — bound late (deliveryRiskRef).
+    {
+      deliveryRiskOutlooks: () => deliveryRiskRef.current!.deliveryRiskOutlooks(),
+      outlookByOrder: (ids) => deliveryRiskRef.current!.outlookByOrder(ids),
+    }
   );
   // Frakt på offert: prices for an order and its freight row — built after
   // salesService, which owns the row rules (setFreightRow).
@@ -899,12 +910,18 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   });
   planReaderRef.current = planningService;
   abcClassRef.current = planningService;
+  const deliveryRiskReader = createDeliveryRiskReader(planningService);
+  deliveryRiskRef.current = deliveryRiskReader;
   // Aviseringar — derived at every read. The behovsberäkning (through its
   // cache) and the TO list's Sen come from the planning service; the
   // "due within N days" window from the system settings.
   const alertsService = createAlertsService({
     repo: createAlertsRepository(database),
-    planning: planningService,
+    planning: {
+      requirementProposals: () => planningService.requirementProposals(),
+      orderPlanSummaries: (ids) => planningService.orderPlanSummaries(ids),
+      deliveryRiskOrders: () => deliveryRiskReader.deliveryRiskOrders(),
+    },
     settings: {
       supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays,
       quoteFollowupDays: async () => (await systemService.getSettings()).alertQuoteFollowupDays,

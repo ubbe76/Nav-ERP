@@ -547,7 +547,7 @@ describe("årsbokslut och avisering", () => {
     await service.import(uploadOf(statementWith([{ direction: "credit", amount: 7, bookingDate: `${BANK_YEAR}-10-15`, acctSvcrRef: "N1", addtlNtryInf: "Ny" }])), { autoMatch: false }, userId);
     const alerts = createAlertsService({
       repo: createAlertsRepository(db),
-      planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
+      planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map(), deliveryRiskOrders: async () => [] },
       settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => `${BANK_YEAR}-10-20`,
     });

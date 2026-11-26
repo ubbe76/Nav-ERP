@@ -310,6 +310,7 @@ export default async function OverviewPage() {
     receivables: alertCard("receivables", "Inga förfallna kundfakturor."),
     payables: alertCard("payables", "Inga leverantörsfakturor att betala just nu."),
     quotes: alertCard("quotes", "Inga offerter att följa upp."),
+    deliveryRisk: alertCard("deliveryRisk", "Inga kundordrar med leverans i fara."),
     deviations: (
       <ListCard
         key="deviations"

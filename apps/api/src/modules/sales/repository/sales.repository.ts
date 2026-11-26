@@ -1320,7 +1320,9 @@ export function createSalesRepository(db: Db) {
     },
 
     // `today` (Stockholm) dates the status filter Sen (late-orders.ts).
-    async listSalesOrders(query: ListSalesOrdersQuery, today: string) {
+    // `onlyIds`: the status filter Leverans i fara, resolved by the service
+    // from the planning service — an empty list means "nothing matches".
+    async listSalesOrders(query: ListSalesOrdersQuery, today: string, opts: { onlyIds?: string[] } = {}) {
       // Nästa leveransdatum: the earliest effective date among rows not
       // fully delivered, else the order's own — same rule as
       // listPurchaseOrders, so one early row shows the order late. Also the
@@ -1356,6 +1358,7 @@ export function createSalesRepository(db: Db) {
       const { statuses, late } = splitLateFilter(query.status);
       if (statuses) conditions.push(inArray(salesOrders.status, statuses));
       if (late) conditions.push(salesOrderLate(today));
+      if (opts.onlyIds) conditions.push(opts.onlyIds.length > 0 ? inArray(salesOrders.id, opts.onlyIds) : sql`false`);
       if (query.kind) conditions.push(sql`${documentKindSql} = ${query.kind}`);
       if (query.deliveryTo) conditions.push(sql`${nextDeliveryDateSql} <= ${query.deliveryTo}::date`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;

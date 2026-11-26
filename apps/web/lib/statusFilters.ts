@@ -13,6 +13,7 @@ import {
   SUPPLIER_INVOICE_STATUS_PILL,
   type SalesOrderStatus,
 } from "./types";
+import { DELIVERY_RISK_FILTER, DELIVERY_RISK_LABEL } from "./deliveryRisk";
 import type { FilterChoice, MultiFilter } from "./listFilter";
 
 function pills(pill: Record<string, { label: string }>, values?: readonly string[]): FilterChoice[] {
@@ -39,7 +40,9 @@ const QUOTE_STATUSES: readonly SalesOrderStatus[] = ["quote", "ordered", "lost",
 export const SALES_ORDER_FILTER: MultiFilter = {
   param: "status",
   options: pills(SALES_ORDER_STATUS_PILL, SALES_ORDER_REGISTER_STATUSES),
-  narrow: [LATE],
+  // Leverans i fara (leveransläget): derived like Sen — a row that is Sen,
+  // Saknar täckning or covered by a TO with Halvfabrikat sent.
+  narrow: [LATE, { value: DELIVERY_RISK_FILTER, label: DELIVERY_RISK_LABEL }],
   finished: { values: ["delivered", "invoiced", "cancelled"], label: FINISHED_LABEL },
 };
 

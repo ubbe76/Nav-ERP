@@ -5,7 +5,7 @@
 // at the end. Status enums are exported as their Swedish label, mirroring the
 // *_STATUS_PILL maps in apps/web/lib/types.ts (there is no server-side
 // equivalent, so the labels are inlined here).
-import type { CsvColumn } from "@navet/shared";
+import { salesOrderOutlookText, type CsvColumn, type SalesOrderListOutlook } from "@navet/shared";
 import type {
   customers,
   invoices,
@@ -68,6 +68,8 @@ type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & {
   customerName: string;
   nextDeliveryDate: string | null;
   lostReasonName: string | null;
+  // Leveransläget — derived by the service for the rows that are a demand.
+  deliveryOutlook: SalesOrderListOutlook | null;
 };
 
 export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
@@ -76,6 +78,8 @@ export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Offertnummer", value: (r) => r.quoteNumber },
   { label: "Kund", value: (r) => r.customerName },
   { label: "Status", value: (r) => SALES_ORDER_STATUS_LABELS[r.status] },
+  // Empty for a quote and a closed order (no outlook). Text, never a price.
+  { label: "Leveransläge", value: (r) => salesOrderOutlookText(r.deliveryOutlook) },
   { label: "Leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },
   { label: "Nästa leveransdatum", value: (r) => r.nextDeliveryDate, format: "date" },
   { label: "Giltig t.o.m.", value: (r) => r.quoteValidUntil, format: "date" },

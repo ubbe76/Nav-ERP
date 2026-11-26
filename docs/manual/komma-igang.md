@@ -195,6 +195,7 @@ Utöver dem kan du lägga till kortet **Favoriter** (dina [favoriter](#favoriter
 | **Leverantörsfakturor att betala** | Samma rader som aviseringen med samma namn | Inköp → Öppna poster |
 | **Offerter att följa upp** | Samma rader som aviseringen med samma namn | Offerter |
 | **Öppna avvikelser** | Öppna reklamationer och avvikelser, de vars **Åtgärd senast** har passerat först | Avvikelser |
+| **Leverans i fara** | Samma rader som aviseringen **Kundordrar med leverans i fara**: kundordrar där en rad är sen, saknar täckning eller väntar på ett sent halvfabrikat ([Leveransläge](/hjalp/forsaljning#leveranslage)) | Kundorder filtrerad på **Leverans i fara** |
 
 Korten visar högst sex rader, och **Visa alla (N)** när listan är längre. En röd prick betyder försenad: leveransdatumet har passerat, fakturan har förfallit, ärendets **Åtgärd senast** har passerat eller resursen är belagd över 100 %. En gul prick betyder i dag, snart eller minst 90 % beläggning. En resurs utan veckoschema visar timmarna utan procent ("inget schema"). Kan ett korts uppgifter inte läsas står det "Kunde inte läsa … just nu." i kortet, och resten av Översikten visas som vanligt.
 
@@ -202,7 +203,7 @@ Dialogen har en rad per kort. Kryssrutan **Visa** bestämmer om kortet visas, oc
 
 **Materialflöde** och **Senaste lagerhändelser** tar hela sidans bredd. Alla andra kort är halva kort: står två sådana efter varandra delar de en rad, och ett ensamt halvt kort tar hela bredden. Checklistan **Kom igång** (för administratörer) ligger kvar överst och styrs av sin egen knapp **Dölj**.
 
-Översikten hämtar bara det korten du valt behöver. Döljer du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram alla aviseringar, vilket gör den snabbare att öppna — korten för fakturor och offerter hämtar då bara sina egna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
+Översikten hämtar bara det korten du valt behöver. Döljer du **Materialflöde** och **Att bevaka** räknar sidan därför inte fram alla aviseringar, vilket gör den snabbare att öppna — korten för fakturor, offerter och leverans i fara hämtar då bara sina egna. Konton med **Endast läsning** kan också anpassa sin egen Översikt.
 
 ## Lista och kort
 

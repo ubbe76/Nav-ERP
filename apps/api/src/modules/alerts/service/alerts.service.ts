@@ -59,6 +59,40 @@ export interface AlertRequirementRow {
 export interface AlertPlanningReader {
   requirementProposals(): Promise<AlertRequirementRow[]>;
   orderPlanSummaries(orderIds: string[]): Promise<Map<string, { late: boolean }>>;
+  // Leverans i fara: the open kundorder at risk (the planning service's
+  // deliveryOutlooks through planning/service/delivery-risk.ts) — the same
+  // orders as the kundorder list's filter.
+  deliveryRiskOrders(): Promise<AlertDeliveryRiskOrder[]>;
+}
+
+// What the row text reads of the order's outlook (OrderOutlook satisfies it).
+export interface AlertDeliveryRiskOrder {
+  orderId: string;
+  orderNumber: string;
+  partnerName: string;
+  outlook: {
+    status: "on_time" | "late" | "undated" | "uncovered" | "none";
+    daysLate: number; // working days
+    promisedDate: string | null;
+    estimatedDeliveryDate: string | null;
+    counts: { uncovered: number };
+  };
+}
+
+// Why the order is at risk, worst first: Saknar täckning, Sen, else
+// Halvfabrikat sent (the only way an order that is not late itself is at
+// risk). Pure.
+export function deliveryRiskText(outlook: AlertDeliveryRiskOrder["outlook"]): string {
+  const promised = outlook.promisedDate ? `lovat ${outlook.promisedDate}` : null;
+  if (outlook.status === "uncovered") {
+    return `Saknar täckning på ${outlook.counts.uncovered} ${outlook.counts.uncovered === 1 ? "rad" : "rader"}`;
+  }
+  if (outlook.status === "late") {
+    const late = outlook.daysLate > 0 ? `Sen ${outlook.daysLate} ${outlook.daysLate === 1 ? "arbetsdag" : "arbetsdagar"}` : "Sen";
+    if (outlook.estimatedDeliveryDate === null) return promised ? `${late} · ${promised}` : late;
+    return `${late} · beräknad leverans ${outlook.estimatedDeliveryDate}${promised ? ` (${promised})` : ""}`;
+  }
+  return promised ? `Halvfabrikat sent · ${promised}` : "Halvfabrikat sent";
 }
 
 export interface AlertSettingsReader {
@@ -202,6 +236,26 @@ export function createAlertsService(deps: {
         secondary: `${daysLateText(r.earliestDate, today)} · leveransdatum ${r.earliestDate}`,
         date: r.earliestDate,
       }));
+    },
+
+    // Leverans i fara: by the promised date, undated last.
+    async sales_order_delivery_risk() {
+      const orders = await planning.deliveryRiskOrders();
+      return orders
+        .map((o) => ({
+          key: o.orderId,
+          severity: "yellow" as const,
+          href: `/forsaljning/ordrar/${o.orderId}`,
+          primary: `${o.orderNumber} ${o.partnerName}`,
+          secondary: deliveryRiskText(o.outlook),
+          date: o.outlook.promisedDate,
+        }))
+        .sort(
+          (a, b) =>
+            (a.date === null ? 1 : 0) - (b.date === null ? 1 : 0) ||
+            (a.date ?? "").localeCompare(b.date ?? "") ||
+            a.primary.localeCompare(b.primary, "sv")
+        );
     },
 
     // The status first: a late Utkast has not been sent to the supplier.
