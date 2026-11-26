@@ -73,7 +73,7 @@ export function SalesOrdersPageClient({
 
       <ListToolbar placeholder={isQuote ? "Sök offertnummer eller kund…" : "Sök ordernummer eller kund…"}>
         <ListMultiFilter filter={statusFilter} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
-        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}`} filter={statusFilter} />
+        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}${isQuote ? "" : "&withOutlook=true"}`} filter={statusFilter} />
         {view.chooser}
       </ListToolbar>
 

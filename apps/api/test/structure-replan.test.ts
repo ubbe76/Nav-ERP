@@ -263,7 +263,8 @@ describe("planStructure — one world", () => {
     const first = planProduction({
       ...base,
       orders: [{ id: "h", orderNumber: "TO-H", dueDate: null, operations: [{ ...w.operations[1]!, started: false }] }],
-      existingOperations: [w.operations[0]!, w.operations[2]!],
+      // P waits for its turn: it is no load for its own halvfabrikat.
+      existingOperations: [w.operations[2]!],
     });
     expect(daysOf(plan, "h:10")).toEqual(first.plans[0]!.days);
     const second = planProduction({
@@ -291,6 +292,75 @@ describe("planStructure — one world", () => {
     expect(daysOf(plan, "h:10")).toEqual(days([MON, 8]));
     expect(daysOf(plan, "p:10")).toEqual(days([TUE, 8]));
     expect(plan.clear).toEqual([]);
+  });
+
+  it("a parent due today with a lot left on the same resource is no load for its halvfabrikat: the child starts today", () => {
+    // P: 40 h on 110, due today (and once: passed) — unplanned, the book
+    // would put it all on today and roll it through the week. H: 8 h on 110.
+    for (const due of [TODAY, "2026-10-12"]) {
+      const plan = planStructure(
+        world([
+          op("p", 10, 40, { dueDate: due, plannedDays: days([MON, 8], [TUE, 8], [WED, 8], [THU, 8], [FRI, 8]) }),
+          op("h", 10, 8, { dueDate: FRI, plannedDays: days([MON2, 8]) }),
+        ]),
+        NONE,
+        [to("p", 0, null, ["h"], { dueDate: due }), to("h", 1, "p", [], { dueDate: FRI })]
+      );
+      expect(daysOf(plan, "h:10"), due).toEqual(days([MON, 8]));
+      // H is ready today: no golv, and P takes what H left.
+      expect(plan.floorOf.get("p")).toBeUndefined();
+      expect(daysOf(plan, "p:10"), due).toEqual(days([TUE, 8], [WED, 8], [THU, 8], [FRI, 8], [MON2, 8]));
+    }
+  });
+
+  it("a later sibling is no load either — but a sibling already planned in the run is", () => {
+    // H1 and H2 (both 110, 8 h) under P. H2 is due today; H1 is planned
+    // first (order number) and must not be pushed by H2's released load.
+    const plan = planStructure(
+      world([op("p", 10, 4, { dueDate: MON2 }), op("h1", 10, 8, { dueDate: FRI }), op("h2", 10, 8, { dueDate: TODAY })]),
+      NONE,
+      [to("p", 0, null, ["h1", "h2"], { dueDate: MON2 }), to("h1", 1, "p", [], { dueDate: FRI }), to("h2", 1, "p", [], { dueDate: TODAY })]
+    );
+    expect(daysOf(plan, "h1:10")).toEqual(days([MON, 8]));
+    expect(daysOf(plan, "h2:10")).toEqual(days([TUE, 8]));
+    expect(daysOf(plan, "p:10")).toEqual(days([WED, 4]));
+  });
+
+  it("the färdigdatum never decide the placing (S30): any dates give the same days", () => {
+    // P → H → S on shared resources, load outside the tree, a queue time.
+    const run = (due: Record<"p" | "h" | "s", string | null>) => {
+      const operations = [
+        op("p", 10, 12, { dueDate: due.p }),
+        op("p", 20, 6, { dueDate: due.p, workCenterId: "wc-3" }),
+        op("h", 10, 10, { dueDate: due.h }),
+        op("h", 20, 5, { dueDate: due.h, workCenterId: "wc-3" }),
+        op("s", 10, 14, { dueDate: due.s }),
+        op("x", 10, 6, { dueDate: WED, plannedDays: days([TUE, 6]) }),
+        op("y", 10, 20, { dueDate: THU }),
+      ];
+      return planStructure(world(operations, { queueDays: 0.5 }), NONE, [
+        to("p", 0, null, ["h"], { dueDate: due.p }),
+        to("h", 1, "p", ["s"], { dueDate: due.h }),
+        to("s", 2, "h", [], { dueDate: due.s }),
+      ]);
+    };
+    const reference = run({ p: null, h: null, s: null });
+    expect(reference.plans).toHaveLength(5);
+    const variants: Record<"p" | "h" | "s", string | null>[] = [
+      { p: TODAY, h: null, s: null },
+      { p: "2026-10-01", h: WED, s: TUE },
+      { p: "2027-03-01", h: "2026-10-05", s: "2027-01-01" },
+      { p: WED, h: TODAY, s: TODAY },
+    ];
+    for (const due of variants) {
+      const plan = run(due);
+      expect(plan.plans, JSON.stringify(due)).toEqual(reference.plans);
+      expect([...plan.finishOf], JSON.stringify(due)).toEqual([...reference.finishOf]);
+      expect([...plan.floorOf], JSON.stringify(due)).toEqual([...reference.floorOf]);
+    }
+    // Only Sen reads them.
+    expect(run({ p: TODAY, h: null, s: null }).warnings.some((w) => w.kind === "late" && w.manufacturingOrderId === "p")).toBe(true);
+    expect(reference.warnings.filter((w) => w.kind === "late")).toEqual([]);
   });
 
   it("a component shared by two places of the tree is planned once, before both, and both wait for it", () => {

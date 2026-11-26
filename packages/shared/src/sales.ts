@@ -98,6 +98,16 @@ export const listSalesOrdersQuerySchema = listQuerySchema.extend({
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .optional(),
+  // Leveransläget on the rows (deliveryOutlook) — opt-in like the article
+  // register's withAbc: the outlook pegs the page's open orders at every
+  // read, and this list is also every order picker's `?limit=1000` fetch.
+  // Only the kundorder list (page, split list and its export) asks for it;
+  // without it deliveryOutlook is null and nothing is computed. The filter
+  // status=delivery_risk works either way (it needs the ids, not the mark).
+  withOutlook: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
 });
 export type ListSalesOrdersQuery = z.infer<typeof listSalesOrdersQuerySchema>;
 
@@ -105,7 +115,7 @@ export type ListSalesOrdersQuery = z.infer<typeof listSalesOrdersQuerySchema>;
 // read like the card's): the order's worst row and whether the order is
 // Leverans i fara (Sen, Saknar täckning or Halvfabrikat sent). null on the
 // row = no outlook (a quote, a delivered order, an order without rows that
-// are a demand). No prices.
+// are a demand) — or a list read without withOutlook=true. No prices.
 export const SALES_ORDER_OUTLOOK_STATUSES = ["on_time", "late", "undated", "uncovered"] as const;
 export type SalesOrderOutlookStatus = (typeof SALES_ORDER_OUTLOOK_STATUSES)[number];
 export interface SalesOrderListOutlook {

@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ALERT_KINDS, DELIVERY_RISK_FILTER, SALES_ORDER_OUTLOOK_STATUSES, salesOrderOutlookText, type SalesOrderListOutlook } from "@navet/shared";
 // The web's own files (the web cannot import @navet/shared).
@@ -59,6 +61,25 @@ describe("the kundorder list's Leverans i fara", () => {
       }
     }
     expect(salesOrderOutlookText(outlook("on_time"))).toBe("I tid");
+  });
+
+  it("only the kundorder list asks the API for the mark (withOutlook is opt-in — the order pickers never pay for it)", () => {
+    const root = fileURLToPath(new URL("../../web/", import.meta.url));
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = `${dir}/${name}`;
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.tsx?$/.test(name)) files.push(path);
+      }
+    };
+    for (const dir of ["app", "components", "lib"]) walk(`${root}${dir}`);
+    const asking = files.filter((f) => readFileSync(f, "utf8").includes("withOutlook=true")).map((f) => f.slice(root.length)).sort();
+    expect(asking).toEqual(["app/forsaljning/ordrar/page.tsx", "components/sales/SalesOrdersPageClient.tsx", "components/split/splitLists.tsx"]);
+    expect(readFileSync(`${root}app/forsaljning/ordrar/page.tsx`, "utf8")).toContain("&kind=order&withOutlook=true");
+    expect(readFileSync(`${root}components/split/splitLists.tsx`, "utf8")).toContain('api: "/api/v1/sales-orders?kind=order&withOutlook=true"');
+    // The export: the kundorder list's link only (the offert list has no column).
+    expect(readFileSync(`${root}components/sales/SalesOrdersPageClient.tsx`, "utf8")).toContain('${isQuote ? "" : "&withOutlook=true"}');
   });
 });
 

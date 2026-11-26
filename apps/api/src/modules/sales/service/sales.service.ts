@@ -2103,19 +2103,23 @@ export function createSalesService(
     // `status=delivery_risk` (Leverans i fara) is resolved here from the
     // planning service's ids and handed to the repository as `onlyIds`, so
     // paging and `total` stay in SQL (the TO list's Sen works the same way);
-    // with `late` or a real status all apply. Every row carries the order's
-    // deliveryOutlook — one batch for the page's rows that are a demand, or
-    // the filter's own answer.
+    // with `late` or a real status all apply. The rows' deliveryOutlook is
+    // opt-in (`withOutlook`, like the article register's withAbc): one batch
+    // for the page's rows that are a demand, or the filter's own answer.
+    // Without the flag it is null on every row and nothing is computed — the
+    // order pickers' `?limit=1000` fetches read this list too.
     async listSalesOrders(query: ListSalesOrdersQuery, today: string = stockholmToday()) {
+      const wanted = query.withOutlook === true;
       let outlooks: Map<string, SalesOrderListOutlook> | null = null;
       let onlyIds: string[] | undefined;
       if (splitLateFilter(query.status).deliveryRisk) {
         if (!deliveryRisk) return { rows: [], total: 0 };
-        outlooks = await deliveryRisk.deliveryRiskOutlooks();
-        onlyIds = [...outlooks.keys()];
+        const atRisk = await deliveryRisk.deliveryRiskOutlooks();
+        onlyIds = [...atRisk.keys()];
+        if (wanted) outlooks = atRisk;
       }
       const result = await repo.listSalesOrders(query, today, { onlyIds });
-      if (!outlooks && deliveryRisk) {
+      if (wanted && !outlooks && deliveryRisk) {
         const withOutlook = result.rows.filter((r) => DELIVERY_OUTLOOK_STATUSES.has(r.status)).map((r) => r.id);
         if (withOutlook.length > 0) outlooks = await deliveryRisk.outlookByOrder(withOutlook);
       }

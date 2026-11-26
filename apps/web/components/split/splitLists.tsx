@@ -101,7 +101,8 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     path: "/forsaljning/ordrar",
     title: "Kundorder",
     noun: "en kundorder",
-    api: "/api/v1/sales-orders?kind=order",
+    // withOutlook: the row's Leveransläge mark (opt-in in the API).
+    api: "/api/v1/sales-orders?kind=order&withOutlook=true",
     newHref: "/forsaljning/ordrar?ny=1",
     newLabel: "Ny kundorder",
     searchPlaceholder: "Sök i kundorder",

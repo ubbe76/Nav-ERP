@@ -127,7 +127,9 @@ function ReplanForm({ target, onClose, onChanged }: { target: ReplanStructureTar
     if (written) return;
     const seq = ++sequence.current;
     // The preview on screen is already the preview of this form.
+    // An error from a preview of ANOTHER form no longer describes this one.
     if (shownKey.current === key) {
+      setPreviewError(null);
       setPreviewing(false);
       return;
     }

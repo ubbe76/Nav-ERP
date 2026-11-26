@@ -473,6 +473,47 @@ describe("POST /manufacturing-orders/:id/replan-structure", () => {
     expect(await events("updated")).toHaveLength(3);
   });
 
+  it("a top that is due today with a lot left on the halvfabrikat's resource does not push the halvfabrikat — and the dates never move the days", async () => {
+    // P: 20 h on 101, due today. H: 2 h on 101, due in five days. Released,
+    // P is no load for H: H starts on the first working day.
+    const f = await base();
+    const halv = await f.article("H", "Halvfabrikat", "manufactured");
+    const product = await f.article("P", "Produkt", "manufactured");
+    await mfgService.createRoutingOperation(halv.id, { sequenceNo: 10, workCenterId: f.kap.id, setupTime: 0, runTimePerUnit: 60 });
+    await mfgService.createRoutingOperation(product.id, { sequenceNo: 10, workCenterId: f.kap.id, setupTime: 0, runTimePerUnit: 600 });
+    await articleService.addBomComponent(product.id, { componentArticleId: halv.id, quantity: 1 });
+    const h = await f.order(halv.id, 2, addDays(today, 5));
+    const p = await f.order(product.id, 2, today);
+    await f.plan();
+    const first = weekdayOnOrAfter(today);
+
+    const plain = await previewOf(f.cookie, p.id);
+    expect(orderOf(plain, h.id)).toMatchObject({ included: true, plannedFinish: first, planned: { after: { start: first, end: first } } });
+    expect(orderOf(plain, p.id).planned.after.start).toBe(first);
+
+    // The top's date and the checkbox change the dates only.
+    const laterDue = weekdayOnOrAfter(addDays(today, 30));
+    const body = { dueDate: laterDue, moveComponentDueDates: true };
+    const shown = await previewOf(f.cookie, p.id, body);
+    const placing = (r: ReplanStructureResult) => r.orders.map((o) => [o.planned.after, o.plannedFinish, o.operations.map((op) => op.after)]);
+    expect(placing(shown)).toEqual(placing(plain));
+    expect(placing(await previewOf(f.cookie, p.id, { dueDate: laterDue, moveComponentDueDates: false }))).toEqual(placing(plain));
+    expect(placing(await previewOf(f.cookie, p.id, { dueDate: null, moveComponentDueDates: true }))).toEqual(placing(plain));
+    expect(orderOf(shown, h.id)).toMatchObject({ dueDate: { after: first, late: false }, lateAfter: false });
+
+    expect((await writeOf(f.cookie, p.id, shown, body)).statusCode).toBe(200);
+    // The written färdigdatum of the halvfabrikat = its written last day, and
+    // it is not Sen.
+    const [hOp] = await opsOf(h.id);
+    expect(hOp).toMatchObject({ start: first, end: first, locked: true });
+    expect((await dueDatesOf([h.id])).get(h.id)).toBe(hOp!.end);
+    const card = (await get(f.cookie, `/manufacturing-orders/${h.id}`)).json() as { late: boolean; plannedEndDate: string | null };
+    expect(card).toMatchObject({ late: false, plannedEndDate: first });
+    // And the written days are the preview's.
+    const [pOp] = await opsOf(p.id);
+    expect([pOp!.start, pOp!.end]).toEqual([orderOf(shown, p.id).planned.after.start, orderOf(shown, p.id).planned.after.end]);
+  });
+
   it("the checkbox without a new date for the top moves the halvfabrikat alone", async () => {
     const w = await world();
     const ids = [w.p.id, w.h.id, w.s.id, w.g.id];

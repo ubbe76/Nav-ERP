@@ -208,7 +208,7 @@ describe("GET /sales-orders?status=delivery_risk", () => {
 describe("deliveryOutlook on the list's rows", () => {
   it("marks the page's rows that are a demand; a quote and a closed order have none", async () => {
     const w = await world();
-    const listed = await list("");
+    const listed = await list("?withOutlook=true");
     const outlook = (o: { id: string }) => listed.rows.find((r) => r.id === o.id)!.deliveryOutlook;
     expect(listed.total).toBe(7);
     expect(outlook(w.short)).toEqual({ status: "uncovered", daysLate: 0, atRisk: true });
@@ -220,14 +220,30 @@ describe("deliveryOutlook on the list's rows", () => {
     expect(outlook(w.quote)).toBeNull();
     expect(outlook(w.delivered)).toBeNull();
     // The filtered list carries the same mark as the plain one.
-    for (const row of (await list("?status=delivery_risk")).rows) expect(row.deliveryOutlook).toEqual({ status: "uncovered", daysLate: 0, atRisk: true });
+    const filtered = await list("?status=delivery_risk&withOutlook=true");
+    expect(filtered.rows).toHaveLength(3);
+    for (const row of filtered.rows) expect(row.deliveryOutlook).toEqual({ status: "uncovered", daysLate: 0, atRisk: true });
     // The offert list: nothing.
-    expect((await list("?kind=quote")).rows.map((r) => r.deliveryOutlook)).toEqual([null]);
+    expect((await list("?kind=quote&withOutlook=true")).rows.map((r) => r.deliveryOutlook)).toEqual([null]);
   });
 
-  it("the CSV has the column Leveransläge as text", async () => {
+  it("is opt-in: without withOutlook=true no row carries a mark — the filter still finds its orders", async () => {
     const w = await world();
-    const res = await app.inject({ url: "/api/v1/sales-orders/csv?kind=order", headers: { cookie } });
+    for (const q of ["", "?withOutlook=false", "?status=confirmed,in_production&limit=1000"]) {
+      expect((await list(q)).rows.map((r) => r.deliveryOutlook).filter((o) => o !== null), q).toEqual([]);
+    }
+    const filtered = await list("?status=delivery_risk");
+    expect(ids(filtered.rows)).toEqual(ids(w.atRisk));
+    expect(filtered.rows.map((r) => r.deliveryOutlook)).toEqual([null, null, null]);
+    expect((await app.inject({ url: "/api/v1/sales-orders?withOutlook=ja", headers: { cookie } })).statusCode).toBe(400);
+  });
+
+  it("the CSV has the column Leveransläge as text — only when asked for with withOutlook=true", async () => {
+    const w = await world();
+    const without = await app.inject({ url: "/api/v1/sales-orders/csv?kind=order", headers: { cookie } });
+    expect(without.statusCode, without.body).toBe(200);
+    expect(without.body.replace(/^\uFEFF/, "").split(/\r?\n/)[0]!.split(";").slice(0, 5)).toEqual(["Ordernummer", "Offertnummer", "Kund", "Status", "Leveransdatum"]);
+    const res = await app.inject({ url: "/api/v1/sales-orders/csv?kind=order&withOutlook=true", headers: { cookie } });
     expect(res.statusCode, res.body).toBe(200);
     const lines = res.body.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l !== "");
     const header = lines[0]!.split(";");
@@ -237,7 +253,7 @@ describe("deliveryOutlook on the list's rows", () => {
     expect(cell(w.onTime)).toBe("I tid");
     expect(cell(w.delivered)).toBe("");
     expect(res.body).not.toContain("777");
-    const filtered = await app.inject({ url: "/api/v1/sales-orders/csv?kind=order&status=delivery_risk", headers: { cookie } });
+    const filtered = await app.inject({ url: "/api/v1/sales-orders/csv?kind=order&status=delivery_risk&withOutlook=true", headers: { cookie } });
     expect(filtered.body.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l !== "")).toHaveLength(4);
   });
 });
@@ -301,13 +317,13 @@ describe("listSalesOrders and its DeliveryRiskReader", () => {
       },
     };
     const svc = service(createSalesRepository(db), reader);
-    const filtered = await svc.listSalesOrders(query({ status: "delivery_risk" }));
+    const filtered = await svc.listSalesOrders(query({ status: "delivery_risk", withOutlook: "true" }));
     expect(filtered.total).toBe(1);
     expect(filtered.rows.map((r) => [r.id, r.deliveryOutlook])).toEqual([[a.id, mark]]);
     expect(calls).toEqual(["risk"]);
 
     calls.length = 0;
-    const plain = await svc.listSalesOrders(query({}));
+    const plain = await svc.listSalesOrders(query({ withOutlook: "true" }));
     expect(calls).toEqual([`page:${[a.id, b.id].sort().join(",")}`]);
     expect(plain.rows.find((r) => r.id === b.id)!.deliveryOutlook).toEqual({ status: "on_time", daysLate: 0, atRisk: false });
     // Absent from the reader's answer, and a quote: no mark.
@@ -316,7 +332,16 @@ describe("listSalesOrders and its DeliveryRiskReader", () => {
 
     // A page of quotes never calls the reader.
     calls.length = 0;
-    await svc.listSalesOrders(query({ kind: "quote" }));
+    await svc.listSalesOrders(query({ kind: "quote", withOutlook: "true" }));
     expect(calls).toEqual([]);
+
+    // Without the flag (the order pickers, the Översikt's counts): the plain
+    // list never calls the reader, and the filter only for its ids.
+    const unmarked = await svc.listSalesOrders(query({}));
+    expect(calls).toEqual([]);
+    expect(unmarked.rows.map((r) => r.deliveryOutlook)).toEqual([null, null, null]);
+    const riskOnly = await svc.listSalesOrders(query({ status: "delivery_risk" }));
+    expect(calls).toEqual(["risk"]);
+    expect(riskOnly.rows.map((r) => [r.id, r.deliveryOutlook])).toEqual([[a.id, null]]);
   });
 });

@@ -28,7 +28,7 @@ export default async function SalesOrdersPage(props: { searchParams: Promise<Pag
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
   const orders = await apiGet<Paged<SalesOrder>>(
-    `/api/v1/sales-orders${listApiQuery(withFinishedRule(SALES_ORDER_FILTER, searchParams), ["status"], pageSize)}&kind=order`,
+    `/api/v1/sales-orders${listApiQuery(withFinishedRule(SALES_ORDER_FILTER, searchParams), ["status"], pageSize)}&kind=order&withOutlook=true`,
     cookieHeader
   );
 

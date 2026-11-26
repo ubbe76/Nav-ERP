@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "../ui/Button";
+import { FormError } from "../ui/Form";
 import { useCan } from "../PermissionsProvider";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
 import type { DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
@@ -17,12 +18,19 @@ export function DeliveryTimeBox({
   request,
   withCustomer,
   onUseDate,
+  useDateBusy = false,
+  useDateError = null,
   rowsWithOwnDate = 0,
   refreshKey = "",
 }: {
   request: DeliveryTimeCheckRequest | null;
   withCustomer: boolean;
   onUseDate: (date: string) => void;
+  // A caller whose "Använd datumet" writes (the quote card's PATCH): the
+  // button waits while it is under way, and a failure is shown HERE — the
+  // box's own dialog is closed by then.
+  useDateBusy?: boolean;
+  useDateError?: string | null;
   rowsWithOwnDate?: number;
   // The quote card asks with { salesOrderId } only, so the request never
   // changes when the rows do: the card hands in its rows, customer and
@@ -64,21 +72,27 @@ export function DeliveryTimeBox({
           type="button"
           variant="secondary"
           size="small"
-          disabled={!line?.date || counting || failed}
+          disabled={!line?.date || counting || failed || useDateBusy}
           onClick={() => line?.date && onUseDate(line.date)}
         >
-          Använd datumet
+          {useDateBusy ? "Sparar…" : "Använd datumet"}
         </Button>
         <Button type="button" variant="secondary" size="small" onClick={() => setOpen(true)}>
           Visa hur
         </Button>
       </div>
+      {useDateError && (
+        <div className={styles.error}>
+          <FormError>{useDateError}</FormError>
+        </div>
+      )}
       <DeliveryTimeCheckDialog
         open={open}
         onClose={() => setOpen(false)}
         request={request}
         withCustomer={withCustomer}
         rowsWithOwnDate={rowsWithOwnDate}
+        useDateBusy={useDateBusy}
         onUseDate={(date) => {
           setOpen(false);
           onUseDate(date);

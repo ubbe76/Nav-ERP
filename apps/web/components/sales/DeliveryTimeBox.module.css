@@ -52,3 +52,9 @@
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+
+/* A failed "Använd datumet": its own row under the box's content. */
+.error {
+  flex-basis: 100%;
+  min-width: 0;
+}

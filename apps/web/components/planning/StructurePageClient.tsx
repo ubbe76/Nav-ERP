@@ -172,9 +172,14 @@ function StructureView({ query }: { query: string }) {
   const [data, setData] = useState<StructureResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // A re-read that failed while a tree is shown: the tree stays (and so does
+  // an open dialog's result), with a notice and a retry.
+  const [reloadError, setReloadError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   // A late answer never replaces a newer one.
   const sequence = useRef(0);
+  const hasData = useRef(false);
+  hasData.current = data !== null;
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [showStock, setShowStock] = useState(false);
@@ -199,11 +204,15 @@ function StructureView({ query }: { query: string }) {
         if (seq !== sequence.current) return;
         setData(result);
         setLoadError(null);
+        setReloadError(null);
       })
       .catch((err: unknown) => {
         if (seq !== sequence.current) return;
-        setData(null);
-        setLoadError(apiErrorMessage(err, "Kunde inte läsa strukturen."));
+        const message = apiErrorMessage(err, "Kunde inte läsa strukturen.");
+        // The view is keyed on its order, so data that is here is this
+        // order's: a failed re-read keeps it.
+        if (hasData.current) setReloadError(message);
+        else setLoadError(message);
       })
       .finally(() => {
         if (seq === sequence.current) setLoading(false);
@@ -451,6 +460,14 @@ function StructureView({ query }: { query: string }) {
       {truncatedNotices(data.truncated).map((text) => (
         <FormNotice key={text}>{text}</FormNotice>
       ))}
+      {reloadError && (
+        <FormNotice>
+          Strukturen kunde inte läsas om ({reloadError}) — det som visas kan vara inaktuellt.{" "}
+          <Button type="button" variant="secondary" size="small" disabled={loading} onClick={reload}>
+            Försök igen
+          </Button>
+        </FormNotice>
+      )}
       <FormError>{actionError}</FormError>
       {notice && <FormNotice>{notice}</FormNotice>}
 

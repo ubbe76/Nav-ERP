@@ -188,6 +188,7 @@ export function SalesOrderDetail({
   const [dtcOpen, setDtcOpen] = useState(false);
   const [dtcBusy, setDtcBusy] = useState(false);
   const [dtcError, setDtcError] = useState<string | null>(null);
+  const dtcInFlight = useRef(false);
   const pill = SALES_ORDER_STATUS_PILL[order.status];
   // Rows stay editable until the order is delivered/invoiced/cancelled;
   // per-row guards (quantity ≥ delivered, no delete with deliveries) are
@@ -594,11 +595,15 @@ export function SalesOrderDetail({
   }
 
   // "Använd datumet" in Leveranstidskontroll: sets the order's expected delivery date.
+  // One write at a time: the ref closes the gap before the busy state is
+  // rendered (a double click, the box and the dialog).
   async function useCheckedDate(date: string) {
-    const bumpRevision = await askBumpRevision(order.revision);
+    if (dtcInFlight.current) return;
+    dtcInFlight.current = true;
     setDtcError(null);
     setDtcBusy(true);
     try {
+      const bumpRevision = await askBumpRevision(order.revision);
       await apiFetch(`/api/v1/sales-orders/${order.id}`, {
         method: "PATCH",
         body: JSON.stringify({ expectedDeliveryDate: date, bumpRevision }),
@@ -608,6 +613,7 @@ export function SalesOrderDetail({
     } catch (err) {
       setDtcError(apiErrorMessage(err, "Kunde inte sätta leveransdatumet"));
     } finally {
+      dtcInFlight.current = false;
       setDtcBusy(false);
     }
   }
@@ -801,6 +807,8 @@ export function SalesOrderDetail({
           request={{ salesOrderId: order.id }}
           withCustomer
           onUseDate={useCheckedDate}
+          useDateBusy={dtcBusy}
+          useDateError={dtcOpen ? null : dtcError}
           rowsWithOwnDate={rows.filter((r) => r.expectedDeliveryDate).length}
           refreshKey={JSON.stringify([
             order.customerId,

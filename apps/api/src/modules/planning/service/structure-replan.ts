@@ -134,7 +134,8 @@ export function planStructure(
 
   // 1. The tree's own load is released — or the tree would compete with its
   //    own old plan. Locked operations too (S28); they are listed. The rows
-  //    carry the due date the run counts Sen on.
+  //    carry the due date the run counts Sen on. A released TO is no load at
+  //    all until its own turn (step 2).
   const hadPlan = new Set<string>();
   const relockedIds: string[] = [];
   const relockedPerOrder = new Map<string, number>();
@@ -160,6 +161,7 @@ export function planStructure(
   const blocked: StructurePlan["blocked"] = [];
 
   // 2. Children before parents.
+  const plannedOrderIds = new Set<string>();
   for (const order of structurePlanOrder(orders)) {
     // The golv: the latest ready day among what covers the material — a
     // chosen child's NEW finish day, anything else its stored ready day.
@@ -177,13 +179,21 @@ export function planStructure(
     for (const r of ready) if (r.date > today && (golv === null || r.date > golv.date)) golv = r;
     if (golv) floorOf.set(order.manufacturingOrderId, golv);
 
+    // The load the TO is placed against: everything outside the tree, and
+    // the chosen TOs this run has ALREADY planned (locked days). A chosen TO
+    // that is still waiting for its turn (a parent, a later sibling) is NOT
+    // load: released, it has no days, and the book would put its whole
+    // remaining time on its due date (operationLoadDays — a passed date is
+    // today) and roll it forward — the child would be pushed behind its own
+    // parent, and the placing would depend on the due dates (S30).
     const own: PlanOperation[] = [];
     const others: CapacityOperationRow[] = [];
     for (const op of operations) {
       if (op.manufacturingOrderId === order.manufacturingOrderId) {
         own.push({ ...op, started: operationStarted(op, stamped.has(op.moOperationId)) });
-      } else others.push(op);
+      } else if (!chosen.has(op.manufacturingOrderId) || plannedOrderIds.has(op.manufacturingOrderId)) others.push(op);
     }
+    plannedOrderIds.add(order.manufacturingOrderId);
     const result = planProduction({
       today,
       offDays: world.offDays,
