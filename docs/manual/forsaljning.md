@@ -351,7 +351,7 @@ En kundorder skapas på två sätt:
 - **+ Ny kundorder** (på **Försäljning → Kundorder** och kundkortet) skapar och bekräftar i samma steg — används när affären redan är klar. Ordern får ett KO-nummer direkt.
 - **+ Ny offert** (på **Försäljning → Offerter**, se [Offerter](#offerter)) skapar en offert som blir kundorder när den bekräftas — används när kunden ska ta ställning till pris först.
 
-Båda använder samma formulär: du väljer kund (förvald från kortet), ev. förväntat leveransdatum, anteckning samt orderrader: artikel via artikelväljaren, antal, enhet, **Á-pris** och **Rabatt (%)**. **Kundorder**-listan visar bara ordrar (statusfiltret har inte Offert eller Förlorad); offerterna finns i sin egen lista. På order- och offertkortet är radens artikelnummer en länk till artikelkortet i artikelregistret (för den som får öppna artiklar, annars vanlig text). Du kan välja flera statusar samtidigt. Levererade, fakturerade och avbrutna ordrar visas bara med **Visa avslutade**, se [Lista och kort](/hjalp/komma-igang#lista-och-kort). Statusfiltret har också **Sen**: bekräftade ordrar och ordrar under tillverkning där en rad med rest har ett leveransdatum som har passerat — samma urval som aviseringen [Försenade kundordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas, och exporten till CSV följer filtret.
+Båda använder samma formulär: du väljer kund (förvald från kortet), ev. förväntat leveransdatum, anteckning samt orderrader: artikel via artikelväljaren, antal, enhet, **Á-pris** och **Rabatt (%)**. **Kundorder**-listan visar bara ordrar (statusfiltret har inte Offert eller Förlorad); offerterna finns i sin egen lista. På order- och offertkortet är radens artikelnummer en länk till artikelkortet i artikelregistret (för den som får öppna artiklar, annars vanlig text). Du kan välja flera statusar samtidigt. Levererade, fakturerade och avbrutna ordrar visas bara med **Visa avslutade**, se [Lista och kort](/hjalp/komma-igang#lista-och-kort). Statusfiltret har också **Sen**: bekräftade ordrar och ordrar under tillverkning där en rad med rest har ett leveransdatum som har passerat — samma urval som aviseringen [Försenade kundordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas, och exporten till CSV följer filtret. Bredvid **Sen** finns **Leverans i fara**, som visar ordrarna där leveransen inte ser ut att hålla — se [Leverans i fara i kundorderlistan](#leverans-i-fara-i-kundorderlistan).
 
 **Konfigurerbara artiklar:** en mall (se [Artiklar](/hjalp/artiklar#konfigurator)) visas i artikelväljaren med märkningen **Konfigurerbar** och öppnar dialogen **Konfigurera** med mallens valgrupper, giltighetsfel per grupp och priset för valet (kundens pris när kunden är vald, på det antal raden har). I läget **Variantartiklar** hämtar **Lägg in** varianten om den finns och skapar den annars, och raden får variantartikeln — därefter är det en vanlig rad med [variantens priskedja](/hjalp/artiklar#varianter); under artikelfältet står *Varianten 63000-B-1200 skapades* respektive *fanns redan*. I läget **Beställningsvara** stannar mallen som radens artikel: **Lägg in** lägger valen på raden, valraderna (t.ex. *Lock: Lock B*, *Bredd: 1 200 mm*) visas under artikelfältet, **Á-pris** och **Rabatt (%)** förifylls från konfigurationens pris (kundens pris på mallen plus tilläggen, kundens rabatt) och kan skrivas över, och **Konfigurera om** öppnar dialogen igen innan raden sparas. Samma mall får ligga flera gånger på en order med olika val. **Avbryt** (eller Esc) tömmer artikelfältet. Själva mallen kan aldrig sparas utan konfiguration; via API:t svarar systemet att artikeln är en beställningsvara och ska konfigureras. Samma dialog finns på **Lägg till rad** på orderkortet. Går strukturen inte att härleda för valen (mallen har t.ex. en strukturrad vars alternativ saknar artikel, en formel som inte går att räkna eller ett operationsnummer som krockar) vägrar systemet raden redan här — på offert såväl som kundorder, och lika vid antalsändring och **Ändra konfiguration** — med *Kombinationen kan inte tillverkas — åtgärda mallens struktur på artikelkortet.* följt av vad som är fel. Via API:t ges samma avslag utan detaljer.
 
@@ -509,6 +509,53 @@ Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är k
 - **Offert (PDF)**, **Orderbekräftelse (PDF)** och **Plocklista (PDF)** (se [Plocklista](#plocklista)) laddar ner dokumenten utan att skicka något; orderbekräftelsen och plocklistan finns bara på orderkortet. Offertens och orderbekräftelsens radtabell har en egen kolumn **Rabatt**; cellen är tom för rader utan rabatt.
 - Kortets utskickshistorik visas under knapparna; hela loggen finns i [System → E-postlogg](/hjalp/system).
 
+## Leveransläge
+
+På kundorderkortet visas **Leveransläge** för en order i status **Bekräftad** eller **Under tillverkning**: kommer raderna att kunna lämna oss den dag som är lovad? Leveransläget syns för den som har behörigheten Försäljning eller Tillverkning. En offert har inget leveransläge — använd **Leveranstidskontroll** för att se när en offert kan levereras.
+
+**Under statusraden** står orderns läge på en rad:
+
+- *Leverans i tid (lovat 4 dec)* — alla rader med rest är täckta i tid.
+- *Beräknad leverans 8 dec (lovat 4 dec) · 3 arbetsdagar sen* — minst en rad blir klar för sent. Datumet är dagen kunden får godset om det skickas den dag den sista raden är klar, räknat med kundens leveransdagar och transportdagar. Kan något datum inte räknas fram för en annan rad står det *Leveransen är 3 arbetsdagar sen*.
+- *Saknar täckning på 1 rad* — det finns varken lager, inköpsorder eller tillverkningsorder för hela restantalet.
+- *Kan inte beräknas — tillgång utan datum* — raden täcks av en inköps- eller tillverkningsorder som saknar datum.
+
+Märket **Halvfabrikat sent** visas bredvid när en tillverkningsorder som täcker en rad väntar på ett halvfabrikat som blir klart för sent. Raden kan då stå som i tid, men tillverkningsorderns plan vet inte om förseningen — se [Täcks av och Går till](/hjalp/tillverkning#tacks-av-och-gar-till).
+
+Länken **Visa strukturen** på samma rad öppnar [Struktur](/hjalp/tillverkning#struktur): hela kundordern som ett träd — varje rad med sin tillverkningsorder, dess material och halvfabrikatens tillverkningsordrar under — med de planerade dagarna på en dagaxel. Där ser du var i kedjan en försening uppstår och kan planera om. Länken visas för den som kan öppna tillverkningsordrar.
+
+**I radtabellen** har varje rad med rest ett märke i kolumnen **Leveransläge**:
+
+| Märke | Betyder |
+|---|---|
+| **I tid** | Hela restantalet är täckt och klart senast den dag raden måste skickas. En rad utan leveransdatum som är täckt är alltid i tid. |
+| **Sen N dagar** | Något av det som täcker raden blir klart efter avsändningsdagen. Antalet är arbetsdagar. |
+| **Saknar täckning** | Lager, inköpsordrar och tillverkningsordrar räcker inte till hela restantalet. |
+| **Tillgång utan datum** | Raden täcks av en inköps- eller tillverkningsorder utan datum. |
+
+Klicka på märket för att se vad som täcker raden, en rad per källa: *Lager 6 st*, *TO-1050 · 3 st · klar 3 dec · 2 dagar för sent*, *IO-88 · 6 st · 2 dec (utkast)* och *Saknas 4 st*. Ordernumren är länkar till inköps- respektive tillverkningsordern.
+
+Så räknas det:
+
+- **Avsändningsdagen** är radens leveransdatum (radens eget, annars orderns) flyttat bakåt med kundens transportdagar och leveransdagar — samma dag som artikelöversikten och behovsberäkningen planerar mot.
+- **Klart** är i dag för lager, ankomstdatumet för en inköpsorder och den planerade klar-dagen för en tillverkningsorder (färdigdatumet om den inte är planerad). Ett datum som har passerat räknas som i dag.
+- En tillgång är **i tid** när den är klar senast på avsändningsdagen. Lagret är aldrig sent.
+- Lager, inköpsordrar och tillverkningsordrar fördelas på behoven i datumordning — det tidigaste behovet får först. Spärrade lagerplatser räknas inte.
+- En **konfigurerad rad** (beställningsvara) täcks bara av sina egna tillverkningsordrar, de som är skapade från raden.
+- Tjänsteartiklar, fraktraden och ställkostnadsrader har inget leveransläge, och inte heller en rad som är helt levererad.
+
+Kopplingen är härledd och kan ändras när ett tidigare behov kommer in. Inget sparas: leveransläget räknas om varje gång kortet öppnas, och orderns leveransdatum ändras aldrig automatiskt.
+
+### Leverans i fara i kundorderlistan
+
+En order är **i fara** när någon rad med rest är **Sen**, **Saknar täckning** eller täcks av en tillverkningsorder med **Halvfabrikat sent**. **Tillgång utan datum** räknas inte som i fara — det är en fråga till inköp, inte en försening.
+
+- **Filtret Leverans i fara** finns i kundorderlistans statusfilter, bredvid **Sen**. Det visar bara ordrarna i fara, och kan kombineras med **Sen** och med statusarna: då visas ordrarna som uppfyller alla val. Antalet i sidhuvudet och exporten till CSV följer filtret.
+- **Märket i kolumnen Status** står bredvid orderns status när ordern behöver ses över: **Sen N dagar**, **Saknar täckning**, **Halvfabrikat sent** eller **Tillgång utan datum**. En order i tid har inget märke, och inte heller offerter, levererade eller avbrutna ordrar. I den smala listan bredvid kortet står märket som text efter leveransdatumet. CSV-exporten har kolumnen **Leveransläge** med samma ord (*I tid* för en order utan märke).
+- **Sen** och **Leverans i fara** är olika frågor. **Sen** betyder att ett lovat leveransdatum redan har passerat. **Leverans i fara** ser framåt: en order med leverans om tre veckor är i fara om tillverkningsordern blir klar för sent, och en order vars datum passerade i går men som ligger färdig på hyllan är sen men inte i fara.
+
+Samma ordrar visas i aviseringen **Kundordrar med leverans i fara** under [Aviseringar](/hjalp/aviseringar) och på Översiktens kort **Leverans i fara**, som du lägger till med **Anpassa** (se [Anpassa Översikten](/hjalp/komma-igang#anpassa-oversikten)). Märket och filtret räknas fram när listan visas, precis som på kortet.
+
 ## Leveranstidskontroll
 
 Leveranstidskontrollen räknar fram den **tidigaste avsändningsdagen** och det **tidigaste leveransdatumet** för en kundorder — utifrån vad som finns i lager, vad som redan är på väg in, ledtiden på material som måste köpas och produktionens lediga tid. Saldo på [spärrade lagerplatser](/hjalp/lager#sparrade-lagerplatser) räknas inte som lager. Den kan köras på en kundorder, på raderna i **Ny kundorder** eller på en fristående sida för artiklar och antal.
@@ -522,6 +569,16 @@ Själva kontrollen är en beräkning som läser och räknar — den ändrar inge
 - **Fristående:** **Försäljning → Leveranstidskontroll**. Lägg in rader med **Lägg till rad** — artikel och antal; en konfigurerbar mall konfigureras med **Konfigurera**, som på en orderrad — välj om du vill en **Kund** och klicka **Kontrollera**.
 
 Ger [alternativa resurser](/hjalp/artiklar#alternativa-resurser) ett tidigare datum visar dialogen båda datumen och låter dig välja — se [Alternativa resurser i kontrollen](#alternativa-resurser-i-kontrollen).
+
+### Rutan Leveranstid
+
+I **Ny offert**, **Ny kundorder** och på offertkortet (status Offert) räknas kontrollen också automatiskt, utan att du behöver öppna dialogen. Rutan **Leveranstid** under raderna visar till exempel *Tidigast leverans 12 dec (avsändning 10 dec)*, eller *Tidigast avsändning 10 dec* när ingen kund är vald.
+
+- Rutan räknar om en stund efter att du slutat ändra raderna, antalet eller kunden. Medan den räknar står det förra svaret kvar, nedtonat, med *Räknar…* under.
+- **Använd datumet** sätter leveransdatumet till det föreslagna. Rutan fyller aldrig i datumet själv.
+- **Visa hur** öppnar dialogen Leveranstidskontroll med hela kedjan: lager, inköp och operationer per rad.
+- Rutan är en beräkning och bokar ingenting. På en bekräftad order visar kortet i stället [leveransläget](#leveranslage).
+- Rutan visas för den som har behörighet till Försäljning eller Tillverkning, precis som knappen **Leveranstidskontroll**.
 
 Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Knappen visas bara när kontrollen räknats med en kund — utan kund är datumet avsändningsdagen och dialogen visar i stället texten "Välj kund för att räkna med kundens transportdagar." Raderna på ordern ändras aldrig — har några rader ett [eget leveransdatum](#leveransdatum-per-rad) behåller de det, och dialogen säger hur många de är. Kräver behörigheten Försäljning eller Tillverkning.
 

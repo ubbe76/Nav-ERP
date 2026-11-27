@@ -11,6 +11,7 @@ import buttonStyles from "../ui/Button.module.css";
 import { NewQuoteForm } from "./NewQuoteForm";
 import { FINISHED_HIDDEN_HINT, ListExportLink, ListToolbar, Pagination, ListMultiFilter, useFinishedHidden } from "../ui/ListControls";
 import { QUOTE_FILTER, SALES_ORDER_FILTER } from "../../lib/statusFilters";
+import { listOutlookMark } from "../../lib/deliveryRisk";
 import { useListColumns } from "../ui/ListColumns";
 import { SALES_ORDER_STATUS_PILL, type Paged, type SalesOrder } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
@@ -39,7 +40,8 @@ export function SalesOrdersPageClient({
   const view = useListColumns([
     { key: "orderNumber", label: isQuote ? "Offert" : "Ordernummer", width: "140px" },
     { key: "customerName", label: "Kund", width: "1fr" },
-    { key: "status", label: "Status", width: "160px" },
+    // Wider on the order list: the status and the leveransläge mark side by side.
+    { key: "status", label: "Status", width: isQuote ? "160px" : "280px" },
     { key: "currency", label: "Valuta", width: "90px" },
     { key: "expectedDeliveryDate", label: "Leveransdatum", width: "150px" },
     ...(isQuote ? [{ key: "quoteValidUntil", label: "Giltig t.o.m.", width: "170px" }] : []),
@@ -71,7 +73,7 @@ export function SalesOrdersPageClient({
 
       <ListToolbar placeholder={isQuote ? "Sök offertnummer eller kund…" : "Sök ordernummer eller kund…"}>
         <ListMultiFilter filter={statusFilter} allLabel="Alla statusar" ariaLabel="Filtrera på status" />
-        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}`} filter={statusFilter} />
+        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}${isQuote ? "" : "&withOutlook=true"}`} filter={statusFilter} />
         {view.chooser}
       </ListToolbar>
 
@@ -93,7 +95,17 @@ export function SalesOrdersPageClient({
               return order.customerName;
             case "status": {
               const pill = SALES_ORDER_STATUS_PILL[order.status];
-              return <StatusPill status={pill.status} label={pill.label} compact />;
+              // Leveransläget beside the status: only what needs a look
+              // (Sen, Saknar täckning, Halvfabrikat sent, Tillgång utan datum).
+              const mark = listOutlookMark(order.deliveryOutlook);
+              return mark ? (
+                <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <StatusPill status={pill.status} label={pill.label} compact />
+                  <StatusPill status={mark.tone} label={mark.label} compact />
+                </span>
+              ) : (
+                <StatusPill status={pill.status} label={pill.label} compact />
+              );
             }
             case "currency":
               return order.currency;

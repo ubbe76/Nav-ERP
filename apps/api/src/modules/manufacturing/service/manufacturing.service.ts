@@ -37,6 +37,7 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { compareStationCodes } from "./station-order.js";
+import { compareArticleNumbers, linkedOperationMaterials } from "./operation-materials.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
 import { MANUFACTURING_ORDER_STATUS_LABELS } from "./export-columns.js";
 import type { GivenOperationPlan, GivenPlanOptions, ManufacturingPlanReader, SetDueDatesOutcome } from "../../planning/service/planning.service.js";
@@ -1333,25 +1334,25 @@ export function createManufacturingService(
           readiness.set(id, r);
         }
       }
-      // Natural number order, the same collation as the web's material sort
-      // (lib/terminalOperations.ts) — so a row's first material IS its
-      // sort key there, and the picker lists 2 before 10.
-      const byArticleNumber = (a: TerminalMaterial, b: TerminalMaterial) => a.articleNumber.localeCompare(b.articleNumber, "sv", { numeric: true });
-      const materialsByOp = new Map<string, TerminalMaterial[]>();
-      for (const m of materials) {
-        if (!m.moOperationId) continue;
-        materialsByOp.set(m.moOperationId, [
-          ...(materialsByOp.get(m.moOperationId) ?? []),
-          { articleId: m.articleId, articleNumber: m.articleNumber, articleName: m.articleName },
-        ]);
-      }
+      // The shared grouping (operation-materials.ts): every linked row, in
+      // natural article-number order. The terminal lists them all — also a
+      // halvfabrikat and a fully drawn row; only the planning views filter.
+      const linked = linkedOperationMaterials(
+        materials.map((m) => ({ ...m, quantityPlanned: Number(m.quantityPlanned), quantityConsumed: Number(m.quantityConsumed) }))
+      );
+      const materialsByOp = new Map<string, TerminalMaterial[]>(
+        [...linked].map(([operationId, list]) => [
+          operationId,
+          list.map((m) => ({ articleId: m.articleId, articleNumber: m.articleNumber, articleName: m.articleName })),
+        ])
+      );
       const rows: TerminalOperation[] = listed.map((row) => {
         const r = readiness.get(row.operationId)!;
         return {
           ...row,
           readiness: r.readiness,
           available: String(r.available),
-          materials: (materialsByOp.get(row.operationId) ?? []).sort(byArticleNumber),
+          materials: materialsByOp.get(row.operationId) ?? [],
         };
       });
       // The picker lists the materials BEFORE the material filter, so
@@ -1359,7 +1360,7 @@ export function createManufacturingService(
       const unique = new Map(rows.flatMap((r) => r.materials).map((m) => [m.articleId, m]));
       return {
         rows: q.materialArticleId ? rows.filter((r) => r.materials.some((m) => m.articleId === q.materialArticleId)) : rows,
-        materials: [...unique.values()].sort(byArticleNumber),
+        materials: [...unique.values()].sort(compareArticleNumbers),
       };
     },
 

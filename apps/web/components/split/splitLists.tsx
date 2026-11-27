@@ -22,6 +22,7 @@ import {
   type SupplierInvoice,
 } from "../../lib/types";
 import { formatMoney, formatQuantity } from "../../lib/format";
+import { listOutlookMark } from "../../lib/deliveryRisk";
 import { SUPPLIER_CONFIRMATION_TEXT } from "../../lib/overviewCardRows";
 import type { MultiFilter } from "../../lib/listFilter";
 import {
@@ -90,7 +91,7 @@ const salesOrder = (kind: "order" | "quote") => (raw: unknown): SplitRow => {
     id: o.id,
     href: `/forsaljning/${kind === "quote" ? "offerter" : "ordrar"}/${o.id}`,
     primary: o.customerName,
-    secondary: kind === "quote" ? join(number, o.quoteValidUntil ? `giltig ${shortDate(o.quoteValidUntil)}` : null) : join(number, `lev ${shortDate(o.nextDeliveryDate ?? o.expectedDeliveryDate)}`),
+    secondary: kind === "quote" ? join(number, o.quoteValidUntil ? `giltig ${shortDate(o.quoteValidUntil)}` : null) : join(number, `lev ${shortDate(o.nextDeliveryDate ?? o.expectedDeliveryDate)}`, listOutlookMark(o.deliveryOutlook)?.label ?? null),
     status: pill ? { label: pill.label, tone: pill.status } : null,
   };
 };
@@ -100,7 +101,8 @@ export const SPLIT_LISTS: Record<string, SplitListConfig> = {
     path: "/forsaljning/ordrar",
     title: "Kundorder",
     noun: "en kundorder",
-    api: "/api/v1/sales-orders?kind=order",
+    // withOutlook: the row's Leveransläge mark (opt-in in the API).
+    api: "/api/v1/sales-orders?kind=order&withOutlook=true",
     newHref: "/forsaljning/ordrar?ny=1",
     newLabel: "Ny kundorder",
     searchPlaceholder: "Sök i kundorder",

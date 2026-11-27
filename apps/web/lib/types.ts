@@ -2010,6 +2010,8 @@ export interface SalesOrder extends DocumentTermsFields {
   currency: string;
   exchangeRate: string;
   // List-only: earliest effective delivery date among open rows.
+  // Leveransläget (list only): derived at the read, null without one.
+  deliveryOutlook?: SalesOrderListOutlook | null;
   nextDeliveryDate?: string | null;
   expectedDeliveryDate: string | null;
   // Offertuppföljning: created as a quote (not a direct order), Giltig t.o.m.
@@ -3044,6 +3046,8 @@ export interface CapacitySummary {
   lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
   unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
   resourceSuggestions: ResourceSuggestionRow[];
+  // Pending operations moved by hand (Låst) among the loaded ones.
+  lockedOperations: number;
 }
 
 export interface CapacityResult {
@@ -5972,7 +5976,10 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   component_orders_created: "Halvfabrikat skapade",
   operation_moved: "Operation flyttad",
   operation_unlocked: "Operation upplåst",
+  order_plan_unlocked: "Planeringen upplåst",
   run_order_changed: "Körordning ändrad",
+  co_run: "Operationer samkörda",
+  structure_replanned: "Strukturen omplanerad",
   started: "Startad",
   report_undone: "Rapportering ångrad",
   closed: "Stängd",
@@ -7408,6 +7415,56 @@ export interface WorkInProgressReport {
 }
 
 
+// Leveransläge: GET /sales-orders/:id/delivery-outlook — will the order's
+// rows leave on the day they were promised (derived at every read).
+// Quantities are in the article's BASE unit. No prices.
+export type OutlookStatus = "on_time" | "late" | "undated" | "uncovered";
+export interface OutlookAllocation extends CoverageAllocation {
+  componentLate: boolean; // a TO with Halvfabrikat sent
+}
+export interface OutlookRow {
+  salesOrderRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  restQuantity: number;
+  configured: boolean;
+  promisedDate: string | null;
+  promisedShipDate: string | null;
+  allocations: OutlookAllocation[];
+  uncovered: number;
+  readyDate: string | null;
+  estimatedShipDate: string | null;
+  estimatedDeliveryDate: string | null;
+  status: OutlookStatus;
+  daysLate: number;
+  componentLate: boolean;
+  overdue: boolean;
+  atRisk: boolean;
+}
+export interface OrderOutlook {
+  status: OutlookStatus | "none";
+  daysLate: number;
+  atRisk: boolean;
+  promisedDate: string | null;
+  estimatedDeliveryDate: string | null;
+  counts: { late: number; uncovered: number; undated: number; componentLate: number };
+}
+// The kundorder list's row mark (GET /sales-orders): the order's worst row
+// and Leverans i fara. null = no outlook (a quote, a closed order).
+export interface SalesOrderListOutlook {
+  status: OutlookStatus;
+  daysLate: number;
+  atRisk: boolean;
+}
+export interface SalesOrderDeliveryOutlook extends OrderOutlook {
+  salesOrderId: string;
+  orderNumber: string;
+  orderStatus: string;
+  today: string;
+  rows: OutlookRow[];
+}
+
 // Pegging (#9): GET /manufacturing-orders/:id/coverage. Quantities are in the
 // component's BASE unit.
 export interface CoverageAllocation {
@@ -7609,6 +7666,51 @@ export interface RunPlanRow {
   // The row takes part in Ordningen inom dagen (a planned operation on its
   // planned start day) — the day's reorderable ids are what the PUT wants.
   reorderable: boolean;
+  // The co-run materials: purchased, linked to the operation, something left
+  // to draw. [] for a Planerad TO and for an operation without any.
+  materials: RunPlanMaterial[];
+  // false = "saknar kopplat material" (no linked row on a purchased article).
+  materialLinked: boolean;
+  // Open/paused stamp sessions on the operation.
+  activeStamps: RunPlanStamp[];
+}
+
+// Where a missing material is expected from (pegging) — only on a short row.
+export interface RunPlanMaterialSupply {
+  kind: "purchase_order" | "manufacturing_order";
+  documentId: string;
+  documentNumber: string;
+  // null = undated. For an overdue supply (`late`) its OWN day, not today.
+  date: string | null;
+  // The supply's own day has passed and it has still not arrived.
+  late: boolean;
+  isDraft: boolean;
+}
+
+export interface RunPlanMaterial {
+  // The material row's id (the order can carry the same article on another
+  // operation — kommer/saknas are this row's own).
+  materialRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  // The operation's row: planned − consumed.
+  remainingQuantity: number;
+  // The article's whole usable balance (never a Spärrad lagerplats).
+  usableOnHand: number;
+  // available ⇔ usableOnHand >= remainingQuantity — per row, not allocated.
+  status: "available" | "short";
+  // 0 when available. With a supply: what neither the shelf nor any supply
+  // covers of this row — shown beside "kommer" when above 0.
+  missingQuantity: number;
+  supply: RunPlanMaterialSupply | null; // only when short
+}
+
+export interface RunPlanStamp {
+  employeeId: string;
+  name: string;
+  paused: boolean;
 }
 
 export interface RunPlanDay {
@@ -7636,6 +7738,22 @@ export interface RunPlanStation {
   name: string;
 }
 
+// Material-läget: one ingoing material (purchased, linked to the operation,
+// something left) with the listed operations that draw it.
+export interface RunPlanMaterialGroup {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  // The sum of the rows' remaining quantities of the article.
+  totalRemainingQuantity: number;
+  usableOnHand: number;
+  // The usable balance does not cover the group together.
+  short: boolean;
+  // RunPlanRow.key, in the order of the list — each operation once.
+  rowKeys: string[];
+}
+
 export interface RunPlanResult {
   workCenter: RunPlanStation | null;
   today: string;
@@ -7645,4 +7763,282 @@ export interface RunPlanResult {
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];
+  materialGroups: RunPlanMaterialGroup[];
+  // The open orders' operations without linked purchased material.
+  unlinkedRowKeys: string[];
+}
+
+// Dagplan (GET /planning/day-plan): every resource's work one day.
+export interface DayPlanResource {
+  workCenter: RunPlanStation;
+  productionGroupId: string | null;
+  load: CapacityDayLoad;
+  // Kvar från tidigare: today the körplan's Försenad; a later day the
+  // planned operations that started an earlier day and still lie on the day.
+  carried: RunPlanRow[];
+  // The day's operations in körordning.
+  rows: RunPlanRow[];
+  // Tid kvar of carried + rows, in hours.
+  rowHours: number;
+  // The körplan's Ej planerad on the resource.
+  unplannedRows: number;
+  // På plats — only today.
+  present: { employeeId: string; name: string }[];
+  // Material-läget, grouped over carried + rows.
+  materialGroups: RunPlanMaterialGroup[];
+  unlinkedRowKeys: string[];
+}
+
+export interface DayPlanResult {
+  today: string;
+  date: string;
+  weekday: number; // ISO 1 = Monday … 7 = Sunday
+  isoWeek: number;
+  // The previous / next working day; null outside today … today + 41.
+  previousDate: string | null;
+  nextDate: string | null;
+  productionGroups: { id: string; code: string; name: string }[];
+  resources: DayPlanResource[];
+  totals: { rows: number; hours: number; unlinkedOperations: number; shortMaterials: number };
+}
+
+// Samkör (POST /planning/co-run and /planning/co-run/preview): the request…
+export interface CoRunInput {
+  workCenterId: string;
+  date: string;
+  // In the order the block is to be run; plannedStartDate = the start day
+  // the list showed (null = unplanned).
+  operations: { moOperationId: string; plannedStartDate: string | null }[];
+}
+
+export type CoRunOutcome = "moved" | "already_on_day" | "not_placed";
+
+// …and the answer of both: the preview computed, the write as written.
+export interface CoRunResult {
+  workCenter: RunPlanStation;
+  date: string;
+  // The selected operations, in the order they were sent.
+  operations: {
+    moOperationId: string;
+    manufacturingOrderId: string;
+    orderNumber: string;
+    sequenceNo: number;
+    fromDate: string | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+    outcome: CoRunOutcome;
+  }[];
+  // Operations that were not selected and whose days changed or were removed.
+  following: {
+    moOperationId: string;
+    manufacturingOrderId: string;
+    orderNumber: string;
+    sequenceNo: number;
+    workCenterCode: string;
+    fromStartDate: string | null;
+    plannedStartDate: string | null;
+    plannedEndDate: string | null;
+  }[];
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
+  lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
+  warnings: PlanWarning[];
+  // The selected operations' co-run materials, summed per article.
+  materials: RunPlanMaterialGroup[];
+  // The day's places afterwards: the ones already ordered, then the block.
+  runOrder: { moOperationId: string; orderNumber: string; sequenceNo: number; selected: boolean }[];
+}
+
+// --- Strukturvy (planeringsverktyget etapp 4) --------------------------------
+// GET /planning/structure?manufacturingOrderId=|salesOrderId= — one order's
+// whole tree (structure-tree.ts in the API). Derived at every read.
+export interface StructureOperation {
+  moOperationId: string;
+  sequenceNo: number;
+  description: string | null;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  status: "pending" | "done";
+  subcontract: boolean;
+  // Lego: Ledtid + Kötid in whole working days ("Lego · N dagar"); null otherwise.
+  subcontractDays: number | null;
+  started: boolean;
+  remainingHours: number;
+  planLocked: boolean;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  // Hours per day, a passed day clamped to today. Empty for lego, a done
+  // operation and an unplanned undated one.
+  days: { date: string; hours: number }[];
+}
+
+// The coupling to the parent (the material row or the kundorder row).
+export interface StructureLink {
+  quantity: number;
+  needDate: string | null;
+  late: boolean;
+  undated: boolean;
+  daysLate: number;
+  exclusive: boolean;
+}
+
+export type StructureNode =
+  | { kind: "sales_row"; id: string; parentId: null; level: 0; row: OutlookRow; orderNumber: string; customerName: string }
+  | {
+      kind: "order";
+      id: string;
+      parentId: string | null;
+      level: number;
+      manufacturingOrderId: string;
+      orderNumber: string;
+      orderStatus: string;
+      articleId: string;
+      articleNumber: string;
+      articleName: string;
+      remainingQuantity: number;
+      dueDate: string | null;
+      plannedStartDate: string | null;
+      plannedEndDate: string | null;
+      plannedFinish: string | null;
+      late: boolean;
+      componentLate: boolean;
+      link: StructureLink | null; // null on the root
+      repeatOf: string | null; // the id of the node where the TO is drawn
+      lockedOperations: number;
+      operations: StructureOperation[];
+    }
+  | {
+      kind: "material";
+      id: string;
+      parentId: string;
+      level: number;
+      materialRowId: string;
+      articleId: string;
+      articleNumber: string;
+      articleName: string;
+      articleType: "manufactured" | "purchased" | "service";
+      needDate: string | null;
+      quantity: number;
+      uncovered: number;
+      fromStockOnly: boolean;
+    }
+  | {
+      kind: "supply";
+      id: string;
+      parentId: string;
+      level: number;
+      supply: "stock" | "purchase_order";
+      documentId: string | null;
+      documentNumber: string | null;
+      quantity: number;
+      readyDate: string | null;
+      late: boolean;
+      undated: boolean;
+      daysLate: number;
+      isDraft: boolean;
+    }
+  | { kind: "missing"; id: string; parentId: string; level: number; quantity: number; manufacturable: boolean };
+
+export interface StructureAxisDay {
+  date: string;
+  isoWeek: number;
+  weekday: number; // ISO: 1 = Monday … 7 = Sunday
+  off: boolean; // Saturday, Sunday or a full-day holiday
+}
+
+export interface StructureResult {
+  today: string;
+  root:
+    | { kind: "sales_order"; salesOrderId: string; orderNumber: string; customerName: string; outlook: OrderOutlook }
+    | { kind: "manufacturing_order"; manufacturingOrderId: string; orderNumber: string };
+  // Flat, depth first, with parentId/level.
+  nodes: StructureNode[];
+  // Only with a TO at the top: one level up.
+  goesTo: CoverageGoesTo[];
+  axis: { from: string; to: string; days: StructureAxisDay[] };
+  // cycle = the article numbers where the guard stopped the tree.
+  truncated: { depth: boolean; nodes: boolean; cycle: string[] };
+  totals: { orders: number; lateOrders: number; componentLate: number; lockedOperations: number; missing: number };
+}
+
+// POST /planning/unlock-orders — Lås upp hela ordern / Lås upp strukturen.
+export interface UnlockOrdersResult {
+  unlocked: { manufacturingOrderId: string; orderNumber: string; operations: number }[];
+}
+
+// POST /manufacturing-orders/:id/replan-structure[/preview] — Planera om
+// strukturen. The preview and the write answer the same shape; the write
+// sends the preview's `expected` back unchanged.
+export interface ReplanStructureRequest {
+  dueDate: string | null; // the top's new färdigdatum; null = leave it
+  moveComponentDueDates: boolean;
+  includeOrderIds?: string[]; // the chosen halvfabrikat; left out (preview only) = the default
+}
+export interface ReplanExpectedOrder {
+  manufacturingOrderId: string;
+  dueDate: string | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+}
+export interface ReplanPlanWarning {
+  kind: "late" | "horizon" | "sequence" | "unscheduled_resource" | "long_operation";
+  manufacturingOrderId: string;
+  orderNumber: string;
+  sequenceNo?: number;
+  workCenterCode?: string;
+  dueDate?: string | null;
+  plannedFinish?: string | null;
+  remainingHours?: number;
+  message: string;
+}
+export interface ReplanDateRange {
+  start: string | null;
+  end: string | null;
+}
+export interface ReplanStructureOrder {
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleNumber: string;
+  articleName: string;
+  level: number; // 0 = the top
+  parentOrderId: string | null;
+  exclusive: boolean;
+  selectable: boolean; // open, and its parent is chosen
+  included: boolean;
+  sharedWith: string[];
+  dueDate: { before: string | null; after: string | null; late: boolean };
+  planned: { before: ReplanDateRange; after: ReplanDateRange };
+  plannedFinish: string | null;
+  lateAfter: boolean;
+  floor: { date: string; source: { kind: string; documentNumber: string } | null } | null;
+  operations: {
+    moOperationId: string;
+    sequenceNo: number;
+    workCenterCode: string;
+    subcontract: boolean;
+    started: boolean;
+    wasLocked: boolean;
+    before: ReplanDateRange;
+    after: ReplanDateRange;
+  }[];
+}
+export interface ReplanStructureResult {
+  today: string;
+  top: { manufacturingOrderId: string; orderNumber: string };
+  orders: ReplanStructureOrder[]; // the whole tree's TOs, depth first
+  overloadedDays: { workCenterCode: string; date: string; loadHours: number; availableHours: number | null }[];
+  warnings: ReplanPlanWarning[];
+  notes: string[];
+  blocked: { manufacturingOrderId: string; orderNumber: string }[];
+  expected: ReplanExpectedOrder[];
+}
+
+// POST /planning/operations/:opId/move/preview — what Flytta would do, with
+// nothing written: the operation's new days, the following operations, the
+// warnings, and the target day's load on the resource before and after.
+export interface MoveOperationPreview {
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null };
+  following: MoveOperationResult["following"];
+  warnings: PlanWarning[];
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
 }

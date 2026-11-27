@@ -7,6 +7,9 @@ import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
+import { DeliveryTimeBox } from "./DeliveryTimeBox";
+import { DeliveryOutlookCell, DeliveryOutlookHead, deliveryOutlookDetail, useDeliveryOutlook } from "./DeliveryOutlook";
+import { OUTLOOK_ORDER_STATUSES } from "../../lib/deliveryOutlook";
 import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
 import { formatSek } from "../../lib/shipping";
 import Link from "next/link";
@@ -178,9 +181,14 @@ export function SalesOrderDetail({
     useCan()(["kvalitet"]) && ["confirmed", "in_production", "delivered", "invoiced"].includes(order.status);
   // Leveranstidskontroll is open to Försäljning and Tillverkning alike.
   const canCheckDelivery = useCan()(["forsaljning", "tillverkning"]);
+  // Leveransläge: only an order whose rows are a demand has one, and it is
+  // read again whenever the card is (router.refresh() hands in new props).
+  const showOutlook = canCheckDelivery && OUTLOOK_ORDER_STATUSES.includes(order.status);
+  const deliveryOutlook = useDeliveryOutlook(order.id, showOutlook, rows);
   const [dtcOpen, setDtcOpen] = useState(false);
   const [dtcBusy, setDtcBusy] = useState(false);
   const [dtcError, setDtcError] = useState<string | null>(null);
+  const dtcInFlight = useRef(false);
   const pill = SALES_ORDER_STATUS_PILL[order.status];
   // Rows stay editable until the order is delivered/invoiced/cancelled;
   // per-row guards (quantity ≥ delivered, no delete with deliveries) are
@@ -587,11 +595,15 @@ export function SalesOrderDetail({
   }
 
   // "Använd datumet" in Leveranstidskontroll: sets the order's expected delivery date.
+  // One write at a time: the ref closes the gap before the busy state is
+  // rendered (a double click, the box and the dialog).
   async function useCheckedDate(date: string) {
-    const bumpRevision = await askBumpRevision(order.revision);
+    if (dtcInFlight.current) return;
+    dtcInFlight.current = true;
     setDtcError(null);
     setDtcBusy(true);
     try {
+      const bumpRevision = await askBumpRevision(order.revision);
       await apiFetch(`/api/v1/sales-orders/${order.id}`, {
         method: "PATCH",
         body: JSON.stringify({ expectedDeliveryDate: date, bumpRevision }),
@@ -601,6 +613,7 @@ export function SalesOrderDetail({
     } catch (err) {
       setDtcError(apiErrorMessage(err, "Kunde inte sätta leveransdatumet"));
     } finally {
+      dtcInFlight.current = false;
       setDtcBusy(false);
     }
   }
@@ -785,6 +798,26 @@ export function SalesOrderDetail({
         steps={<StatusStepper {...salesSteps(order)} />}
       />
 
+      {showOutlook && <DeliveryOutlookHead state={deliveryOutlook} />}
+
+      {/* Leveranstid on the quote card (S23): an estimate that books nothing;
+          Använd datumet sets Förväntat leveransdatum like the dialog does. */}
+      {order.status === "quote" && rows.length > 0 && (
+        <DeliveryTimeBox
+          request={{ salesOrderId: order.id }}
+          withCustomer
+          onUseDate={useCheckedDate}
+          useDateBusy={dtcBusy}
+          useDateError={dtcOpen ? null : dtcError}
+          rowsWithOwnDate={rows.filter((r) => r.expectedDeliveryDate).length}
+          refreshKey={JSON.stringify([
+            order.customerId,
+            order.revision,
+            rows.map((r) => [r.id, r.articleId, r.quantityOrdered, r.unitId ?? null, r.configuration ?? null]),
+          ])}
+        />
+      )}
+
       {customerChange && (
         <FormNotice style={{ marginBottom: 12 }}>
           Kunden är bytt till {customerChange.to.customerName}.{" "}
@@ -957,6 +990,10 @@ export function SalesOrderDetail({
             // its pill fit on one line on a wide screen; the floor fits the
             // heading.
             { key: "quantityInProduction", label: "I tillverkning", width: shareTrack(100, 1.5) },
+            // Leveransläge: the row's pill (it may break in two lines); the
+            // list it opens is drawn under the row (rowDetail), where there
+            // is room. Only on an order whose rows are a demand.
+            ...(showOutlook ? ([{ key: "deliveryOutlook", label: "Leveransläge", width: shareTrack(120) }] as const) : []),
             { key: "unitPrice", label: "Á-pris", width: shareTrack(inputsOpen ? 100 : 84), align: "right" },
             { key: "discountPercent", label: "Rabatt", width: inputsOpen ? "70px" : "52px", align: "right" },
             // Wide enough for the footer's "69 600,00 SEK" on one line.
@@ -966,6 +1003,7 @@ export function SalesOrderDetail({
               : []),
           ]}
           rows={rows}
+          rowDetail={showOutlook ? (row) => deliveryOutlookDetail(deliveryOutlook, row) : undefined}
           entryRow={entryEnabled ? { cells: entry.cells, span: entry.span } : undefined}
           // The totals box under the table carries Netto/Moms/Totalt; the
           // table's own sum only when there is no VAT summary.
@@ -1047,6 +1085,8 @@ export function SalesOrderDetail({
                 );
               case "quantityDelivered":
                 return toUnitQuantity(Number(row.quantityDelivered), row.unitFactor);
+              case "deliveryOutlook":
+                return <DeliveryOutlookCell state={deliveryOutlook} row={row} />;
               case "quantityInProduction": {
                 const createMo = offersCreateMo(row);
                 if (row.manufacturingOrders.length === 0 && !createMo) return null;

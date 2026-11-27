@@ -667,6 +667,140 @@ describe("Planera — Flytta (forced start on one operation)", () => {
   });
 });
 
+describe("Planera — earliestStart (materialet är klart, Planera om strukturen)", () => {
+  // A fixture with everything the engine does: priority, the chain with a
+  // queue, a locked and a started operation, done and 0-minute ones, lego,
+  // a resource without calendar and existing load.
+  const fixture = (earliestStart?: string | null): Partial<PlanProductionInput> & { orders: PlanOrder[] } => {
+    const withFloor = (o: PlanOrder): PlanOrder => (earliestStart === undefined ? o : { ...o, earliestStart });
+    return {
+      queueDays: 0.5,
+      existingOperations: [existing(6, TUE, { plannedDays: days([TUE, 6]) }), existing(8, THU)],
+      orders: [
+        order("a", "TO-1", FRI, (o) => [
+          pop(o, 10, 4, { operationStatus: "done", plannedDays: days([MON, 4]) }),
+          pop(o, 20, 12),
+          pop(o, 30, 0),
+          pop(o, 40, 0, { workCenterId: "wc-l" }),
+          pop(o, 50, 6),
+        ]),
+        order("b", "TO-2", null, (o) => [
+          pop(o, 10, 5, { started: true }),
+          pop(o, 20, 3, { planLocked: true, plannedDays: days([WED2, 3]) }),
+          pop(o, 30, 2, { workCenterId: "wc-2" }),
+        ]),
+        order("c", "TO-3", "2026-10-21", (o) => [pop(o, 10, 9, { workCenterId: "wc-3" }), pop(o, 20, 2)]),
+      ].map(withFloor),
+    };
+  };
+
+  it("left out, null, today or a day before today: the same result as before on the whole fixture", () => {
+    const before = plan(fixture());
+    expect(before.plans.length).toBeGreaterThan(4);
+    for (const earliestStart of [null, TODAY, "2026-10-12"]) {
+      expect(plan(fixture(earliestStart)), String(earliestStart)).toEqual(before);
+    }
+  });
+
+  it("the first operation may start ON the day, never before it; the next ones follow the chain", () => {
+    const route = (o: PlanOrder) => [pop(o, 10, 4), pop(o, 20, 4), pop(o, 30, 4, { workCenterId: "wc-3" })];
+    const result = plan({ orders: [{ ...order("a", "TO-1", null, route), earliestStart: WED }] });
+    expect(plansOf(result)).toEqual([
+      ["a:10", days([WED, 4])],
+      ["a:20", days([THU, 4])],
+      ["a:30", days([FRI, 4])],
+    ]);
+    expect(result.orders[0]!.plannedFinish).toBe(FRI);
+    expect(result.warnings).toEqual([]);
+    // With the Standardkötid the gaps count from the floor's chain as from today's.
+    const queued = plan({ queueDays: 1, orders: [{ ...order("a", "TO-1", null, route), earliestStart: WED }] });
+    expect(startsOf(queued)).toEqual([["a:10", WED], ["a:20", FRI], ["a:30", TUE2]]);
+  });
+
+  it("the first day with capacity from the floor: a full day and a weekend are jumped", () => {
+    const one = (o: PlanOrder) => [pop(o, 10, 4)];
+    const full = plan({
+      existingOperations: [existing(8, null, { plannedDays: days([WED, 8]) })],
+      orders: [{ ...order("a", "TO-1", null, one), earliestStart: WED }],
+    });
+    expect(plansOf(full)).toEqual([["a:10", days([THU, 4])]]);
+    const weekend = plan({ orders: [{ ...order("a", "TO-1", null, one), earliestStart: SAT }] });
+    expect(plansOf(weekend)).toEqual([["a:10", days([MON2, 4])]]);
+  });
+
+  it("only the order that has it waits — the other is planned from today, and takes the capacity first by priority", () => {
+    const result = plan({
+      orders: [
+        { ...order("a", "TO-1", "2026-10-20", (o) => [pop(o, 10, 6)]), earliestStart: TUE },
+        order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 12)]),
+      ],
+    });
+    // a (first by due date) books Tuesday 6 h; b fills Monday and what is left.
+    expect(plansOf(result)).toEqual([
+      ["a:10", days([TUE, 6])],
+      ["b:10", days([MON, 8], [TUE, 2], [WED, 2])],
+    ]);
+  });
+
+  it("a started operation is forced to today all the same; the operation after it follows the chain", () => {
+    const result = plan({
+      orders: [
+        {
+          ...order("a", "TO-1", null, (o) => [pop(o, 10, 4, { started: true }), pop(o, 20, 4)]),
+          earliestStart: THU,
+        },
+      ],
+    });
+    // The chain's ready day starts on the floor (operationChain: the latest
+    // ready day so far), so Op 20 waits for the material AND the gap after
+    // it — the working day after Thursday, as after any ready day.
+    expect(plansOf(result)).toEqual([
+      ["a:10", days([MON, 4])],
+      ["a:20", days([FRI, 4])],
+    ]);
+    // Nothing went before it in the chain: no sequence break.
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("a locked first operation keeps its days before the floor; the next one counts from it", () => {
+    const result = plan({
+      orders: [
+        {
+          ...order("a", "TO-1", null, (o) => [pop(o, 10, 4, { planLocked: true, plannedDays: days([MON, 4]) }), pop(o, 20, 4)]),
+          earliestStart: THU,
+        },
+      ],
+    });
+    expect(plansOf(result)).toEqual([["a:20", days([FRI, 4])]]);
+    expect(result.orders[0]!.plannedFinish).toBe(FRI);
+  });
+
+  it("lego first counts from the floor — also on a day off — and the finish day counts it", () => {
+    const route = (o: PlanOrder) => [pop(o, 10, 0, { workCenterId: "wc-l" }), pop(o, 20, 4)];
+    // Sent Wednesday 21, back five working days later (Wednesday 28), Op 20 the day after.
+    const weekday = plan({ orders: [{ ...order("a", "TO-1", null, route), earliestStart: WED }] });
+    expect(plansOf(weekday)).toEqual([["a:20", days([THU2, 4])]]);
+    // Saturday 24: sent Monday 26, back Monday 2 November.
+    const saturday = plan({ orders: [{ ...order("a", "TO-1", null, route), earliestStart: SAT }] });
+    expect(plansOf(saturday)).toEqual([["a:20", days(["2026-11-03", 4])]]);
+    const legoOnly = plan({
+      orders: [{ ...order("a", "TO-1", MON2, (o) => [pop(o, 10, 0, { workCenterId: "wc-l" })]), earliestStart: SAT }],
+    });
+    expect(legoOnly.orders[0]).toMatchObject({ plannedFinish: MON3, late: true });
+  });
+
+  it("a hand move (forceStart) wins over the floor; what follows still waits for the material", () => {
+    const result = plan({
+      forceStart: { operationId: "a:10", date: TUE },
+      orders: [{ ...order("a", "TO-1", null, (o) => [pop(o, 10, 4), pop(o, 20, 4)]), earliestStart: THU }],
+    });
+    expect(plansOf(result)).toEqual([
+      ["a:10", days([TUE, 4])],
+      ["a:20", days([FRI, 4])],
+    ]);
+  });
+});
+
 describe("Planera — determinism", () => {
   const orders = () => [
     order("c", "TO-3", "2026-11-13", (o) => [pop(o, 10, 20), pop(o, 20, 0, { workCenterId: "wc-l" }), pop(o, 30, 15)]),

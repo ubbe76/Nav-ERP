@@ -29,6 +29,7 @@ import {
   setupDoneOnCurrentResource,
   type CapacityOperationRow,
 } from "./capacity-calc.js";
+import { groupRunPlanByMaterial, type RunPlanMaterialGroup } from "./co-run.js";
 
 // A Planerad TO's operation on the resource: a capacity row that may lack an
 // mo_operations id (a plain planned TO's operations are still the article's
@@ -100,6 +101,66 @@ export interface RunPlanRow {
   // list PUT /planning/run-plan/order wants. An unplanned operation lies on
   // its due date and a Planerad TO's operation has no place: both false.
   reorderable: boolean;
+  // The co-run materials (B3); [] for a Planerad TO and for an operation
+  // without any — and when the reader did not load them.
+  materials: RunPlanMaterial[];
+  // The operation has at least one linked row on a PURCHASED article,
+  // whatever is left of it; false = "saknar kopplat material".
+  materialLinked: boolean;
+  // Open/paused stamp sessions on the operation.
+  activeStamps: RunPlanStamp[];
+}
+
+// Where a missing material is expected from (pegging) — only on a short row.
+export interface RunPlanMaterialSupply {
+  kind: "purchase_order" | "manufacturing_order";
+  documentId: string;
+  documentNumber: string;
+  // The day the supply is expected; null = undated. For a supply whose own
+  // day has passed (`late`) it is THAT day, not today — an overdue IO must
+  // not read as "kommer i dag" every morning.
+  date: string | null;
+  // The supply's own day lies before today and it has still not arrived.
+  late: boolean;
+  isDraft: boolean;
+}
+
+// One co-run material of the operation (B3: purchased, linked to the
+// operation, something left to draw) with what the shelf holds.
+export interface RunPlanMaterial {
+  // mo_material_consumptions.id — the order can carry the same article on
+  // another operation or unlinked; the pegging's demand is this row's.
+  materialRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  // The operation's row: planned − consumed.
+  remainingQuantity: number;
+  // onHandByArticle(...).usable, round4 — the article's whole usable balance.
+  usableOnHand: number;
+  // available ⇔ usableOnHand >= remainingQuantity (per row against the
+  // whole balance — Materialbrist's base, not pegging).
+  status: "available" | "short";
+  // 0 when available. Short without a supply: what the row lacks. Short
+  // WITH a supply: what neither the shelf nor any supply covers of THIS row
+  // (the pegging's uncovered) — shown beside "kommer" when above 0.
+  missingQuantity: number;
+  supply: RunPlanMaterialSupply | null; // only when short
+}
+
+// An open or paused stamp session on the operation.
+export interface RunPlanStamp {
+  employeeId: string;
+  name: string;
+  paused: boolean;
+}
+
+// What the reader loaded per operation (moOperationId) — buildRunPlan only
+// puts it on the rows.
+export interface RunPlanOperationMaterials {
+  materials: RunPlanMaterial[];
+  linked: boolean;
 }
 
 // One group of the list, in list order: Försenad first (every day before
@@ -131,6 +192,10 @@ export interface RunPlanResult {
   totalMinutes: number;
   totalHours: number;
   stations: RunPlanStation[];
+  // Material-läget: the listed rows per co-run material, and the open
+  // orders' operations without linked material (groupRunPlanByMaterial).
+  materialGroups: RunPlanMaterialGroup[];
+  unlinkedRowKeys: string[];
 }
 
 const addDays = (date: string, days: number) => {
@@ -179,6 +244,11 @@ export function buildRunPlan(input: {
   operations: CapacityOperationRow[];
   // The Planerade TO:s operations on the resource.
   plannedOrderOperations: RunPlanPlannedOperation[];
+  // Per moOperationId, loaded by the reader. Left out (fixtures, readers
+  // that do not show them) = no materials, not linked, no stamps. Never
+  // read by the order, the selection, the dagnyckel or `reorderable`.
+  materials?: ReadonlyMap<string, RunPlanOperationMaterials>;
+  stamps?: ReadonlyMap<string, RunPlanStamp[]>;
 }): RunPlanResult {
   const byOrder = new Map<string, CapacityOperationRow[]>();
   for (const op of input.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
@@ -200,6 +270,8 @@ export function buildRunPlan(input: {
     const date = operationStartDate(op);
     const range = plannedDateRange(op);
     const ready = plannedOrder || op.moOperationId == null ? null : readiness.get(op.moOperationId)!;
+    const extrasId = plannedOrder ? null : op.moOperationId;
+    const material = extrasId == null ? undefined : input.materials?.get(extrasId);
     return {
       key: op.moOperationId ?? `${op.manufacturingOrderId}:${op.sequenceNo}`,
       moOperationId: op.moOperationId,
@@ -226,6 +298,9 @@ export function buildRunPlan(input: {
       available: ready ? ready.available : null,
       waitingForSequenceNo: ready && ready.readiness !== "ready" ? (previous.get(op.moOperationId!) ?? null) : null,
       reorderable: !plannedOrder && op.moOperationId != null && range != null && range.start >= input.today,
+      materials: material?.materials ?? [],
+      materialLinked: material?.linked ?? false,
+      activeStamps: (extrasId == null ? undefined : input.stamps?.get(extrasId)) ?? [],
       minutes,
     };
   };
@@ -276,15 +351,19 @@ export function buildRunPlan(input: {
     if (row.reorderable) group.reorderable = true;
   }
   const total = listed.reduce((sum, row) => sum + row.minutes, 0);
+  const rows: RunPlanRow[] = listed.map(({ minutes: _minutes, ...row }) => row);
+  const material = groupRunPlanByMaterial(rows);
 
   return {
     workCenter: { id: input.workCenter.id, code: input.workCenter.code, name: input.workCenter.name },
     today: input.today,
     toDate: input.toDate,
-    rows: listed.map(({ minutes: _minutes, ...row }) => row),
+    rows,
     days: groups.map(({ sum, ...g }) => ({ ...g, minutes: round2(sum), hours: round2(sum / 60) })),
     totalMinutes: round2(total),
     totalHours: round2(total / 60),
     stations: input.stations,
+    materialGroups: material.groups,
+    unlinkedRowKeys: material.unlinkedRowKeys,
   };
 }

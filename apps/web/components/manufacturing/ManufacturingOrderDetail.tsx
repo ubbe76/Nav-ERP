@@ -67,9 +67,10 @@ import { Lock } from "lucide-react";
 import { suggestionText } from "../../lib/resourceSuggestion";
 import { SwitchResourceButton } from "../planning/SwitchResourceButton";
 import { plannedDateLabel } from "../../lib/planning";
-import { CoveredByCell, GoesToSection, coverageOfRow } from "./CoverageSections";
+import { CoveredByCell, GoesToSection, StructureLink, coverageOfRow } from "./CoverageSections";
 import { MoveComponentsDialog } from "./MoveComponentsDialog";
 import { MissingComponentsDialog } from "./MissingComponentsDialog";
+import { ReplanStructureDialog } from "../planning/ReplanStructureDialog";
 import { PrintButton } from "../documents/PrintButton";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { formatStockholmDateTime } from "../../lib/date";
@@ -137,6 +138,7 @@ export function ManufacturingOrderDetail({
   const [coverage, setCoverage] = useState<ManufacturingOrderCoverage | null>(null);
   const [moveOpen, setMoveOpen] = useState(false);
   const [missingOpen, setMissingOpen] = useState(false);
+  const [replanOpen, setReplanOpen] = useState(false);
   // A request sequence: the effect and the dialogs' onMoved/onCreated can
   // overlap, and only the LAST request may write — an older answer landing
   // after the post-commit one would show stale Saknas/moves.
@@ -333,6 +335,19 @@ export function ManufacturingOrderDetail({
             Skapa saknade halvfabrikat…
           </Button>
         )}
+        {/* Planera om strukturen: this TO and the halvfabrikat-TOs under it,
+            children first, locked — only an open order, only with Tillverkning. */}
+        {canEditLines && (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={dueDateDirty}
+            title={dueDateDirty ? "Spara färdigdatumet först" : undefined}
+            onClick={() => setReplanOpen(true)}
+          >
+            Planera om strukturen…
+          </Button>
+        )}
         {/* Shop-floor printout — the article's drawings are appended. */}
         <PrintButton href={`/api/v1/manufacturing-orders/${order.id}/pdf`} label="Skriv ut TO" size="default" />
         <a
@@ -466,11 +481,14 @@ export function ManufacturingOrderDetail({
 
       <SectionHeading
         actions={
-          canEditLines && (
-            <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: null })}>
-              + Lägg till material
-            </Button>
-          )
+          <>
+            <StructureLink manufacturingOrderId={order.id} />
+            {canEditLines && (
+              <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: null })}>
+                + Lägg till material
+              </Button>
+            )}
+          </>
         }
       >
         Material
@@ -539,6 +557,17 @@ export function ManufacturingOrderDetail({
           loadCoverage().catch(() => undefined);
         }}
       />
+      {canEditLines && (
+        <ReplanStructureDialog
+          target={replanOpen ? { manufacturingOrderId: order.id, orderNumber: order.orderNumber } : null}
+          onClose={() => setReplanOpen(false)}
+          onChanged={() => {
+            setHistoryKey((k) => k + 1);
+            router.refresh();
+            loadCoverage().catch(() => undefined);
+          }}
+        />
+      )}
       <MissingComponentsDialog
         open={missingOpen}
         onClose={() => setMissingOpen(false)}

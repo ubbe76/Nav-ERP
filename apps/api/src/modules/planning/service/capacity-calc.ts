@@ -253,6 +253,10 @@ export interface CapacitySummary {
   // Förslag på resurs (#15): every open operation's förslag, by order number
   // and sequence (the räknare's list — not narrowed by the group filter).
   resourceSuggestions: ResourceSuggestion[];
+  // "N låsta": the pending operations with a locked plan (Flytta, Samkör,
+  // the reservation) among the loaded ones — not narrowed by the group
+  // filter either. Strukturvyn's node counter is the same predicate.
+  lockedOperations: number;
 }
 
 export interface CapacityResult {
@@ -438,6 +442,20 @@ export function plannedDateRange(op: Pick<CapacityOperationRow, "plannedDays">):
   return { start: dates[0]!, end: dates[dates.length - 1]! };
 }
 
+// An order's planned days as the TO list shows them: the first and the last
+// stored day among its PENDING operations with a plan (null = none). ONE
+// expression for the plan summaries (orderPlanSummaries) and for Planera om
+// strukturen's before/after and its `expected`.
+export function orderPlannedRange(
+  operations: readonly Pick<CapacityOperationRow, "operationStatus" | "plannedDays">[]
+): { start: string | null; end: string | null } {
+  const dates = operations
+    .filter((op) => op.operationStatus === "pending" && !!op.plannedDays && op.plannedDays.length > 0)
+    .flatMap((op) => op.plannedDays!.map((d) => d.date))
+    .sort();
+  return { start: dates[0] ?? null, end: dates[dates.length - 1] ?? null };
+}
+
 // The day an operation is due to start, NOT clamped to today (the körplan's
 // dagnyckel — a day before today is Försenad): the plan's first day when
 // planned, else the MO's due date — the very day operationLoadDays buckets
@@ -456,6 +474,13 @@ export function operationLoadDays(op: CapacityOperationRow, today: string): { da
   if (minutes <= 0) return [];
   if (op.plannedDays && op.plannedDays.length > 0) return remainingByPlannedDays(minutes, op.plannedDays, today);
   return [{ date: loadBucketDay(op.dueDate, today), minutes }];
+}
+
+// Låst — a pending operation whose planned days Planera keeps (Flytta,
+// Samkör, the reservation). ONE predicate for Beläggning's "N låsta" and
+// Strukturvyn's counters.
+export function isLockedOperation(op: Pick<CapacityOperationRow, "operationStatus" | "planLocked">): boolean {
+  return op.operationStatus === "pending" && (op.planLocked ?? false);
 }
 
 // Påbörjad — ONE rule for Planera, Flytta, the replanning after a Byt and
@@ -501,11 +526,14 @@ export function subcontractReadyDate(
   floor: string,
   offDays: ReadonlySet<string>
 ): string {
-  return addWorkingDays(
-    nextWorkingDayOnOrAfter(floor, offDays),
-    ceilDays(Math.max(0, (wc.leadTimeDays ?? 0) + (wc.queueTimeDays ?? 0))),
-    offDays
-  );
+  return addWorkingDays(nextWorkingDayOnOrAfter(floor, offDays), subcontractDays(wc), offDays);
+}
+
+// A lego resource's Ledtid + Kötid in whole working days — the days
+// subcontractReadyDate adds after the floor, and Strukturvyn's text
+// "Lego · N dagar" (ONE expression for both).
+export function subcontractDays(wc: { leadTimeDays?: number | null; queueTimeDays?: number | null }): number {
+  return ceilDays(Math.max(0, (wc.leadTimeDays ?? 0) + (wc.queueTimeDays ?? 0)));
 }
 
 // The walk every reader of the chain makes, so none of them can count the
@@ -641,6 +669,41 @@ function finishCell(cell: CapacityCell): CapacityCell {
 function dayLoadOf(date: string, loadHours: number, availableHours: number | null): CapacityDayLoad {
   const cell = finishCell({ ...emptyCell(), loadHours, availableHours });
   return { date, loadHours: cell.loadHours, availableHours: cell.availableHours, overloaded: cell.overloaded };
+}
+
+// The load and the capacity of ONE day per resource — the same three rules
+// computeCapacity puts together for `dayLoads`: operationLoadDays (the
+// bucket), resourceDayMinutes × capacityFactor (the capacity) and dayLoadOf /
+// finishCell (rounding, overload). Never a rule of its own: the test "equals
+// the matrix's dayLoads" compares it with the day view for every resource
+// and day. Keyed on workCenterId; every own resource is in (loadHours 0
+// without load), legoresurser never — as in the matrix.
+export function resourceDayLoads(
+  input: Pick<CapacityInput, "workCenters" | "operations" | "weekScheduleDays" | "daySchedules" | "holidays">,
+  today: string,
+  date: string
+): Map<string, CapacityDayLoad> {
+  const lookups = buildScheduleLookups(input.weekScheduleDays, input.daySchedules, input.holidays);
+  const workCenters = input.workCenters.filter((w) => w.type !== "subcontract");
+  const loadHours = new Map<string, number>(workCenters.map((w) => [w.workCenterId, 0]));
+  for (const operation of input.operations) {
+    const hours = loadHours.get(operation.workCenterId);
+    if (hours === undefined) continue;
+    // Summed per operation in hours, as the matrix's day cell is.
+    let minutes = 0;
+    for (const chunk of operationLoadDays(operation, today)) if (chunk.date === date) minutes += chunk.minutes;
+    if (minutes > 0) loadHours.set(operation.workCenterId, hours + minutes / 60);
+  }
+  return new Map(
+    workCenters.map((w) => [
+      w.workCenterId,
+      dayLoadOf(
+        date,
+        loadHours.get(w.workCenterId)!,
+        hasCapacityCalendar(w) ? (resourceDayMinutes(lookups, w, date) / 60) * w.capacityFactor : null
+      ),
+    ])
+  );
 }
 
 export function computeCapacity(
@@ -993,6 +1056,14 @@ export function computeCapacity(
     weeks,
     days,
     groups,
-    summary: { plannedAt, overloadedCells, overloadedDays, lateOrders, unplannedOrders, resourceSuggestions },
+    summary: {
+      plannedAt,
+      overloadedCells,
+      overloadedDays,
+      lateOrders,
+      unplannedOrders,
+      resourceSuggestions,
+      lockedOperations: input.operations.filter(isLockedOperation).length,
+    },
   };
 }

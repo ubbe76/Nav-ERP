@@ -153,7 +153,7 @@ describe("Kräver kostnadsställe", () => {
     expect(missing[0]).toMatchObject({ verificationId: issued!.verificationId, accountNumbers: ["3001"] });
     const alerts = createAlertsService({
       repo: alertsRepo,
-      planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
+      planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map(), deliveryRiskOrders: async () => [] },
       settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => TODAY,
     });

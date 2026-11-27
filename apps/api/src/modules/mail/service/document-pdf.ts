@@ -639,10 +639,19 @@ export interface OrderRegisterPdfInput {
 
 // Körplan (planning module formats every cell). Landscape A4: the resource's
 // pending operations grouped per day, a sum line per group and a total.
+// Dagplanen prints through the same renderer with `materialHeading` set:
+// the first column is then narrow (Nr), Låst is left out (the caller writes
+// it in the status text) and a Material column, wrapped over as many lines
+// as it needs, comes last. Without it the printout is the körplan's, call
+// for call.
 export interface RunPlanPdfInput {
   title: string;
   subtitle: string;
   emptyText: string;
+  // The first column's heading; left out = "Dag".
+  firstColumnHeading?: string;
+  // Set = Dagplanens column set (DAY_PLAN_COLS) with this heading last.
+  materialHeading?: string;
   groups: {
     heading: string;
     totalLabel: string;
@@ -657,6 +666,8 @@ export interface RunPlanPdfInput {
       dueDate: string;
       status: string;
       locked: string;
+      // Only printed with materialHeading.
+      material?: string;
     }[];
   }[];
   totalLabel: string;
@@ -1104,6 +1115,20 @@ const RUN_PLAN_COLS = {
   dueDate: { x: 540, w: 58 },
   status: { x: 601, w: 108 },
   locked: { x: 712, w: 30 },
+} as const;
+
+// Dagplanen: Nr instead of Dag, no Låst, Material last.
+const DAY_PLAN_COLS = {
+  day: { x: 0, w: 20 },
+  orderNumber: { x: 23, w: 62 },
+  article: { x: 88, w: 125 },
+  operation: { x: 216, w: 95 },
+  remainingQuantity: { x: 314, w: 44 },
+  remainingTime: { x: 361, w: 50 },
+  dueDate: { x: 419, w: 54 },
+  // Wide enough for "5 redo · väntar på op 10 · Låst".
+  status: { x: 476, w: 138 },
+  material: { x: 617, w: 125 },
 } as const;
 
 const VERIFICATION_LIST_COLS = {
@@ -3376,7 +3401,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   async function renderRunPlan(input: RunPlanPdfInput): Promise<Buffer> {
     const { doc, finished } = await startDocument({ landscape: true });
     const left = PAGE_MARGIN;
-    const C = RUN_PLAN_COLS;
+    // Dagplanens column set; null = the körplan's own.
+    const D = input.materialHeading != null ? DAY_PLAN_COLS : null;
+    const C = D ?? RUN_PLAN_COLS;
     let y = startReport(doc, input.title, input.subtitle);
     const cell = (text: string, col: { x: number; w: number }, align: "left" | "right" = "left") =>
       // One line per cell (the height cap cuts a too-long text with an
@@ -3393,7 +3420,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     const header = () => {
       doc.font(FONT_BOLD).fontSize(8.5);
-      cell("Dag", C.day);
+      cell(input.firstColumnHeading ?? "Dag", C.day);
       cell("TO", C.orderNumber);
       cell("Artikel", C.article);
       cell("Operation", C.operation);
@@ -3401,7 +3428,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       cell("Tid kvar", C.remainingTime, "right");
       cell("Färdigdatum", C.dueDate);
       cell("Status", C.status);
-      cell("Låst", C.locked);
+      if (D) cell(input.materialHeading!, D.material);
+      else cell("Låst", RUN_PLAN_COLS.locked);
       y += 12;
       rule("#999999");
       y += 4;
@@ -3429,7 +3457,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += 14;
       doc.font(FONT).fontSize(8.5);
       for (const row of group.rows) {
-        ensure(12);
+        // The material text wraps (several materials on one operation); the
+        // row is as high as it needs. The körplan's rows are always 12.
+        let rowHeight = 12;
+        if (D && row.material) {
+          doc.font(FONT).fontSize(8.5);
+          rowHeight = Math.max(12, Math.ceil(doc.heightOfString(row.material, { width: D.material.w })) + 2);
+        }
+        ensure(rowHeight);
         doc.font(FONT).fontSize(8.5);
         cell(row.day, C.day);
         cell(row.orderNumber, C.orderNumber);
@@ -3439,8 +3474,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         cell(row.remainingTime, C.remainingTime, "right");
         cell(row.dueDate, C.dueDate);
         cell(row.status, C.status);
-        cell(row.locked, C.locked);
-        y += 12;
+        if (D) doc.text(row.material ?? "", left + D.material.x, y, { width: D.material.w });
+        else cell(row.locked, RUN_PLAN_COLS.locked);
+        y += rowHeight;
       }
       ensure(16);
       doc.font(FONT_ITALIC).fontSize(8.5);

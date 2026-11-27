@@ -51,9 +51,13 @@ describe("page access table", () => {
         // Mina inställningar is every account's own page.
         "/mina-installningar",
         "/tillverkning",
+        // Dagplan and its Mötesläge read like Körplan.
+        "/tillverkning/dagplan",
+        "/tillverkning/dagplan/mote",
         "/tillverkning/korplan",
         "/tillverkning/ordrar",
         "/tillverkning/ordrar/x1",
+        "/tillverkning/struktur",
         "/tillverkning/terminal",
       ].sort()
     );

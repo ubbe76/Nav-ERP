@@ -16,18 +16,32 @@ const OPEN = new Set(["planned", "released", "in_progress"]);
 const FINISHED = new Set(["done", "closed"]);
 const round4 = (n: number) => Number(n.toFixed(4));
 
-export function uncoveredConfiguredQuantity(input: {
+export interface ConfiguredCoverageInput {
   quantityOrdered: number;
   quantityDelivered: number;
   linkedOrders: { status: string; quantity: number; received: number }[];
-}): number {
+}
+
+// An open linked TO — the ones that still have something to receive.
+export function isOpenLinkedOrder(status: string): boolean {
+  return OPEN.has(status);
+}
+
+// The two sums the rule nets — Leveransläget (delivery-outlook.ts) reads the
+// same ones for the finished units that have not left yet.
+export function configuredCoverageSums(linkedOrders: ConfiguredCoverageInput["linkedOrders"]): { open: number; finished: number } {
   let open = 0;
   let finished = 0;
-  for (const o of input.linkedOrders) {
+  for (const o of linkedOrders) {
     if (OPEN.has(o.status)) {
       open += Math.max(0, o.quantity - o.received);
       finished += o.received;
     } else if (FINISHED.has(o.status)) finished += o.quantity;
   }
+  return { open, finished };
+}
+
+export function uncoveredConfiguredQuantity(input: ConfiguredCoverageInput): number {
+  const { open, finished } = configuredCoverageSums(input.linkedOrders);
   return Math.max(0, round4(input.quantityOrdered - open - Math.max(input.quantityDelivered, finished)));
 }

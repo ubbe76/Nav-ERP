@@ -172,6 +172,16 @@ export type RunPlanQuery = z.infer<typeof runPlanQuerySchema>;
 export const runPlanPdfQuerySchema = runPlanQuerySchema.required({ workCenterId: true });
 export type RunPlanPdfQuery = z.infer<typeof runPlanPdfQuerySchema>;
 
+// GET /planning/day-plan[/pdf] — Dagplan: every resource's work ONE day.
+// `date` left out = today (Stockholm); the service refuses a day outside
+// today … today + 41 (400 day-plan-date-out-of-range). An unknown
+// productionGroupId is a selection without resources, never a 404.
+export const dayPlanQuerySchema = z.object({
+  date: businessDateSchema.optional(),
+  productionGroupId: z.string().uuid().optional(),
+});
+export type DayPlanQuery = z.infer<typeof dayPlanQuerySchema>;
+
 // PUT /planning/run-plan/order — the order within ONE day on a resource
 // (#18): the WHOLE day's list of operations in the wanted order. The order
 // only steers the körplan and the terminal's list, never a date.
@@ -186,12 +196,33 @@ export const runPlanOrderSchema = z.object({
 });
 export type RunPlanOrderInput = z.infer<typeof runPlanOrderSchema>;
 
+// POST /planning/co-run[/preview] — Samkör: the chosen operations of ONE
+// resource are moved to `date` with Flytta's rule, laid next to each other in
+// the day's order and locked. `plannedStartDate` = the start day the list
+// showed (null = unplanned) — another one under the lock refuses the whole
+// request (409 co-run-changed). Sent in the order the block is to be run.
+export const coRunSchema = z.object({
+  workCenterId: z.string().uuid(),
+  date: businessDateSchema,
+  operations: z
+    .array(z.object({ moOperationId: z.string().uuid(), plannedStartDate: businessDateSchema.nullable() }))
+    .min(2)
+    .max(50)
+    .refine((ops) => new Set(ops.map((o) => o.moOperationId)).size === ops.length, { message: "operations must be unique" }),
+});
+export type CoRunInput = z.infer<typeof coRunSchema>;
+
 // POST /planning/operations/:opId/move — Flytta: the operation starts on
 // `date` (the day's whole capacity, overload allowed) and is locked; with
 // moveFollowing the TO's later unlocked operations are replanned after it.
+// `expectedStartDate` = the start day the view showed (null = unplanned):
+// another stored start day under the lock refuses the move (409
+// operation-plan-changed). Left out (integrations) = no test. The same body
+// goes to …/move/preview, which answers what the move would do.
 export const moveOperationSchema = z.object({
   date: businessDateSchema,
   moveFollowing: z.boolean().default(true),
+  expectedStartDate: businessDateSchema.nullable().optional(),
 });
 export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
 
@@ -268,3 +299,65 @@ export const articleForecastUpdateSchema = z.object({
     .refine((months) => new Set(months.map((m) => m.month)).size === months.length, { message: "each month at most once" }),
 });
 export type ArticleForecastUpdateInput = z.infer<typeof articleForecastUpdateSchema>;
+
+// GET /planning/structure — Strukturvyn (planeringsverktyget etapp 4): ONE
+// order's whole tree, opened on a tillverkningsorder or on a kundorder —
+// exactly one of the two.
+export const structureQuerySchema = z
+  .object({ manufacturingOrderId: z.string().uuid().optional(), salesOrderId: z.string().uuid().optional() })
+  .refine((q) => (q.manufacturingOrderId ? 1 : 0) + (q.salesOrderId ? 1 : 0) === 1, {
+    message: "exactly one of manufacturingOrderId and salesOrderId",
+  });
+export type StructureQuery = z.infer<typeof structureQuerySchema>;
+
+// POST /planning/unlock-orders — Lås upp hela ordern (one TO) / Lås upp
+// strukturen (every TO of the shown tree). Idempotent, so no `expected`:
+// removing a lock can never hurt. Each TO at most once.
+export const unlockOrdersSchema = z.object({
+  manufacturingOrderIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(200)
+    .refine((ids) => new Set(ids).size === ids.length, { message: "A manufacturing order may only be listed once" }),
+});
+export type UnlockOrdersInput = z.infer<typeof unlockOrdersSchema>;
+
+// POST /manufacturing-orders/:id/replan-structure[/preview] — Planera om
+// strukturen (planeringsverktyget etapp 5): the top TO and the chosen
+// halvfabrikat-TOs under it planned again, children before parents, and
+// locked. `dueDate` = the top's new färdigdatum (null = leave it);
+// `moveComponentDueDates` writes Flytta halvfabrikatens suggestions for the
+// chosen TOs; `includeOrderIds` = the chosen halvfabrikat (the top is always
+// in). The preview may leave them out = the default choice. `expected` is
+// what the preview answered (the tree's TOs with their due dates and planned
+// days) — sent back unchanged; anything else under the lock is 409
+// replan-structure-changed. No number fields.
+const replanIncludeOrderIds = z
+  .array(z.string().uuid())
+  .max(200)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "A manufacturing order may only be listed once" });
+const replanStructureBase = z.object({
+  dueDate: businessDateSchema.nullable(),
+  moveComponentDueDates: z.boolean(),
+});
+export const replanStructurePreviewSchema = replanStructureBase.extend({ includeOrderIds: replanIncludeOrderIds.optional() });
+export type ReplanStructurePreviewInput = z.infer<typeof replanStructurePreviewSchema>;
+export const replanStructureSchema = replanStructureBase.extend({
+  includeOrderIds: replanIncludeOrderIds,
+  expected: z
+    .array(
+      z.object({
+        manufacturingOrderId: z.string().uuid(),
+        dueDate: businessDateSchema.nullable(),
+        plannedStartDate: businessDateSchema.nullable(),
+        plannedEndDate: businessDateSchema.nullable(),
+      })
+    )
+    .min(1)
+    // The whole tree, chosen or not — Strukturvyn's own bound on a tree.
+    .max(600)
+    .refine((rows) => new Set(rows.map((r) => r.manufacturingOrderId)).size === rows.length, {
+      message: "A manufacturing order may only be listed once",
+    }),
+});
+export type ReplanStructureInput = z.infer<typeof replanStructureSchema>;

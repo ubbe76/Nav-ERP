@@ -1,0 +1,826 @@
+/* Dagplan. Two row layouts share the markup: a table (a resource section at
+   least 860px wide) and cards (narrower: a phone, a small window, and
+   always Mötesläget, whose sections are capped below that width). Sizes
+   hang on a few local variables so Mötesläget only has to raise them. */
+.page {
+  --dp-font: 13.5px;
+  --dp-small: 12px;
+  --dp-title: 16px;
+  --dp-row-pad: 9px;
+  font-family: var(--font-body);
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.page[data-loading="true"] .resources {
+  opacity: 0.6;
+  transition: opacity 150ms ease 200ms;
+}
+
+/* --- Toolbar ---------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 20px;
+  margin-bottom: 12px;
+}
+
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.dayNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dayButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.dayButton:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dayButton:focus-visible,
+.moveButton:focus-visible,
+.noticeClose:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dayTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+  margin: 0 4px;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.todayBadge {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+.summary strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.summaryWarn {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.summaryMuted {
+  color: var(--color-text-secondary);
+}
+
+.notice {
+  margin-bottom: 12px;
+}
+
+.noticeHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.noticeClose {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.noticeList {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.idle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* --- A resource -------------------------------------------------------- */
+
+.resources {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.resource {
+  container-type: inline-size;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+}
+
+/* Sticky while its rows scroll by. No overflow on the section — that would
+   stop the sticking — so the rounded corners are repeated here. */
+.resourceHeader {
+  position: sticky;
+  top: var(--app-toolbar-height);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 18px;
+  padding: 10px 16px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card) var(--radius-kpi-card) 0 0;
+}
+
+.resourceTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--dp-title);
+  font-weight: 600;
+}
+
+.resourceCode {
+  color: var(--color-heading-accent);
+}
+
+.resourceName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--dp-font);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.load[data-tone="alert"] {
+  padding: 1px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+}
+
+.loadTrack {
+  width: 72px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--color-track);
+  overflow: hidden;
+}
+
+.loadBar {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--status-running);
+}
+
+.load[data-tone="alert"] .loadTrack {
+  background: var(--color-track-on-tint);
+}
+
+.load[data-tone="alert"] .loadBar {
+  background: var(--status-stopped);
+}
+
+.present {
+  min-width: 0;
+  font-size: var(--dp-font);
+  color: var(--color-text-primary);
+}
+
+.presentLabel {
+  color: var(--color-text-secondary);
+}
+
+.unplanned {
+  margin-left: auto;
+  font-size: var(--dp-small);
+  font-weight: 600;
+  color: var(--status-delayed-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+a.unplanned:hover {
+  text-decoration: underline;
+}
+
+.noRows {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: var(--dp-font);
+  color: var(--color-text-muted);
+}
+
+/* --- Rows: the table (default) ----------------------------------------- */
+
+/* Two lines per operation: what and how much on the first, the article and
+   its material on the second — so the table fits beside the menu on a
+   1366px screen without scrolling sideways. */
+.list {
+  --dp-columns: 26px 84px minmax(0, 1.3fr) 82px 84px 92px minmax(0, 1fr);
+  --dp-areas: "nr order operation quantity hours due status" "nr article article material material material material"
+    "nr . . stamps stamps stamps stamps";
+}
+
+.list[data-columns="write"] {
+  --dp-columns: 26px 84px minmax(0, 1.3fr) 82px 84px 92px minmax(0, 1fr) 88px 30px;
+  --dp-areas: "nr order operation quantity hours due status ordering menu"
+    "nr article article material material material material ordering menu"
+    "nr . . stamps stamps stamps stamps ordering menu";
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.headRow,
+.row {
+  display: grid;
+  grid-template-columns: var(--dp-columns);
+  column-gap: 12px;
+  padding: 0 16px;
+}
+
+.headRow {
+  padding-top: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.headRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.right {
+  text-align: right;
+}
+
+.band {
+  padding: 6px 16px;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--dp-small);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.row {
+  position: relative;
+  grid-template-areas: var(--dp-areas);
+  row-gap: 3px;
+  align-items: start;
+  padding-top: var(--dp-row-pad);
+  padding-bottom: var(--dp-row-pad);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--dp-font);
+  line-height: 1.45;
+}
+
+.rows:last-child > .row:last-child {
+  border-bottom: none;
+  border-radius: 0 0 var(--radius-kpi-card) var(--radius-kpi-card);
+}
+
+.row > span {
+  min-width: 0;
+}
+
+/* The facts (Antal kvar, Tid kvar, Färdigdatum) are three cells in the
+   table and one line in a card. */
+.facts {
+  display: contents;
+}
+
+.facts > span {
+  min-width: 0;
+}
+
+/* Kvar från tidigare: an amber edge, not a tinted block — there can be many. */
+.row[data-carried="true"] {
+  box-shadow: inset 3px 0 0 var(--status-delayed);
+}
+
+.row[data-dragging="true"] {
+  opacity: 0.45;
+}
+
+/* Where a dragged row lands. */
+.row[data-drop="before"]::before,
+.row[data-drop="after"]::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.row[data-drop="before"]::before {
+  top: -2px;
+}
+
+.row[data-drop="after"]::after {
+  bottom: -2px;
+}
+
+.nr {
+  grid-area: nr;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.orderLink {
+  color: var(--accent-fg);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.order {
+  grid-area: order;
+}
+
+.article {
+  grid-area: article;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.operation {
+  grid-area: operation;
+  font-weight: 600;
+}
+
+.operationText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quantity {
+  grid-area: quantity;
+}
+
+.hours {
+  grid-area: hours;
+}
+
+.due {
+  grid-area: due;
+}
+
+.material {
+  grid-area: material;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.material::before {
+  content: attr(data-label);
+  flex: none;
+  font-size: var(--dp-small);
+  color: var(--color-text-muted);
+}
+
+.articleName {
+  color: var(--color-text-secondary);
+}
+
+.operation {
+  display: flex;
+  flex-direction: column;
+}
+
+.plannedNote {
+  font-size: var(--dp-small);
+  font-weight: 500;
+  color: var(--status-delayed-text);
+}
+
+.quantity,
+.hours {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hours .unit {
+  display: none;
+}
+
+.due {
+  white-space: nowrap;
+}
+
+.status {
+  grid-area: status;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.lockBadge {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-size: var(--dp-small);
+  color: var(--color-text-secondary);
+}
+
+.stamps {
+  grid-area: stamps;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+}
+
+.stamps[data-empty="true"] {
+  display: none;
+}
+
+.stamps::before {
+  content: attr(data-label);
+  font-size: var(--dp-small);
+  color: var(--color-text-muted);
+}
+
+.stamp {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--status-running-text);
+}
+
+.stamp::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--status-running);
+  vertical-align: 1px;
+}
+
+.stamp[data-paused="true"] {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.stamp[data-paused="true"]::before {
+  background: var(--color-text-muted);
+}
+
+.orderCell {
+  grid-area: ordering;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 28px;
+  color: var(--color-text-muted);
+  cursor: grab;
+}
+
+.grip:active {
+  cursor: grabbing;
+}
+
+/* Dragging is for a mouse; a touch screen orders with Upp/Ned. */
+@media (pointer: coarse) {
+  .grip {
+    display: none;
+  }
+}
+
+.moveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.moveButton:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.menu {
+  grid-area: menu;
+  align-self: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background: var(--color-bg);
+  }
+}
+
+/* --- Rows: cards (a narrow section) ------------------------------------ */
+
+@container (max-width: 859px) {
+  .headRow {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "nr order operation ordering menu"
+      "article article article status status"
+      "facts facts facts facts facts"
+      "material material material material material"
+      "stamps stamps stamps stamps stamps";
+    column-gap: 8px;
+    row-gap: 4px;
+    align-items: center;
+    padding: 12px 16px;
+  }
+
+  .nr {
+    min-width: 1.2em;
+    font-size: var(--dp-title);
+    color: var(--color-text-primary);
+  }
+
+  .article {
+    color: var(--color-text-primary);
+  }
+
+  .facts {
+    grid-area: facts;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+  }
+
+  .quantity,
+  .hours {
+    text-align: left;
+  }
+
+  .hours .unit {
+    display: inline;
+  }
+
+  .facts > span::before {
+    content: attr(data-label) " ";
+    font-family: var(--font-body);
+    font-size: var(--dp-small);
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+
+  .status {
+    justify-content: flex-end;
+  }
+
+  /* Touch targets. */
+  .moveButton {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-control);
+  }
+}
+
+/* A phone: the status gets its own line, the article the whole width. */
+@container (max-width: 479px) {
+  .row {
+    grid-template-areas:
+      "nr order operation operation menu"
+      "article article article article article"
+      "facts facts facts ordering ordering"
+      "status status status ordering ordering"
+      "material material material material material"
+      "stamps stamps stamps stamps stamps";
+  }
+
+  .status {
+    justify-content: flex-start;
+  }
+}
+
+/* --- Mötesläget --------------------------------------------------------- */
+
+.page[data-meeting="true"] {
+  --dp-font: 17px;
+  --dp-small: 14.5px;
+  --dp-title: 22px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: 20px 24px 32px;
+  background: var(--color-bg);
+}
+
+.meetingBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin-bottom: 12px;
+}
+
+.meetingTitle {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.meetingActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.reloadFailed {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.page[data-meeting="true"] .dayTitle {
+  min-width: 220px;
+  font-size: 26px;
+}
+
+.page[data-meeting="true"] .todayBadge {
+  font-size: 14px;
+}
+
+.page[data-meeting="true"] .dayButton {
+  width: 44px;
+  height: 44px;
+}
+
+.page[data-meeting="true"] .summary {
+  font-size: 17px;
+}
+
+.page[data-meeting="true"] .idle {
+  margin-top: 16px;
+  font-size: 15px;
+}
+
+/* Side by side on a wide screen, one under another on a narrow one. The cap
+   keeps every section below the table width, so the rows are always cards. */
+.page[data-meeting="true"] .resources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.page[data-meeting="true"] .resource {
+  max-width: 850px;
+}
+
+/* No app toolbar above Mötesläget. */
+.page[data-meeting="true"] .resourceHeader {
+  top: 0;
+}
+
+.page[data-meeting="true"] .row {
+  row-gap: 6px;
+}
+
+@media (max-width: 640px) {
+  .toolbarActions {
+    margin-left: 0;
+  }
+
+  .dayTitle {
+    min-width: 0;
+  }
+
+  .page[data-meeting="true"] {
+    --dp-font: 16px;
+    --dp-small: 14px;
+    --dp-title: 19px;
+    padding: 12px 12px 24px;
+  }
+
+  .page[data-meeting="true"] .dayTitle {
+    min-width: 0;
+    font-size: 21px;
+  }
+
+  .meetingTitle {
+    font-size: 21px;
+  }
+}

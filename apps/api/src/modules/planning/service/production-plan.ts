@@ -20,6 +20,7 @@ import {
   hasCapacityCalendar,
   mondayOf,
   operationLoadDays,
+  operationStarted,
   remainingOperationMinutes,
   type CapacityOperationRow,
   type DayScheduleNetRow,
@@ -65,6 +66,16 @@ export interface PlanOrder {
   orderNumber: string;
   dueDate: string | null;
   operations: PlanOperation[];
+  // Materialet är klart den dagen (Planera om strukturen): the chain starts
+  // there instead of today — the first operation may use capacity ON that
+  // day, never before today. Left out = today, as before. The reservation's
+  // floor for a TO that already exists (delivery-time-check.ts,
+  // scheduleOperations: max(materialReady, t0)) — the same operationChain,
+  // never a second placement rule. The chain's ready day starts there too:
+  // the finish day is never before it, and the operation after one that
+  // lies earlier (påbörjad, locked, moved by hand) starts the working day
+  // after it at the earliest.
+  earliestStart?: string | null;
 }
 
 export interface PlanProductionInput {
@@ -178,7 +189,9 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
     // The chain: the first operation may use capacity from today, each next
     // one from the working day after the previous is ready + the queue time.
     // Done operations and operations without time never advance it (S7).
-    const chain = operationChain(today, input.queueDays, input.offDays);
+    // With earliestStart the chain starts on the day the material is ready.
+    const chainStart = order.earliestStart != null && order.earliestStart > today ? order.earliestStart : today;
+    const chain = operationChain(chainStart, input.queueDays, input.offDays);
     let horizonHit = false;
 
     // Sekvensbrott (S13): the operation starts before the previous one is
@@ -300,6 +313,76 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   }
 
   return { plans, clear, warnings, orders };
+}
+
+// The plan's world as a move reads it: the calendars, the resources as the
+// book sees them and EVERY open operation with its allocation (the service's
+// loadPlanWorld).
+export interface MoveWorld {
+  today: string;
+  offDays: ReadonlySet<string>;
+  workCenters: Map<string, PlanWorkCenter>;
+  schedule: PlanProductionInput["schedule"];
+  queueDays: number;
+  longOperationWeeks?: number;
+  operations: CapacityOperationRow[];
+}
+
+// Flytta's rule — ONE implementation for the hand move and Samkör (co-run.ts):
+// the operation starts on `date` (the day's whole capacity, overload
+// allowed). The TO's earlier operations and, without moveFollowing, its later
+// ones keep their days (fixed load, like a lock); with moveFollowing the later
+// unlocked ones are replanned from the new finish day (next working day +
+// Standardkötid). Everything else is existing load. `stamped` = the
+// operations with an open/paused stamp session (påbörjad, operationStarted).
+// Never throws: the caller has already tested the status, lego and the time —
+// and compares the operation's own plan with `date` (a day without capacity
+// starts later). An operation that is not in the world gives an empty result.
+export function planOperationMove(
+  world: MoveWorld,
+  stamped: ReadonlySet<string>,
+  move: { operationId: string; date: string; moveFollowing: boolean }
+): PlanProductionResult {
+  const target = world.operations.find((o) => o.moOperationId === move.operationId);
+  if (!target) return { plans: [], clear: [], warnings: [], orders: [] };
+  const orderOps: PlanOperation[] = [];
+  const fixed: CapacityOperationRow[] = [];
+  for (const o of world.operations.filter((o) => o.manufacturingOrderId === target.manufacturingOrderId)) {
+    const started = operationStarted(o, stamped.has(o.moOperationId));
+    const replan =
+      o.moOperationId === move.operationId ||
+      o.operationStatus === "done" ||
+      (o.sequenceNo > target.sequenceNo && move.moveFollowing && !o.planLocked);
+    if (replan) orderOps.push({ ...o, started });
+    // A lego operation always walks with the order: the engine never
+    // books it, but it takes its place in the chain (its Ledtid and
+    // its gap) exactly as in Planera — left out, the gaps after it
+    // were counted one short (another day than the next Planera gives
+    // with a Standardkötid in half days) and a move to before the lego
+    // is back gave no sequence warning.
+    else if (world.workCenters.get(o.workCenterId)?.type === "subcontract") orderOps.push({ ...o, started });
+    // Kept as it is: planned ⇒ fixed load and the sequence floor, like a
+    // lock but reported as "ligger fast" rather than "låst"; unplanned
+    // ⇒ its due-date bucket, untouched.
+    else if (hasPlan(o)) orderOps.push({ ...o, started, fixed: true });
+    else fixed.push(o);
+  }
+  return planProduction({
+    today: world.today,
+    offDays: world.offDays,
+    workCenters: world.workCenters,
+    schedule: world.schedule,
+    queueDays: world.queueDays,
+    orders: [
+      { id: target.manufacturingOrderId, orderNumber: target.orderNumber, dueDate: target.dueDate, operations: orderOps },
+    ],
+    existingOperations: [
+      ...world.operations.filter((o) => o.manufacturingOrderId !== target.manufacturingOrderId),
+      ...fixed,
+    ],
+    forceStart: { operationId: move.operationId, date: move.date },
+    longOperationWeeks: world.longOperationWeeks,
+  });
 }
 
 // The operations as writeOperationPlans leaves them after a run: a planned

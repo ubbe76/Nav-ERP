@@ -5,6 +5,7 @@ import { planningRoutes } from "../src/modules/planning/routes/planning.routes.j
 import {
   OperationNotFoundError,
   OperationNotPlannableError,
+  OperationPlanChangedError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
   type PlanningService,
@@ -15,7 +16,7 @@ import {
 // production-plan.integration.test.ts (Postgres); the access rules by
 // permissions-coverage.test.ts (module default: write = tillverkning).
 
-type Fake = Partial<Pick<PlanningService, "planProductionRun" | "moveOperation" | "unlockOperation">>;
+type Fake = Partial<Pick<PlanningService, "planProductionRun" | "moveOperation" | "previewMoveOperation" | "unlockOperation">>;
 
 function buildApp(fake: Fake) {
   const app = Fastify();
@@ -134,6 +135,99 @@ describe("POST /planning/operations/:opId/move", () => {
     const res = await app.inject({ method: "POST", url: `/planning/operations/${id()}/move`, payload: { date: "2030-03-13" } });
     expect(res.statusCode).toBe(status);
     expect(res.json().code).toBe(code);
+  });
+});
+
+// Etapp 6a: the preview takes the move's body and maps the move's errors;
+// expectedStartDate rides along on both. The access (write rule tillverkning,
+// not readOnlySafe) is tested through the real app in
+// production-plan-preview.route.test.ts.
+describe("POST /planning/operations/:opId/move/preview and expectedStartDate", () => {
+  const load = { date: "2030-03-13", loadHours: 4, availableHours: 8, overloaded: false };
+  const preview = {
+    operation: { plannedStartDate: "2030-03-13", plannedEndDate: "2030-03-18" },
+    following: [],
+    warnings: [],
+    dayLoad: { before: load, after: { ...load, loadHours: 12, overloaded: true } },
+  };
+
+  it("200s with the preview, defaults moveFollowing and never calls the move", async () => {
+    const opId = id();
+    const app = buildApp({
+      moveOperation: async () => {
+        throw new Error("the preview must not move");
+      },
+      previewMoveOperation: async (op, input) => {
+        expect([op, input]).toEqual([opId, { date: "2030-03-13", moveFollowing: true }]);
+        return preview;
+      },
+    });
+    const res = await app.inject({ method: "POST", url: `/planning/operations/${opId}/move/preview`, payload: { date: "2030-03-13" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(preview);
+  });
+
+  it.each(["move", "move/preview"])("%s passes expectedStartDate through — a day, null (unplanned) or left out", async (path) => {
+    const seen: unknown[] = [];
+    const app = buildApp({
+      moveOperation: async (_op, input) => {
+        seen.push(input);
+        return { operation: dates, following: [], warnings: [] };
+      },
+      previewMoveOperation: async (_op, input) => {
+        seen.push(input);
+        return preview;
+      },
+    });
+    const url = `/planning/operations/${id()}/${path}`;
+    for (const extra of [{ expectedStartDate: "2030-03-11" }, { expectedStartDate: null }, {}]) {
+      const res = await app.inject({ method: "POST", url, payload: { date: "2030-03-13", moveFollowing: false, ...extra } });
+      expect(res.statusCode).toBe(200);
+    }
+    expect(seen).toEqual([
+      { date: "2030-03-13", moveFollowing: false, expectedStartDate: "2030-03-11" },
+      { date: "2030-03-13", moveFollowing: false, expectedStartDate: null },
+      { date: "2030-03-13", moveFollowing: false },
+    ]);
+  });
+
+  it.each([
+    ["move", {}],
+    ["move/preview", {}],
+    ["move/preview", { date: "nope" }],
+    ["move/preview", { date: "2030-03-13", moveFollowing: "yes" }],
+    ["move", { date: "2030-03-13", expectedStartDate: "nope" }],
+    ["move/preview", { date: "2030-03-13", expectedStartDate: "nope" }],
+    ["move/preview", { date: "2030-03-13", expectedStartDate: 20300311 }],
+  ] as const)("%s 400s %o", async (path, payload) => {
+    const app = buildApp({
+      moveOperation: async () => {
+        throw new Error("the service must not be called");
+      },
+      previewMoveOperation: async () => {
+        throw new Error("the service must not be called");
+      },
+    });
+    const res = await app.inject({ method: "POST", url: `/planning/operations/${id()}/${path}`, payload });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it.each([
+    [new OperationNotFoundError("x"), 404, "operation-not-found"],
+    [new OperationNotPlannableError("done"), 409, "operation-not-plannable"],
+    [new PlanDateInPastError("2030-03-01", "2030-03-04"), 400, "plan-date-in-past"],
+    [new PlanDateNoCapacityError("2030-03-09", "110"), 409, "plan-date-no-capacity"],
+    [new OperationPlanChangedError("TO-1050", 20), 409, "operation-plan-changed"],
+  ] as const)("maps %s on both routes", async (error, status, code) => {
+    const fail = async () => {
+      throw error;
+    };
+    const app = buildApp({ moveOperation: fail, previewMoveOperation: fail });
+    for (const path of ["move", "move/preview"]) {
+      const res = await app.inject({ method: "POST", url: `/planning/operations/${id()}/${path}`, payload: { date: "2030-03-13" } });
+      expect(res.statusCode, path).toBe(status);
+      expect(res.json().code).toBe(code);
+    }
   });
 });
 

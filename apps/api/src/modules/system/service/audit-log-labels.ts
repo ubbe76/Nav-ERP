@@ -100,7 +100,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // Produktionsplanering: Flytta, Lås upp and the order within the day (#18).
   operation_moved: "Operation flyttad",
   operation_unlocked: "Operation upplåst",
+  order_plan_unlocked: "Planeringen upplåst",
   run_order_changed: "Körordning ändrad",
+  co_run: "Operationer samkörda",
+  // Planera om strukturen: per TO, and one summary row on the plan.
+  structure_replanned: "Strukturen omplanerad",
   started: "Startad",
   closed: "Stängd",
   // Inköpsorder: the last receipt (or a row change) left nothing to receive.

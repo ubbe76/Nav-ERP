@@ -126,6 +126,18 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     listHref: "/forsaljning/ordrar?status=late",
     area: "forsaljning",
   },
+  // Leverans i fara (leveransläget): an open kundorder with a row that is
+  // Sen, Saknar täckning or covered by a TO with Halvfabrikat sent — the
+  // list filtered on the same orders (the planning service's
+  // deliveryRiskOrderIds).
+  {
+    kind: "sales_order_delivery_risk",
+    label: "Kundordrar med leverans i fara",
+    severity: "yellow",
+    rule: ["forsaljning"],
+    listHref: "/forsaljning/ordrar?status=delivery_risk",
+    area: "forsaljning",
+  },
   {
     kind: "purchase_order_late",
     label: "Försenade inköpsordrar",

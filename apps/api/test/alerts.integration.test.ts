@@ -44,7 +44,10 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
-import { createAlertsService, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
+import { createAlertsService, deliveryRiskText, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
+import { ALERT_KIND_CATALOG, alertKindDef, visibleKinds } from "../src/modules/alerts/service/alert-kinds.js";
+import { createDeliveryRiskReader } from "../src/modules/planning/service/delivery-risk.js";
+import type { Permission } from "@navet/shared";
 import { listStockBatches } from "../src/modules/stock/repository/batch-trace.repository.js";
 import { ALERT_BATCH_EXPIRY_DAYS_KEY } from "../src/modules/system/service/alert-settings.js";
 import { listStockBatchesQuerySchema, createStockLocationSchema } from "@navet/shared";
@@ -85,9 +88,15 @@ const planningService = createPlanningService(createPlanningRepository(db), {
 let supplierInvoiceDays = 7;
 let quoteFollowupDays = 7;
 let batchExpiryDays = 30;
+// Leverans i fara: the same adapter app.ts binds.
+const deliveryRisk = createDeliveryRiskReader(planningService);
 const alerts = createAlertsService({
   repo: createAlertsRepository(db),
-  planning: planningService,
+  planning: {
+    requirementProposals: () => planningService.requirementProposals(),
+    orderPlanSummaries: (ids) => planningService.orderPlanSummaries(ids),
+    deliveryRiskOrders: () => deliveryRisk.deliveryRiskOrders(),
+  },
   settings: {
     supplierInvoiceDays: async () => supplierInvoiceDays,
     quoteFollowupDays: async () => quoteFollowupDays,
@@ -425,6 +434,85 @@ describe("manufacturing_order_late", () => {
     expect(g.items.map((i) => [i.key, i.date, i.href])).toEqual([[late.id, YESTERDAY, `/tillverkning/ordrar/${late.id}`]]);
     expect(g.items[0]!.primary).toBe(`${late.orderNumber} ${article.articleNumber} ${article.name}`);
     expect(g.items[0]!.secondary).toBe(`Sen enligt planeringen · färdigdatum ${YESTERDAY}`);
+  });
+});
+
+// Kundordrar med leverans i fara (leveransläget, etapp 3c): the open orders
+// whose outlook is atRisk — the planning service's own list — with the
+// reason as text. The list filter's side is in sales-delivery-risk.test.ts.
+describe("sales_order_delivery_risk", () => {
+  // An order of 5 st whose only supply is an inköpsorder arriving `arrives`.
+  async function orderCoveredByPurchase(promised: string | null, arrives: string) {
+    const order = await salesOrder("confirmed", promised, [{ quantity: 5 }]);
+    const [row] = await db.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, order.id));
+    const supplier = await makeSupplier();
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ orderNumber: `IO-${suffix()}`, supplierId: supplier.id, status: "confirmed", confirmedDeliveryDate: arrives })
+      .returning();
+    await db.insert(purchaseOrderRows).values({ purchaseOrderId: po!.id, articleId: row!.articleId, quantityOrdered: "5", unitPrice: "10" });
+    return order;
+  }
+
+  it("lists the orders at risk by promised date with the reason, and nothing else", async () => {
+    // Saknar täckning: nothing on the shelf, nothing on order. Two rows.
+    const uncovered = await salesOrder("confirmed", "2030-03-20", [{ quantity: 5 }, { quantity: 2 }]);
+    // Sen: the inköpsorder arrives three working days after the promise.
+    const late = await orderCoveredByPurchase("2030-03-08", "2030-03-13");
+    // No promised date: an uncovered row is at risk all the same — last.
+    const undatedOrder = await salesOrder("in_production", null, [{ quantity: 1 }]);
+    // Not at risk: covered in time, a quote, a delivered order.
+    await orderCoveredByPurchase("2030-03-20", "2030-03-13");
+    await salesOrder("quote", "2030-03-08", [{ quantity: 5 }]);
+    await salesOrder("delivered", "2030-03-08", [{ quantity: 5, delivered: 5 }]);
+
+    const g = await group("sales_order_delivery_risk");
+    expect(g).toMatchObject({
+      label: "Kundordrar med leverans i fara",
+      severity: "yellow",
+      area: "forsaljning",
+      listHref: "/forsaljning/ordrar?status=delivery_risk",
+      count: 3,
+      error: false,
+    });
+    expect(g.items.map((i) => [i.key, i.date, i.href, i.severity])).toEqual([
+      [late.id, "2030-03-08", `/forsaljning/ordrar/${late.id}`, "yellow"],
+      [uncovered.id, "2030-03-20", `/forsaljning/ordrar/${uncovered.id}`, "yellow"],
+      [undatedOrder.id, null, `/forsaljning/ordrar/${undatedOrder.id}`, "yellow"],
+    ]);
+    expect(g.items[0]!.primary).toBe(`${late.orderNumber} Kund AB`);
+    expect(g.items[0]!.secondary).toMatch(/^Sen 3 arbetsdagar · beräknad leverans 2030-03-\d\d \(lovat 2030-03-08\)$/);
+    expect(g.items[1]!.secondary).toBe("Saknar täckning på 2 rader");
+    expect(g.items[2]!.secondary).toBe("Saknar täckning på 1 rad");
+    // The same orders as the planning service's own list (the list filter's).
+    expect(g.items.map((i) => i.key).sort()).toEqual((await planningService.deliveryRiskOrderIds()).sort());
+  });
+
+  it("is a Försäljning kind, right after Försenade kundordrar", () => {
+    const kinds = ALERT_KIND_CATALOG.map((d) => d.kind);
+    expect(kinds[kinds.indexOf("sales_order_late") + 1]).toBe("sales_order_delivery_risk");
+    expect(alertKindDef("sales_order_delivery_risk").rule).toEqual(["forsaljning"]);
+    const only = (permissions: Permission[]) => visibleKinds({ role: "user", permissions });
+    expect(only(["forsaljning"])).toContain("sales_order_delivery_risk");
+    expect(only(["tillverkning", "inkop", "lager", "ekonomi", "kvalitet"])).not.toContain("sales_order_delivery_risk");
+  });
+
+  it("words the reason: Saknar täckning before Sen, else Halvfabrikat sent", () => {
+    const base = { daysLate: 0, promisedDate: "2026-12-04", estimatedDeliveryDate: null, counts: { uncovered: 0 } };
+    expect(deliveryRiskText({ ...base, status: "late", daysLate: 3, estimatedDeliveryDate: "2026-12-08" })).toBe(
+      "Sen 3 arbetsdagar · beräknad leverans 2026-12-08 (lovat 2026-12-04)"
+    );
+    expect(deliveryRiskText({ ...base, status: "late", daysLate: 1, estimatedDeliveryDate: "2026-12-07" })).toBe(
+      "Sen 1 arbetsdag · beräknad leverans 2026-12-07 (lovat 2026-12-04)"
+    );
+    // Another row has no ready date: no estimate for the order.
+    expect(deliveryRiskText({ ...base, status: "late", daysLate: 2 })).toBe("Sen 2 arbetsdagar · lovat 2026-12-04");
+    // Ready on a weekend after a Friday need: late, but no working day.
+    expect(deliveryRiskText({ ...base, status: "late", estimatedDeliveryDate: "2026-12-07" })).toBe("Sen · beräknad leverans 2026-12-07 (lovat 2026-12-04)");
+    expect(deliveryRiskText({ ...base, status: "uncovered", counts: { uncovered: 2 } })).toBe("Saknar täckning på 2 rader");
+    expect(deliveryRiskText({ ...base, status: "uncovered", counts: { uncovered: 1 } })).toBe("Saknar täckning på 1 rad");
+    expect(deliveryRiskText({ ...base, status: "on_time" })).toBe("Halvfabrikat sent · lovat 2026-12-04");
+    expect(deliveryRiskText({ ...base, status: "undated", promisedDate: null })).toBe("Halvfabrikat sent");
   });
 });
 
@@ -781,6 +869,7 @@ describe("computeAlerts", () => {
           throw new Error("MRP exploded");
         },
         orderPlanSummaries: async () => new Map(),
+        deliveryRiskOrders: async () => [],
       },
       settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => TODAY,

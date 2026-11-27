@@ -344,7 +344,7 @@ export function ListMultiFilter({ filter, allLabel, ariaLabel }: { filter: Multi
                 </label>
               ))}
               <p className={styles.multiHint}>
-                {filter.narrow.map((o) => o.label).join(" och ")} visar de som är sena bland statusarna du har valt, eller
+                {filter.narrow.map((o) => o.label).join(" och ")} visar bara de ordrarna bland statusarna du har valt, eller
                 bland alla om ingen status är vald.
               </p>
             </>

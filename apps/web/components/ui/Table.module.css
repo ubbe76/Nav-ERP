@@ -96,6 +96,21 @@
   border-bottom: none;
 }
 
+/* rowDetail: an unfolded part under a row, across the whole grid. The body
+   sticks to the left edge so it stays in view while a wide table scrolls. */
+.rowDetail {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.rowDetailBody {
+  position: sticky;
+  left: 0;
+  width: fit-content;
+  max-width: min(100%, 640px);
+  padding: 2px 20px 12px;
+}
+
 .headerRow > .headerCell:first-child,
 .row > .cell:first-child,
 .footerRow > .cell:first-child,
@@ -308,6 +323,10 @@
 @media (max-width: 640px) {
   .table {
     display: block;
+  }
+
+  .rowDetail {
+    display: none;
   }
 
   .headerRow {

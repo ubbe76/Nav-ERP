@@ -2548,6 +2548,12 @@ function OperationListView({
             Körplan
           </a>
         )}
+        {/* Dagplan: every resource's work today — whatever stations are chosen. */}
+        {canOpenPage("/tillverkning/dagplan") && (
+          <a href="/tillverkning/dagplan" target="_blank" rel="noopener noreferrer" className={styles.stationButton}>
+            Dagplan
+          </a>
+        )}
         <label className={styles.filterGroup}>
           <span className={styles.filterLabel}>Material</span>
           <select className={styles.select} value={materialId} disabled={busy} onChange={(e) => onMaterialId(e.target.value)}>

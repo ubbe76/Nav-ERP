@@ -10,6 +10,7 @@ export const ALERT_KINDS = [
   "stock_negative",
   "batch_expiry",
   "sales_order_late",
+  "sales_order_delivery_risk",
   "purchase_order_late",
   "manufacturing_order_late",
   "purchase_needed",

@@ -1,0 +1,645 @@
+/* Strukturvyn. ONE grid: the tree column (sticky) and one column per day of
+   the API's axis. Every cell is placed explicitly (grid-row/grid-column
+   inline), so the days off and today can be drawn as columns BEHIND the
+   rows. The axis scrolls inside .scroller — the page never gets wider than
+   the screen. Mobile first: under 760 px of box width there is no axis at
+   all, the same cells stack as an indented list with the dates as text. */
+
+.page {
+  min-width: 0;
+  font-family: var(--font-body);
+  color: var(--color-text-primary);
+}
+
+.muted {
+  color: var(--color-text-muted);
+  font-size: 13.5px;
+}
+
+/* --- Head ------------------------------------------------------------- */
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+.headTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rootLink {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+a.rootLink:hover {
+  color: var(--accent-fg);
+}
+
+.rootDetail {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.outlook {
+  font-size: 14px;
+}
+
+.outlook[data-tone="stopped"] .outlookText {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.outlook[data-tone="delayed"] .outlookText {
+  color: var(--status-delayed-text);
+  font-weight: 600;
+}
+
+.totals {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.goesTo {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  background: var(--color-surface);
+  font-size: 13.5px;
+}
+
+.goesToTitle {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.goesToList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goesToList li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.goesToList [data-late] {
+  color: var(--status-stopped-text);
+}
+
+.goesToLink {
+  color: var(--accent-fg);
+  text-decoration: underline;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+/* --- The box ---------------------------------------------------------- */
+
+.box {
+  container-type: inline-size;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.page[data-loading] .box {
+  opacity: 0.6;
+}
+
+.scroller {
+  min-width: 0;
+}
+
+.grid {
+  display: block;
+  --day-w: 26px;
+}
+
+.corner,
+.weekHead,
+.dayHead,
+.offDay,
+.todayColumn,
+.lane,
+.legend {
+  display: none;
+}
+
+/* A row's tree cell. */
+.cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px 8px 7px calc(6px + var(--level-narrow) * 12px);
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-surface);
+  font-size: 13.5px;
+}
+
+.cell[data-root] {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.cell[data-highlight] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cell[data-kind="operation"] {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-top-color: transparent;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.cell[data-kind="operation"][data-done] {
+  color: var(--color-text-muted);
+}
+
+.cell[data-kind="missing"] .nodeLabel,
+.cell[data-kind="missing"] .detail {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.fold,
+.foldSpace {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+}
+
+.fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.fold:hover {
+  background: var(--color-divider);
+}
+
+.fold:focus-visible,
+.linkButton:focus-visible,
+.bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 22px;
+}
+
+.nodeLink,
+.nodeLabel {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+a.nodeLink:hover {
+  color: var(--accent-fg);
+}
+
+.cell[data-kind="material"] .nodeLabel,
+.cell[data-kind="supply"] .nodeLabel {
+  font-weight: 500;
+}
+
+.opTitle {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+}
+
+.detail {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.cell[data-kind="operation"] .detail {
+  color: var(--color-text-muted);
+}
+
+.levelBadge {
+  flex: 0 0 auto;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-divider);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The parts are separated by a dot that stays with the part before it. */
+.date:not([data-last])::after {
+  content: " · ";
+}
+
+.late {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.lockedBadge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.linkButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--accent-fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.menu {
+  flex: 0 0 auto;
+  margin: -4px -4px -4px 0;
+}
+
+/* --- Wide: the day axis ------------------------------------------------ */
+
+@container (min-width: 760px) {
+  .scroller {
+    overflow: auto;
+    /* A vertical scrollport of its own, so the axis' head stays in view. */
+    max-height: calc(100vh - 110px);
+    min-height: 240px;
+  }
+
+  .grid {
+    display: grid;
+    /* A short axis stretches over the box, a long one scrolls. */
+    grid-template-columns: clamp(340px, 42cqw, 520px) repeat(var(--days), minmax(var(--day-w), 1fr));
+    grid-template-rows: 24px 34px;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .corner,
+  .weekHead,
+  .dayHead {
+    display: flex;
+    position: sticky;
+    z-index: 3;
+    background: var(--color-surface);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .corner {
+    top: 0;
+    left: 0;
+    z-index: 5;
+    align-items: flex-end;
+    padding: 0 12px 8px;
+    border-right: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+    font-size: 12px;
+  }
+
+  .weekHead {
+    top: 0;
+    align-items: center;
+    padding-left: 6px;
+    border-left: 1px solid var(--color-divider);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .dayHead {
+    top: 24px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    border-bottom: 1px solid var(--color-border);
+    font-weight: 500;
+    font-size: 10.5px;
+    line-height: 1.1;
+  }
+
+  .dayNumber {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .dayHead[data-off] {
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+  }
+
+  .dayHead[data-off] .dayNumber {
+    color: var(--color-text-muted);
+  }
+
+  .dayHead[data-today] {
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+
+  .dayHead[data-today] .dayNumber {
+    color: var(--accent-fg);
+  }
+
+  .offDay {
+    display: block;
+    background: var(--color-bg);
+  }
+
+  .todayColumn {
+    display: block;
+    border-left: 2px solid var(--accent);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  .cell {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    padding-left: calc(8px + var(--level) * 14px);
+    border-right: 1px solid var(--color-border);
+  }
+
+  .levelBadge {
+    display: none;
+  }
+
+  /* The axis shows these — the words are for the list. */
+  .date[data-on-axis] {
+    display: none;
+  }
+
+  .date[data-last-wide]::after {
+    content: "";
+  }
+
+  .lane {
+    display: grid;
+    grid-column: 2 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+    border-top: 1px solid var(--color-divider);
+    min-height: 100%;
+  }
+
+  .lane[data-kind="operation"] {
+    border-top-color: transparent;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px var(--space-4);
+    padding: 8px 12px;
+    border-top: 1px solid var(--color-border);
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+}
+
+/* An operation's planned days. */
+.bar {
+  grid-row: 1;
+  height: 14px;
+  margin: 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: var(--status-running);
+  min-width: 0;
+}
+
+button.bar {
+  cursor: pointer;
+}
+
+button.bar:hover {
+  filter: brightness(1.1);
+}
+
+.bar[data-tone="late"] {
+  background: var(--status-delayed);
+}
+
+.bar[data-locked] {
+  box-shadow: inset 0 0 0 2px var(--color-text-primary);
+}
+
+/* The TO's own row: first to last planned day, thin. */
+.span {
+  grid-row: 1;
+  height: 4px;
+  margin: 0 2px;
+  border-radius: 2px;
+  background: var(--status-running);
+  opacity: 0.6;
+}
+
+.span[data-tone="late"] {
+  background: var(--status-delayed);
+  opacity: 1;
+}
+
+.marker {
+  grid-row: 1;
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--day-w);
+  height: 22px;
+  z-index: 1;
+}
+
+.marker i,
+.legend i {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.marker[data-shape="diamond"] i,
+.legendDiamond {
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  background: var(--color-text-primary);
+  border: 1px solid var(--color-surface);
+}
+
+.marker[data-shape="diamond"][data-tone="late"] i {
+  background: var(--status-stopped);
+}
+
+.marker[data-shape="need"] i,
+.legendNeed {
+  width: 0;
+  height: 20px;
+  border-left: 2px dashed var(--color-text-secondary);
+}
+
+.marker[data-shape="need"][data-tone="late"] i {
+  border-left-color: var(--status-stopped);
+}
+
+.marker[data-shape="dot"] i,
+.legendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--color-text-secondary);
+  background: var(--color-surface);
+}
+
+.marker[data-shape="dot"][data-tone="late"] i {
+  border-color: var(--status-stopped);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendBar {
+  width: 18px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--status-running);
+}
+
+.legendNeed {
+  height: 14px;
+}
+
+/* --- Without an order --------------------------------------------------- */
+
+.search {
+  max-width: 520px;
+  min-width: 0;
+}
+
+.searchLead {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.searchForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.searchForm input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}

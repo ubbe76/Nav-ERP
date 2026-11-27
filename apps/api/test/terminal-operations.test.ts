@@ -149,6 +149,32 @@ describe("listTerminalOperations", () => {
     expect(all.materials.map((m) => m.articleNumber)).toEqual(["BEN-2", "BEN-10", "PLÅT-2", "RÖR-30"]);
   });
 
+  it("keeps every linked material after the shared grouping: also a halvfabrikat and a fully drawn row (S1)", async () => {
+    const f = await setup();
+    const parent = await makeArticle(`BÄNK-${crypto.randomUUID().slice(0, 8)}`, "Bänk", "manufactured");
+    const halv = await makeArticle("HALV-5", "Underrede", "manufactured");
+    const drawn = await makeArticle("HALV-12", "Plåt dragen", "purchased");
+    const r10 = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: f.kap.id, setupTime: 0, runTimePerUnit: 1 });
+    await articleService.addBomComponent(parent.id, { componentArticleId: drawn.id, quantity: 2, routingOperationId: r10.id });
+    await articleService.addBomComponent(parent.id, { componentArticleId: halv.id, quantity: 1, routingOperationId: r10.id });
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 3 }, f.user.id);
+    await db.execute(
+      sql`UPDATE mo_material_consumptions SET quantity_consumed = quantity_planned WHERE manufacturing_order_id = ${order.id} AND component_article_id = ${drawn.id}`
+    );
+
+    const all = await mfgService.listTerminalOperations({});
+    const row = all.rows.find((r) => r.manufacturingOrderId === order.id)!;
+    // The response shape is the terminal's own three fields — no quantities.
+    expect(row.materials).toEqual([
+      { articleId: halv.id, articleNumber: "HALV-5", articleName: "Underrede" },
+      { articleId: drawn.id, articleNumber: "HALV-12", articleName: "Plåt dragen" },
+    ]);
+    expect(all.materials.map((m) => m.articleNumber)).toEqual(["HALV-5", "HALV-12", "PLÅT-2", "RÖR-30"]);
+    expect(Object.keys(all.materials[0]!).sort()).toEqual(["articleId", "articleName", "articleNumber"]);
+    const filtered = await mfgService.listTerminalOperations({ materialArticleId: halv.id });
+    expect(filtered.rows.map((r) => r.operationId)).toEqual([row.operationId]);
+  });
+
   it("leaves out planned and done orders and done operations", async () => {
     const f = await setup();
     const planned = await mfgService.createManufacturingOrder({ articleId: f.parent.id, quantity: 3 }, f.user.id);

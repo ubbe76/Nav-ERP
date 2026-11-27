@@ -793,6 +793,16 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Körplan
   "run-plan-order-changed": "Körplanen har ändrats — listan har lästs om.",
   "run-plan-subcontract-resource": "Resursen är en legoresurs — körplanen visar bara egna resurser.",
+  // Dagplan
+  "day-plan-date-out-of-range": "Dagplanen visar i dag och sex veckor framåt — välj en annan dag.",
+  // Samkör
+  "co-run-changed": "Planen har ändrats sedan listan lästes — den har lästs om. Välj operationerna igen.",
+  "operation-plan-changed": "Operationen har flyttats sedan vyn lästes — den har lästs om. Försök igen.",
+  // Planera om strukturen (the 409 body of the first carries the new preview).
+  "replan-structure-changed":
+    "Strukturen eller planen har ändrats sedan förhandsvisningen — den har räknats om. Kontrollera och välj Planera om igen.",
+  "replan-structure-not-plannable":
+    "Kapaciteten räcker inte inom två år för alla valda tillverkningsordrar — strukturen kan inte planeras om.",
   "plan-date-no-capacity": serverMessage("Resursen har ingen kapacitet den dagen — välj en annan dag."),
   // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
   "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",

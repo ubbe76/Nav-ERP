@@ -3,17 +3,23 @@ import type {
   ArticleForecastUpdateInput,
   CapacityQuery,
   ComponentMovesInput,
+  CoRunInput,
   MissingComponentsInput as MissingComponentsRequest,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
+  DayPlanQuery,
   DeliveryTimeCheckRequest,
   ListAbcQuery,
   ListRequirementsQuery,
   MoveOperationInput,
   Paged,
+  ReplanStructureInput,
+  ReplanStructurePreviewInput,
   RunPlanOrderInput,
   RunPlanPdfQuery,
   RunPlanQuery,
+  StructureQuery,
+  UnlockOrdersInput,
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import { round4, roundToDecimals, roundUpToMultiple, SALES_ORDER_EDITABLE_STATUSES } from "@navet/shared";
@@ -69,9 +75,14 @@ import {
   mondayOf,
   capacityHorizon,
   computeCapacity,
+  isLockedOperation,
   orderPlanStatus,
+  orderPlannedRange,
   operationStarted,
+  plannedDateRange,
   remainingOperationMinutes,
+  resourceDayLoads,
+  type CapacityDayLoad,
   type CapacityInput,
   type CapacityOperationRow,
   type CapacityResult,
@@ -104,9 +115,9 @@ import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./cap
 import {
   longOperationWarnings,
   operationsWithPlan,
+  planOperationMove,
   planProduction,
   type OperationPlan,
-  type PlanOperation,
   type PlanOrder,
   type PlanWarning,
 } from "./production-plan.js";
@@ -117,7 +128,41 @@ import {
   type ResourceSuggestion,
 } from "./resource-suggestions.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
-import { buildRunPlan, defaultRunPlanToDate, runPlanStations, type RunPlanResult, type RunPlanRow } from "./run-plan.js";
+import {
+  buildRunPlan,
+  defaultRunPlanToDate,
+  runPlanStations,
+  type RunPlanMaterial,
+  type RunPlanOperationMaterials,
+  type RunPlanResult,
+  type RunPlanRow,
+  type RunPlanStamp,
+} from "./run-plan.js";
+import { coRunOrder, coRunRunOrder, groupRunPlanByMaterial, planCoRun, type CoRunPlan, type CoRunResult } from "./co-run.js";
+import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
+import {
+  buildStructureTree,
+  exclusiveOrderIds,
+  nextStructureLevel,
+  structureDemands,
+  STRUCTURE_MAX_DEPTH,
+  type StructureDemand,
+  type StructureInput,
+  type StructureOrderFacts,
+  type StructureResult,
+  type StructureRootRow,
+} from "./structure-tree.js";
+import {
+  planStructure,
+  replanOrders,
+  replanSelection,
+  replanStructureOutcome,
+  replanTree,
+  REPLAN_MAX_INCLUDED,
+  sameReplanExpected,
+  type ReplanStructureResult,
+} from "./structure-replan.js";
+import { isCoRunMaterial, linkedOperationMaterials } from "../../manufacturing/service/operation-materials.js";
 import type { RunPlanPdfInput } from "../../mail/service/document-pdf.js";
 import type { AuditEntry, AuditWriter } from "../../system/repository/audit.repository.js";
 import {
@@ -139,6 +184,17 @@ import {
 } from "./due-date-suggestion.js";
 import { uncoveredConfiguredQuantity } from "./configured-coverage.js";
 import {
+  configuredRowCoverage,
+  orderOutlook,
+  outlookRow,
+  type OrderOutlook,
+  type OutlookAllocation,
+  type OutlookOrderHead,
+  type OutlookRow,
+  type SalesOrderDeliveryOutlook,
+} from "./delivery-outlook.js";
+import {
+  deliveryFromShipDate,
   deliveryHolidayWindow,
   effectiveDeliverySettings,
   shipDateFor,
@@ -385,6 +441,55 @@ export class RunPlanOrderChangedError extends Error {
   }
 }
 
+// Samkör: a selected operation is not where the list showed it — another
+// resource, another start day, done, or its order no longer open. Nothing is
+// written; the web reads the list again. 409.
+export class CoRunChangedError extends Error {
+  constructor(public workCenterCode: string, public date: string) {
+    super(`Planen för ${workCenterCode} har ändrats sedan listan lästes — läs om listan och välj operationerna igen`);
+    this.name = "CoRunChangedError";
+  }
+}
+
+// Flytta with expectedStartDate: the operation's stored start day is another
+// than the one the view showed (someone moved it, or Planera ran, in
+// between). Nothing is written; the web reads again. 409.
+export class OperationPlanChangedError extends Error {
+  constructor(public orderNumber: string, public sequenceNo: number) {
+    super(`Operation ${sequenceNo} på ${orderNumber} har flyttats sedan vyn lästes — läs om och försök igen`);
+    this.name = "OperationPlanChangedError";
+  }
+}
+
+// Planera om strukturen: the tree or its dates are not what the preview
+// showed — a TO more or less under the top, another färdigdatum, other
+// planned days, or a chosen TO that may not be chosen. Nothing is written;
+// the body carries the fresh preview (as missing-components-changed). 409.
+export class ReplanStructureChangedError extends Error {
+  constructor(public result: ReplanStructureResult) {
+    super("Strukturen eller planen har ändrats sedan förhandsvisningen — den har räknats om");
+    this.name = "ReplanStructureChangedError";
+  }
+}
+
+// Planera om strukturen: a chosen TO does not fit within the plan horizon
+// (S32) — its parent would have no day to stand on. Nothing is written. 409.
+export class ReplanStructureNotPlannableError extends Error {
+  constructor(public orderNumbers: string[]) {
+    super(`Kapaciteten räcker inte inom två år för ${orderNumbers.join(", ")} — strukturen kan inte planeras om`);
+    this.name = "ReplanStructureNotPlannableError";
+  }
+}
+
+// Dagplan for a day outside its window: a passed day, or one more than
+// DAY_PLAN_MAX_AHEAD_DAYS ahead (S5 — Beläggning's day view at its widest). 400.
+export class DayPlanDateOutOfRangeError extends Error {
+  constructor(public date: string, public today: string) {
+    super(`${date} ligger utanför dagplanen — den visar i dag (${today}) och sex veckor framåt`);
+    this.name = "DayPlanDateOutOfRangeError";
+  }
+}
+
 // The körplan's Swedish texts, shared by every surface the API prints them
 // on (the PDF). The web has its own labels for the same fields.
 const formatRunPlanHours = (hours: number) =>
@@ -404,6 +509,22 @@ function runPlanStatusLabel(row: RunPlanRow): string {
     case "not_ready":
       return `Väntar på op ${row.waitingForSequenceNo}`;
   }
+}
+
+// Dagplanens material cell in the PDF — text only, no symbols (S13).
+function dayPlanMaterialText(row: RunPlanRow): string {
+  if (!row.materialLinked) return "–";
+  return row.materials
+    .map((m) => {
+      if (m.status === "available") return `${m.articleNumber} (finns)`;
+      const missing = `saknas ${formatRunPlanQuantity(m.missingQuantity)}${m.unit ? ` ${m.unit}` : ""}`;
+      if (!m.supply) return `${m.articleNumber} (${missing})`;
+      // "kommer 2026-12-02 IO-88", an overdue supply "försenad 2026-11-25
+      // IO-88" — and what nothing covers of the row beside it.
+      const coming = `${m.supply.late ? "försenad" : "kommer"} ${m.supply.date ?? "utan datum"} ${m.supply.documentNumber}`;
+      return `${m.articleNumber} (${coming}${m.missingQuantity > 0 ? `, ${missing}` : ""})`;
+    })
+    .join("; ");
 }
 
 // Flytta to a day where the resource has no capacity at all (a weekend, a
@@ -442,6 +563,18 @@ export interface MoveOperationResult {
   operation: PlannedOperationDates;
   following: { moOperationId: string; sequenceNo: number; plannedStartDate: string | null; plannedEndDate: string | null }[];
   warnings: PlanWarning[];
+}
+
+// POST /planning/operations/:opId/move/preview — what the move would do,
+// nothing written: the operation's and the following operations' new days
+// and the warnings exactly as the move answers them, plus the target day's
+// load on the operation's resource before and after (resourceDayLoads — the
+// matrix's bucket, overload from the flag).
+export interface MoveOperationPreview {
+  operation: { plannedStartDate: string | null; plannedEndDate: string | null };
+  following: MoveOperationResult["following"];
+  warnings: PlanWarning[];
+  dayLoad: { before: CapacityDayLoad; after: CapacityDayLoad };
 }
 
 // The TO list's plan summary per order (min/max over the pending
@@ -1416,7 +1549,9 @@ export function createPlanningService(
     const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { resources: opts.resources });
     // Optional on the repo for the unit tests' fakes ⇒ the default limit.
     const longOperationWeeks = await repo.longOperationWeeks?.(dbc);
-    return { ...planWorldOf(capacity, today), longOperationWeeks };
+    // `capacity` = the raw load, for the readers of the same world that are
+    // not the book (resourceDayLoads in Samkör's answer).
+    return { ...planWorldOf(capacity, today), longOperationWeeks, capacity };
   }
   // queueDays = Standardkötid as the load read it (this run's own value,
   // never a process constant); the resources carry their own Kötid for lego.
@@ -1628,28 +1763,33 @@ export function createPlanningService(
   // `dbc`: Skapa saknade halvfabrikat pegs under the plan lock in its own
   // transaction (undefined = the plain db, as every other read).
   async function orderPlanSummaries(orderIds: string[], dbc?: Tx): Promise<Map<string, OrderPlanSummary>> {
+    return (await loadOrderPlans(orderIds, dbc)).summaries;
+  }
+  // The load behind the summaries, with what it read: the orders' operations
+  // and the plan world (resources, full-day holidays out to `horizonTo`).
+  // Strukturvyn draws its bars from the very operations Sen was decided on —
+  // ONE loadCapacityInput for all of a tree's TOs. `world` is null when
+  // there is nothing to load.
+  async function loadOrderPlans(orderIds: string[], dbc?: Tx) {
     const summaries = new Map<string, OrderPlanSummary>();
-    if (orderIds.length === 0) return summaries;
     const today = todayFn();
     const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
+    if (orderIds.length === 0) return { summaries, operations: [] as CapacityOperationRow[], world: null, horizonTo };
     const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc, { orderIds });
     const world = planWorldOf(capacity, today);
     const byOrder = new Map<string, CapacityOperationRow[]>();
     for (const op of capacity.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
     for (const [orderId, ops] of byOrder) {
       const status = orderPlanStatus(ops, { today, offDays: world.offDays, workCenters: world.workCenters, queueDays: world.queueDays });
-      const dates = ops
-        .filter((op) => op.operationStatus === "pending" && hasPlan(op))
-        .flatMap((op) => op.plannedDays!.map((d) => d.date))
-        .sort();
+      const range = orderPlannedRange(ops);
       summaries.set(orderId, {
-        plannedStartDate: dates[0] ?? null,
-        plannedEndDate: dates[dates.length - 1] ?? null,
+        plannedStartDate: range.start,
+        plannedEndDate: range.end,
         late: status.late,
         plannedFinish: status.planned ? status.plannedFinish : null,
       });
     }
-    return summaries;
+    return { summaries, operations: capacity.operations, world, horizonTo };
   }
 
   // --- Pegging (#9) ----------------------------------------------------
@@ -1666,29 +1806,44 @@ export function createPlanningService(
   // `withParentArticles`: the parents' own articles too (Går till). `dbc`:
   // every load bound to a transaction (Skapa saknade halvfabrikat under the
   // plan lock) — the loads already run one after the other.
-  type PeggedParents = {
+  // pegArticles is the article half on its own (Leveransläget pegs the
+  // kundorder rows' articles without any parent TO): a set of articles'
+  // overviews, their peggings and what they were computed with.
+  type PeggedArticles = {
     today: string;
-    parents: CoverageParentsLoad["orders"];
-    componentsOf: Map<string, string[]>;
     overviews: Map<string, ArticleOverview>;
     peggings: Map<string, Pegging>;
     // What the peggings were computed with — Flytta halvfabrikaten re-pegs a
     // re-dated overview with the same ready dates and holidays.
     readyDates: Map<string, string | null>;
     offDays: Set<string>;
+    // The plan summaries of every TO supply — and of `extraOrderIds`, so a
+    // caller with TOs of its own (Leveransläget's configured rows) shares
+    // the ONE capacity load.
+    summaries: Map<string, OrderPlanSummary>;
+  };
+  type PeggedParents = PeggedArticles & {
+    parents: CoverageParentsLoad["orders"];
+    // Every given TO that exists, whatever its status (`parents` are the
+    // open ones) — Strukturvyn draws a planned or closed TO as a node.
+    heads: CoverageParentsLoad["orders"];
+    componentsOf: Map<string, string[]>;
   };
   async function pegParents(parentIds: string[], opts: { withParentArticles?: boolean } = {}, dbc?: Tx): Promise<PeggedParents> {
-    const today = todayFn();
     const load = await repo.coverageParents(parentIds, dbc);
     const parents = load.orders.filter((o) => OPEN_MO_STATUSES.has(o.status));
     const componentsOf = new Map<string, string[]>();
     for (const o of parents) componentsOf.set(o.id, [...(load.materialComponents.get(o.id) ?? [])]);
     const articleIds = new Set<string>([...componentsOf.values()].flat());
     if (opts.withParentArticles) for (const o of parents) articleIds.add(o.articleId);
-    const overviews = articleIds.size > 0 ? await loadOverviewInputs([...articleIds], dbc) : new Map<string, ArticleOverviewInput>();
+    return { ...(await pegArticles([...articleIds], dbc)), parents, heads: load.orders, componentsOf };
+  }
+  async function pegArticles(articleIds: string[], dbc?: Tx, extraOrderIds: string[] = []): Promise<PeggedArticles> {
+    const today = todayFn();
+    const overviews = articleIds.length > 0 ? await loadOverviewInputs(articleIds, dbc) : new Map<string, ArticleOverviewInput>();
     const built = new Map<string, ArticleOverview>([...overviews].map(([id, input]) => [id, buildArticleOverview(input)]));
 
-    const moSupplyIds = new Set<string>();
+    const moSupplyIds = new Set<string>(extraOrderIds);
     const dates: string[] = [today];
     for (const overview of built.values()) {
       for (const row of overview.rows) {
@@ -1713,7 +1868,7 @@ export function createPlanningService(
         ? new Set(await repo.fullDayHolidaysBetween(dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b)), dbc))
         : new Set<string>();
     const peggings = new Map<string, Pegging>([...built].map(([id, overview]) => [id, pegOverview(overview, { today, readyDates, offDays })]));
-    return { today, parents, componentsOf, overviews: built, peggings, readyDates, offDays };
+    return { today, overviews: built, peggings, readyDates, offDays, summaries };
   }
 
   // --- Flytta halvfabrikaten (pegging #9, etapp 2) ------------------------
@@ -1889,6 +2044,400 @@ export function createPlanningService(
     return out;
   }
   const supplyOf = (pegging: Pegging, allocation: PegAllocation) => pegging.supplies.find((s) => s.id === allocation.supplyId)!;
+  // Går till: where a TO's own output goes — the demands its supply row
+  // covers in its own article's pegging — and what is left for stock. The TO
+  // card's coverage and Strukturvyn's root share it.
+  function goesToOf(own: Pegging | undefined, manufacturingOrderId: string): { goesTo: CoverageGoesTo[]; surplus: number } {
+    const supply = own?.supplies.find((s) => s.id === `mo:${manufacturingOrderId}`);
+    const goesTo: CoverageGoesTo[] = (supply?.allocations ?? []).map((a) => {
+      const demand = own!.demands.find((d) => d.id === a.demandId)!;
+      return {
+        kind: (demand.row?.kind as CoverageGoesTo["kind"] | undefined) ?? "stock",
+        documentId: demand.row?.documentId ?? null,
+        documentNumber: demand.row?.documentNumber ?? null,
+        partner: demand.row?.partner ?? null,
+        needDate: demand.date,
+        quantity: a.quantity,
+        late: a.late,
+        daysLate: a.daysLate,
+      };
+    });
+    return { goesTo, surplus: supply?.surplus ?? 0 };
+  }
+
+  // --- Körplanens och dagplanens extras ----------------------------------
+  // What the körplan and the dagplan show per listed operation beyond the
+  // plan: its co-run materials (B3 — purchased, linked to the operation,
+  // something left) against the shelf, and who is stamped in on it. ONE
+  // function for both readers, a fixed number of loads whatever the list:
+  // the linked material rows, the usable balances, the open stamps — and
+  // the pegging (pegParents, one batch) ONLY for the orders with a row that
+  // is short. Nothing short ⇒ no pegging at all (the mötesläge reads again
+  // every minute).
+  async function loadRunPlanExtras(
+    operationIds: string[],
+    orderIdOf: ReadonlyMap<string, string>
+  ): Promise<{ materials: Map<string, RunPlanOperationMaterials>; stamps: Map<string, RunPlanStamp[]> }> {
+    const materials = new Map<string, RunPlanOperationMaterials>();
+    const stamps = new Map<string, RunPlanStamp[]>();
+    if (operationIds.length === 0) return { materials, stamps };
+
+    const linked = linkedOperationMaterials(await repo.runPlanMaterialRows(operationIds));
+    const coRun = new Map([...linked].map(([operationId, list]) => [operationId, list.filter(isCoRunMaterial)]));
+    const onHand = await repo.usableOnHand([...new Set([...coRun.values()].flat().map((m) => m.articleId))]);
+    for (const [operationId, list] of linked) {
+      materials.set(operationId, {
+        linked: list.some((m) => m.articleType === "purchased"),
+        materials: coRun.get(operationId)!.map((m): RunPlanMaterial => {
+          // Per row against the article's WHOLE usable balance —
+          // Materialbrist's base at reporting, not the FIFO allocation.
+          const usableOnHand = round4(onHand.get(m.articleId) ?? 0);
+          const available = usableOnHand >= m.remainingQuantity;
+          return {
+            materialRowId: m.rowId,
+            articleId: m.articleId,
+            articleNumber: m.articleNumber,
+            articleName: m.articleName,
+            unit: m.unit,
+            remainingQuantity: m.remainingQuantity,
+            usableOnHand,
+            status: available ? "available" : "short",
+            missingQuantity: available ? 0 : round4(m.remainingQuantity - Math.max(usableOnHand, 0)),
+            supply: null,
+          };
+        }),
+      });
+    }
+
+    // Kommer d — only for the short rows: what the pegging says covers the
+    // order's need of the article.
+    const shortOrderIds = new Set<string>();
+    for (const [operationId, entry] of materials) {
+      const orderId = orderIdOf.get(operationId);
+      if (orderId && entry.materials.some((m) => m.status === "short")) shortOrderIds.add(orderId);
+    }
+    if (shortOrderIds.size > 0) {
+      const world = await pegParents([...shortOrderIds]);
+      const demandsOf = new Map<string, ReturnType<typeof parentDemands>>();
+      for (const [operationId, entry] of materials) {
+        const orderId = orderIdOf.get(operationId);
+        if (!orderId || !shortOrderIds.has(orderId)) continue;
+        if (!demandsOf.has(orderId)) demandsOf.set(orderId, parentDemands(world, orderId));
+        for (const material of entry.materials) {
+          if (material.status !== "short") continue;
+          // The demand of exactly THIS material row (the overview's id of
+          // an mo_material row) — never the order's every row of the
+          // article: the same article on another operation, or unlinked,
+          // has its own demand and its own cover.
+          const demands = demandsOf
+            .get(orderId)!
+            .filter((d) => d.articleId === material.articleId && d.demand.id === `mat:${material.materialRowId}`);
+          const uncovered = round4(demands.reduce((sum, d) => sum + d.demand.uncovered, 0));
+          // The allocation that arrives LAST decides when the row is whole
+          // (an undated one counts as last); stock is there already.
+          let last: { pegging: Pegging; allocation: PegAllocation } | null = null;
+          for (const { pegging, demand } of demands) {
+            for (const allocation of demand.allocations) {
+              if (supplyOf(pegging, allocation).kind === "stock") continue;
+              const later =
+                last == null ||
+                (last.allocation.readyDate != null && (allocation.readyDate == null || allocation.readyDate > last.allocation.readyDate));
+              if (later) last = { pegging, allocation };
+            }
+          }
+          const supply = last ? supplyOf(last.pegging, last.allocation) : null;
+          if (supply?.row?.documentId) {
+            // The pegging floors a passed ready date at today (a late supply
+            // is not done). Shown here it would say "kommer i dag" every
+            // day, so an overdue supply carries its OWN day and is marked.
+            const ownDate = world.readyDates.has(supply.id) ? (world.readyDates.get(supply.id) ?? null) : supply.row.date;
+            const late = ownDate != null && ownDate < world.today;
+            material.missingQuantity = uncovered;
+            material.supply = {
+              kind: supply.kind as "purchase_order" | "manufacturing_order",
+              documentId: supply.row.documentId,
+              documentNumber: supply.row.documentNumber,
+              date: late ? ownDate : last!.allocation.readyDate,
+              late,
+              isDraft: supply.row.isDraft,
+            };
+          } else {
+            // No supply on its way: what the pegging leaves uncovered, never
+            // less than the row lacks on the shelf.
+            material.missingQuantity = Math.max(uncovered, material.missingQuantity);
+          }
+        }
+      }
+    }
+
+    for (const stamp of await repo.openStampsByOperation(operationIds)) {
+      const list = stamps.get(stamp.moOperationId) ?? [];
+      list.push({ employeeId: stamp.employeeId, name: stamp.name, paused: stamp.paused });
+      stamps.set(stamp.moOperationId, list);
+    }
+    return { materials, stamps };
+  }
+  // One resource's load on one day in the plan world with `operations` in
+  // place of the loaded ones — resourceDayLoads, the matrix's bucket. Shared
+  // by the previews of Samkör and Flytta (before / after).
+  function worldDayLoad(
+    world: Awaited<ReturnType<typeof loadPlanWorld>>,
+    today: string,
+    workCenterId: string,
+    date: string,
+    operations: CapacityOperationRow[]
+  ): CapacityDayLoad {
+    return (
+      resourceDayLoads({ ...world.capacity, operations }, today, date).get(workCenterId) ?? {
+        date,
+        loadHours: 0,
+        availableHours: null,
+        overloaded: false,
+      }
+    );
+  }
+
+  // Flytta, the part the move and its preview share: the tests and the rule,
+  // in ONE order, writing nothing. `dbc` undefined = outside a transaction
+  // (the preview); the move passes its transaction and already holds the
+  // production_plan lock. The operation row is read without FOR UPDATE — the
+  // advisory lock is what every writer of the plan takes. Throws, in this
+  // order: unknown operation (404), a passed day (400), another stored start
+  // day than expectedStartDate (409 operation-plan-changed), what cannot be
+  // planned (409) and a day without capacity (409).
+  async function prepareMove(dbc: Tx | undefined, opId: string, input: MoveOperationInput) {
+    const op = await repo.planOperation(opId, dbc);
+    if (!op) throw new OperationNotFoundError(opId);
+    const today = todayFn();
+    if (input.date < today) throw new PlanDateInPastError(input.date, today);
+    // The precondition: the view's start day against the stored one. Left
+    // out = no test (integrations).
+    if (input.expectedStartDate !== undefined && input.expectedStartDate !== op.plannedStartDate) {
+      throw new OperationPlanChangedError(op.orderNumber, op.sequenceNo);
+    }
+    if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
+    if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
+    if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
+    const world = await loadPlanWorld(dbc);
+    const target = world.operations.find((o) => o.moOperationId === opId);
+    if (!target) throw new OperationNotPlannableError("order_not_open");
+    // Under the book's threshold nothing would be written (roundPlanDays).
+    if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
+    const stamped = await repo.stampedOperationIds(dbc);
+
+    // The rule itself (which of the order's operations move, follow or
+    // lie fast) is planOperationMove — shared with Samkör.
+    const result = planOperationMove(world, stamped, {
+      operationId: opId,
+      date: input.date,
+      moveFollowing: input.moveFollowing,
+    });
+    // The forced day took nothing (no capacity that day: a weekend, a
+    // röd dag, a free day in the schedule) — the book went on to the
+    // first day with capacity. Tested on the plan BEFORE the write, so
+    // nothing is written.
+    const ownPlan = result.plans.find((p) => p.operationId === opId);
+    if (ownPlan && ownPlan.startDate !== input.date) {
+      throw new PlanDateNoCapacityError(input.date, op.workCenterCode);
+    }
+    const seqOf = new Map(
+      world.operations
+        .filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)
+        .map((o) => [o.moOperationId, o.sequenceNo])
+    );
+    const following = [
+      ...result.plans
+        .filter((p) => p.operationId !== opId)
+        .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartDate: p.startDate, plannedEndDate: p.endDate })),
+      ...result.clear
+        .filter((id) => id !== opId && (seqOf.get(id) ?? 0) > op.sequenceNo)
+        .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartDate: null, plannedEndDate: null })),
+    ].sort((a, b) => a.sequenceNo - b.sequenceNo);
+    return { op, today, world, target, result, following };
+  }
+
+  // --- Samkör (co-run.ts owns the rules) -----------------------------------
+  // What the preview and the write share: the resource, the day and the
+  // selected operations tested, the world loaded and the co-run planned in
+  // memory. `dbc` undefined = outside a transaction (the preview); with
+  // `lock` the selected operations are locked FOR UPDATE in id order — never
+  // the order row — and the caller already holds the production_plan lock.
+  // null = the resource does not exist (404 in the route). Throws, in this
+  // order: a legoresurs (400), a passed day (400), an unknown operation
+  // (404), an operation that is not where the list showed it (409
+  // co-run-changed), one without time to plan (409) and a day without
+  // capacity (409).
+  async function prepareCoRun(dbc: Tx | undefined, input: CoRunInput, opts: { lock: boolean }) {
+    const workCenter = await repo.runPlanWorkCenter(dbc, input.workCenterId);
+    if (!workCenter) return null;
+    if (workCenter.type === "subcontract") throw new RunPlanSubcontractResourceError(workCenter.code);
+    const today = todayFn();
+    if (input.date < today) throw new PlanDateInPastError(input.date, today);
+    const operationIds = input.operations.map((o) => o.moOperationId);
+    const selected = new Map((await repo.coRunOperations(dbc, operationIds, opts)).map((row) => [row.moOperationId, row]));
+    for (const id of operationIds) if (!selected.has(id)) throw new OperationNotFoundError(id);
+    for (const sent of input.operations) {
+      const row = selected.get(sent.moOperationId)!;
+      if (
+        row.workCenterId !== workCenter.id ||
+        row.operationStatus !== "pending" ||
+        !OPEN_MO_STATUSES.has(row.orderStatus) ||
+        row.plannedStartDate !== sent.plannedStartDate
+      ) {
+        throw new CoRunChangedError(workCenter.code, input.date);
+      }
+    }
+    const world = await loadPlanWorld(dbc);
+    const stamped = await repo.stampedOperationIds(dbc);
+    const inWorld = new Map(world.operations.map((o) => [o.moOperationId, o]));
+    for (const id of operationIds) {
+      const op = inWorld.get(id);
+      // Under the book's threshold nothing would be written (roundPlanDays).
+      if (!op || remainingOperationMinutes(op) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
+    }
+    const plan = planCoRun(world, stamped, { date: input.date, operationIds });
+    if (plan.noCapacity) throw new PlanDateNoCapacityError(input.date, workCenter.code);
+    return { workCenter, today, operationIds, selected, world, plan };
+  }
+  type CoRunPrepared = NonNullable<Awaited<ReturnType<typeof prepareCoRun>>>;
+
+  // The resource's pending, planned operations on the day as the co-run
+  // LEAVES them, computed on the world in memory (the preview): the ones
+  // that start there afterwards, with the place they hold today — a place
+  // survives only on the same start day, as writeOperationPlans keeps it.
+  function coRunDayOperationsAfter(
+    prepared: CoRunPrepared,
+    date: string,
+    current: { id: string; runPosition: number | null }[]
+  ): CoRunDayOperation[] {
+    const positionOf = new Map(current.map((op) => [op.id, op.runPosition]));
+    return prepared.plan.operationsAfter
+      .filter(
+        (op) =>
+          op.workCenterId === prepared.workCenter.id && op.operationStatus === "pending" && plannedDateRange(op)?.start === date
+      )
+      .map((op) => ({
+        id: op.moOperationId,
+        orderNumber: op.orderNumber,
+        sequenceNo: op.sequenceNo,
+        runPosition: positionOf.get(op.moOperationId) ?? null,
+      }));
+  }
+  type CoRunDayOperation = { id: string; orderNumber: string; sequenceNo: number; runPosition: number | null };
+
+  // The answer of both routes, in two parts. `dayOperations` = the day's
+  // operations after the co-run (read back under the lock by the write, in
+  // memory by the preview) — coRunRunOrder gives the places from them.
+  //
+  // coRunOutcomeOf is everything but the materials: no load, nothing that
+  // reads the database — the write computes it BEFORE commit (a throw rolls
+  // the co-run back instead of answering 500 on a committed write) and logs
+  // from it. It never assumes an operation is in the planned world: the day
+  // read back under the lock can hold one the world did not (its order
+  // became open in between).
+  function coRunOutcomeOf(prepared: CoRunPrepared, date: string, dayOperations: CoRunDayOperation[]): Omit<CoRunResult, "materials"> {
+    const { workCenter, today, operationIds, selected, world, plan } = prepared;
+    const before = new Map(world.operations.map((o) => [o.moOperationId, o]));
+    const after = new Map(plan.operationsAfter.map((o) => [o.moOperationId, o]));
+    const isSelected = new Set(operationIds);
+
+    const operations = operationIds.map((id) => {
+      const row = selected.get(id)!;
+      const planned = after.get(id);
+      const range = planned ? plannedDateRange(planned) : null;
+      return {
+        moOperationId: id,
+        manufacturingOrderId: row.manufacturingOrderId,
+        orderNumber: row.orderNumber,
+        sequenceNo: row.sequenceNo,
+        fromDate: row.plannedStartDate,
+        plannedStartDate: range?.start ?? null,
+        plannedEndDate: range?.end ?? null,
+        outcome: plan.outcomes.get(id)!,
+      };
+    });
+
+    // Flyttas också: what the moves touched besides the selected ones, when
+    // its days are others than before (a plan written again on the same
+    // days, or the clearing of an operation that had none, is no change).
+    const following: CoRunResult["following"] = [];
+    for (const id of new Set([...plan.plans.map((p) => p.operationId), ...plan.clear])) {
+      if (isSelected.has(id)) continue;
+      const op = after.get(id);
+      if (!op) continue;
+      const was = before.get(id);
+      const from = was ? plannedDateRange(was) : null;
+      const to = plannedDateRange(op);
+      if ((from?.start ?? null) === (to?.start ?? null) && (from?.end ?? null) === (to?.end ?? null)) continue;
+      following.push({
+        moOperationId: id,
+        manufacturingOrderId: op.manufacturingOrderId,
+        orderNumber: op.orderNumber,
+        sequenceNo: op.sequenceNo,
+        workCenterCode: world.workCenters.get(op.workCenterId)?.code ?? "?",
+        fromStartDate: from?.start ?? null,
+        plannedStartDate: to?.start ?? null,
+        plannedEndDate: to?.end ?? null,
+      });
+    }
+    following.sort((a, b) => a.orderNumber.localeCompare(b.orderNumber, "sv", { numeric: true }) || a.sequenceNo - b.sequenceNo);
+
+    // Dagens last: the same rule on the world before and after.
+    const loadOf = (ops: CapacityOperationRow[]) => worldDayLoad(world, today, workCenter.id, date, ops);
+
+    return {
+      workCenter: { id: workCenter.id, code: workCenter.code, name: workCenter.name },
+      date,
+      operations,
+      following,
+      dayLoad: { before: loadOf(world.operations), after: loadOf(plan.operationsAfter) },
+      lateOrders: plan.warnings
+        .filter((w) => w.kind === "late")
+        .map((w) => ({
+          manufacturingOrderId: w.manufacturingOrderId,
+          orderNumber: w.orderNumber,
+          dueDate: w.dueDate ?? null,
+          plannedFinish: w.plannedFinish ?? null,
+        })),
+      warnings: plan.warnings,
+      runOrder: coRunRunOrder(dayOperations, operationIds),
+    };
+  }
+
+  // The answer's materials — the only part that loads (the write runs it
+  // after commit AND after the händelselogg).
+  async function coRunMaterials(prepared: CoRunPrepared): Promise<CoRunResult["materials"]> {
+    const { workCenter, today, operationIds, selected, plan } = prepared;
+    // The selected operations' rows as the körplan builds them (buildRunPlan
+    // over their orders — no T.o.m., so an operation beyond the horizon is
+    // in too) with the extras, grouped by the Material-läge's own function.
+    const orderIdOf = new Map(operationIds.map((id) => [id, selected.get(id)!.manufacturingOrderId]));
+    const orderIds = new Set(orderIdOf.values());
+    const extras = await loadRunPlanExtras(operationIds, orderIdOf);
+    const rowOf = new Map(
+      buildRunPlan({
+        today,
+        toDate: "9999-12-31",
+        workCenter,
+        stations: [],
+        operations: plan.operationsAfter.filter((o) => orderIds.has(o.manufacturingOrderId)),
+        plannedOrderOperations: [],
+        ...extras,
+      }).rows.map((row) => [row.moOperationId, row])
+    );
+    const materialRows = operationIds.map((id) => rowOf.get(id)).filter((row): row is RunPlanRow => row !== undefined);
+
+    return groupRunPlanByMaterial(materialRows).groups;
+  }
+
+  // The listed operations of a run plan's rows: a Planerad TO's operation
+  // carries no extras (buildRunPlan never reads them for it).
+  const extrasOperationsOf = (rows: RunPlanRow[]) => {
+    const orderIdOf = new Map<string, string>();
+    for (const row of rows) if (row.moOperationId && row.status !== "planned_order") orderIdOf.set(row.moOperationId, row.manufacturingOrderId);
+    return { operationIds: [...orderIdOf.keys()], orderIdOf };
+  };
+
   // Halvfabrikat sent: a late allocation from a TO supply. A late IO or
   // missing material gives nothing (the behovsberäkning's and Materialbrist's).
   function isComponentLate(world: PeggedParents, parentId: string): boolean {
@@ -1898,10 +2447,437 @@ export function createPlanningService(
   }
 
   async function componentLateOrders(orderIds: string[]): Promise<Set<string>> {
+    return (await pegLateParents(orderIds)).late;
+  }
+  // The same answer with the batch it was read from (null = nothing to
+  // peg): Strukturvyn's first TO level under a kundorder is exactly the TOs
+  // Leveransläget asked about, so it draws them from this world instead of
+  // pegging them a second time.
+  async function pegLateParents(orderIds: string[]): Promise<{ late: Set<string>; world: PeggedParents | null }> {
     const ids = [...new Set(orderIds)];
-    if (ids.length === 0) return new Set();
+    if (ids.length === 0) return { late: new Set(), world: null };
     const world = await pegParents(ids);
-    return new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id));
+    return { late: new Set(world.parents.filter((p) => isComponentLate(world, p.id)).map((p) => p.id)), world };
+  }
+
+  // --- Leveransläge (planeringsverktyget etapp 3) -------------------------
+  // Will the kundorder rows leave on the day they were promised? Derived at
+  // every read from a FIXED number of loads, whatever the number of orders:
+  //   1. repo.outlookRows — the heads and their demand rows, one query;
+  //   2. repo.linkedOrdersForRows — the configured rows' own TOs (S19);
+  //   3. pegArticles — the ordinary rows' articles pegged in one batch, the
+  //      plan summaries of the configured rows' TOs in the same capacity
+  //      load. The row's demand is the pegging's `so:<rowId>` (the overview
+  //      row), so its allocations are the very ones the TO card's Går till
+  //      shows from the other side;
+  //   4. repo.deliveryContext — the delivery defaults and the holidays for
+  //      the ship dates and the estimated deliveries;
+  //   5. componentLateOrders — Halvfabrikat sent for every allocated TO, one
+  //      pegging batch more.
+  // A quote, a delivered order or any other status: a head without rows
+  // ("none"). Unknown ids are absent.
+  type DeliveryOutlookEntry = { order: OutlookOrderHead; rows: OutlookRow[]; outlook: OrderOutlook };
+  async function deliveryOutlooks(orderIds: string[] | "open"): Promise<Map<string, DeliveryOutlookEntry>> {
+    return (await loadDeliveryOutlooks(orderIds)).entries;
+  }
+  // The same answer with the worlds it was computed in: the ordinary rows'
+  // pegging (null when no order was found), the batch behind Halvfabrikat
+  // sent — every allocated TO pegged as a parent (null without any) — and
+  // each row's article type. Strukturvyn reads the rows' exclusive TOs from
+  // the very peggings the allocations came from, and its first TO level
+  // from the allocated TOs' batch.
+  async function loadDeliveryOutlooks(orderIds: string[] | "open"): Promise<{
+    entries: Map<string, DeliveryOutlookEntry>;
+    world: PeggedArticles | null;
+    allocatedWorld: PeggedParents | null;
+    articleTypeOfRow: Map<string, "manufactured" | "purchased" | "service">;
+  }> {
+    const loaded = await repo.outlookRows(orderIds);
+    const result = new Map<string, DeliveryOutlookEntry>();
+    if (loaded.length === 0) return { entries: result, world: null, allocatedWorld: null, articleTypeOfRow: new Map() };
+    // Tjänsteartiklar have no stock and no outlook.
+    const lines = loaded.flatMap((l) => (l.row && l.row.articleType !== "service" ? [{ order: l.order, row: l.row }] : []));
+
+    const configuredIds = lines.filter((l) => l.row.configured).map((l) => l.row.rowId);
+    const linkedByRow = await repo.linkedOrdersForRows(configuredIds);
+    const linkedOpenIds = [...linkedByRow.values()].flat().map((o) => o.id);
+    const world = await pegArticles([...new Set(lines.filter((l) => !l.row.configured).map((l) => l.row.articleId))], undefined, linkedOpenIds);
+    const today = world.today;
+
+    // The ordinary rows' allocations, before Halvfabrikat sent is known.
+    type Draft = { line: (typeof lines)[number]; promisedShipDate: string | null; allocations: OutlookAllocation[]; uncovered: number };
+    const drafts: Draft[] = [];
+    const dates: string[] = [today];
+    for (const line of lines) {
+      if (line.row.promisedDate) dates.push(line.row.promisedDate);
+      if (line.row.configured) continue;
+      const pegging = world.peggings.get(line.row.articleId);
+      const demand = pegging?.demands.find((d) => d.id === `so:${line.row.rowId}`);
+      // The row came in (or left) between the two reads.
+      if (!pegging || !demand) continue;
+      drafts.push({
+        line,
+        promisedShipDate: demand.date,
+        allocations: demand.allocations.map((a) => {
+          const supply = supplyOf(pegging, a);
+          return {
+            kind: supply.kind,
+            documentId: supply.row?.documentId ?? null,
+            documentNumber: supply.row?.documentNumber ?? null,
+            quantity: a.quantity,
+            readyDate: a.readyDate,
+            late: a.late,
+            undated: a.undated,
+            daysLate: a.daysLate,
+            isDraft: supply.row?.isDraft ?? false,
+            componentLate: false,
+          };
+        }),
+        uncovered: demand.uncovered,
+      });
+    }
+    // A configured row's TO is ready on its planned finish, else its
+    // färdigdatum — the pegging's rule for a TO supply.
+    const linkedReady = (o: { id: string; dueDate: string | null }) => world.summaries.get(o.id)?.plannedFinish ?? o.dueDate;
+    for (const orders of linkedByRow.values()) {
+      for (const o of orders) {
+        const ready = linkedReady(o);
+        if (ready) dates.push(ready);
+      }
+    }
+    for (const d of drafts) for (const a of d.allocations) if (a.readyDate) dates.push(a.readyDate);
+
+    // Transit days are at most 60 working days (toShipDates).
+    const delivery = await repo.deliveryContext(deliveryHolidayWindow(dates, 60));
+    const settingsOf = (line: (typeof lines)[number]) => effectiveDeliverySettings(line.order.customerDelivery, "customer", delivery.defaults);
+    for (const line of lines) {
+      if (!line.row.configured) continue;
+      // The date the row's TO is planned by — shiftToShipDates' rule.
+      const promisedShipDate = line.row.promisedDate ? shipDateFor(line.row.promisedDate, settingsOf(line), delivery.offDays) : null;
+      const coverage = configuredRowCoverage({
+        today,
+        promisedShipDate,
+        quantityOrdered: line.row.quantityOrdered,
+        quantityDelivered: line.row.quantityDelivered,
+        linkedOrders: (linkedByRow.get(line.row.rowId) ?? []).map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          status: o.status,
+          quantity: o.quantity,
+          received: o.received,
+          readyDate: linkedReady(o),
+          componentLate: false,
+        })),
+        offDays: delivery.offDays,
+      });
+      drafts.push({ line, promisedShipDate, allocations: coverage.allocations, uncovered: coverage.uncovered });
+    }
+
+    const allocatedOrderIds = new Set<string>();
+    for (const d of drafts) for (const a of d.allocations) if (a.kind === "manufacturing_order" && a.documentId) allocatedOrderIds.add(a.documentId);
+    const { late: componentLate, world: allocatedWorld } = await pegLateParents([...allocatedOrderIds]);
+
+    const rowsByOrder = new Map<string, OutlookRow[]>();
+    const draftByRow = new Map(drafts.map((d) => [d.line.row.rowId, d]));
+    // In the card's row order (the load's), whatever order the drafts were built in.
+    for (const line of lines) {
+      const d = draftByRow.get(line.row.rowId);
+      if (!d) continue;
+      const settings = settingsOf(line);
+      const row = outlookRow({
+        today,
+        row: {
+          salesOrderRowId: line.row.rowId,
+          articleId: line.row.articleId,
+          articleNumber: line.row.articleNumber,
+          articleName: line.row.articleName,
+          restQuantity: round4(line.row.quantityOrdered - line.row.quantityDelivered),
+          configured: line.row.configured,
+          promisedDate: line.row.promisedDate,
+          promisedShipDate: d.promisedShipDate,
+        },
+        allocations: d.allocations.map((a) =>
+          a.kind === "manufacturing_order" && a.documentId && componentLate.has(a.documentId) ? { ...a, componentLate: true } : a
+        ),
+        uncovered: d.uncovered,
+        // The Leveranstidskontroll's last step, for the order's customer.
+        deliver: (shipDate) => deliveryFromShipDate(shipDate, settings, delivery.offDays),
+      });
+      rowsByOrder.set(line.order.salesOrderId, [...(rowsByOrder.get(line.order.salesOrderId) ?? []), row]);
+    }
+    for (const l of loaded) {
+      if (result.has(l.order.salesOrderId)) continue;
+      const rows = rowsByOrder.get(l.order.salesOrderId) ?? [];
+      result.set(l.order.salesOrderId, {
+        order: {
+          salesOrderId: l.order.salesOrderId,
+          orderNumber: l.order.orderNumber,
+          orderStatus: l.order.orderStatus,
+          customerId: l.order.customerId,
+          customerName: l.order.customerName,
+          promisedDate: l.order.promisedDate,
+        },
+        rows,
+        outlook: orderOutlook(rows, l.order.promisedDate),
+      });
+    }
+    return { entries: result, world, allocatedWorld, articleTypeOfRow: new Map(lines.map((l) => [l.row.rowId, l.row.articleType])) };
+  }
+
+  // Leverans i fara (S18): the open kundorder with a row that is Sen, Saknar
+  // täckning or covered by a TO with Halvfabrikat sent.
+  async function deliveryRiskOrderIds(): Promise<string[]> {
+    return [...(await deliveryOutlooks("open")).values()].filter((e) => e.outlook.atRisk).map((e) => e.order.salesOrderId);
+  }
+
+  // --- Strukturvy (planeringsverktyget etapp 4) ---------------------------
+  // ONE order's whole tree (structure-tree.ts owns the drawing; nothing is
+  // stored and no rule is new). The loads, whatever the size of the tree:
+  //   1. the root — a kundorder: loadDeliveryOutlooks([id]) (Leveransläget's
+  //      rows, and its pegging for the rows' exclusive TOs); a TO: its own
+  //      level below, with its article pegged too (Går till);
+  //   2. ONE pegParents per TO level — the level's TOs are the TO supplies
+  //      in the level above that are not expanded yet (the first level
+  //      under a kundorder is the batch Leveransläget already pegged for
+  //      Halvfabrikat sent — it is not pegged twice). The levels are
+  //      sequential (the next one is unknown until this one is pegged), at
+  //      most down to TO depth STRUCTURE_MAX_DEPTH: the deepest drawn level
+  //      is loaded too, for its heads and so the depth flag is exact;
+  //   3. ONE loadOrderPlans for every TO in the tree (the operations, Sen
+  //      and the planned finish from the same rows) and ONE
+  //      stampedOperationIds.
+  // A planned, closed or done TO is a node without children, like coverage.
+  // The tree's TO levels as they are loaded — shared by Strukturvyn and
+  // Planera om strukturen (the same peggings, the same material rows).
+  // `onLevel` sees each pegged level with its world.
+  function structureLevels(onLevel?: (ids: string[], world: PeggedParents) => void) {
+    const demandsByOrder = new Map<string, StructureDemand[]>();
+    const orders = new Map<string, StructureOrderFacts>();
+    const expanded = new Set<string>();
+    // One pegged level: every TO's head, its material rows with what covers
+    // them and Halvfabrikat sent — all from the level's own world.
+    const addLevel = (ids: string[], world: PeggedParents) => {
+      onLevel?.(ids, world);
+      const headById = new Map(world.heads.map((h) => [h.id, h]));
+      for (const id of ids) {
+        expanded.add(id);
+        const demands = structureDemands(
+          id,
+          parentDemands(world, id).map((d) => ({ article: world.overviews.get(d.articleId)!.article, pegging: d.pegging, demand: d.demand }))
+        );
+        demandsByOrder.set(id, demands);
+        const head = headById.get(id);
+        if (!head) continue;
+        orders.set(id, {
+          manufacturingOrderId: id,
+          orderNumber: head.orderNumber,
+          orderStatus: head.status,
+          articleId: head.articleId,
+          articleNumber: head.articleNumber,
+          articleName: head.articleName,
+          remainingQuantity: Math.max(0, round4(head.quantity - head.received)),
+          dueDate: head.dueDate,
+          plan: null, // set from the ONE capacity load below
+          componentLate: isComponentLate(world, id),
+        });
+      }
+    };
+    // ONE pegParents per TO level from `level` (at TO depth `depth`) down to
+    // STRUCTURE_MAX_DEPTH.
+    const descend = async (level: string[], depth: number, dbc?: Tx) => {
+      for (; level.length > 0 && depth <= STRUCTURE_MAX_DEPTH; depth += 1) {
+        const ids = level;
+        addLevel(ids, await pegParents(ids, {}, dbc));
+        level = nextStructureLevel(
+          ids.flatMap((id) => demandsByOrder.get(id) ?? []),
+          expanded
+        );
+      }
+    };
+    return { demandsByOrder, orders, expanded, addLevel, descend };
+  }
+
+  async function getStructure(query: StructureQuery): Promise<StructureResult> {
+    const today = todayFn();
+    const { demandsByOrder, orders, expanded, addLevel, descend } = structureLevels();
+
+    let root: StructureInput["root"];
+    // The TOs of the next level to peg and their depth (TO levels below the root).
+    let level: string[];
+    let depth = 1;
+    if (query.manufacturingOrderId) {
+      const id = query.manufacturingOrderId;
+      const world = await pegParents([id], { withParentArticles: true });
+      const head = world.heads.find((h) => h.id === id);
+      if (!head) throw new ManufacturingOrderNotFoundError(id);
+      addLevel([id], world);
+      // A TO that is not open has no own article in the world: no Går till.
+      root = { kind: "manufacturing_order", manufacturingOrderId: id, goesTo: goesToOf(world.peggings.get(head.articleId), id).goesTo };
+      level = nextStructureLevel(demandsByOrder.get(id) ?? [], expanded);
+    } else {
+      const id = query.salesOrderId!;
+      const loaded = await loadDeliveryOutlooks([id]);
+      const entry = loaded.entries.get(id);
+      if (!entry) throw new SalesOrderNotFoundError(id);
+      const rows: StructureRootRow[] = entry.rows.map((row) => {
+        const allocated = row.allocations.flatMap((a) => (a.kind === "manufacturing_order" && a.documentId ? [a.documentId] : []));
+        const pegging = loaded.world?.peggings.get(row.articleId);
+        const article = loaded.world?.overviews.get(row.articleId)?.article;
+        return {
+          row,
+          manufacturable: loaded.articleTypeOfRow.get(row.salesOrderRowId) === "manufactured",
+          // A configured row's linked TOs are all its own (S19); an ordinary
+          // row asks moveCandidates on the pegging its allocations came from.
+          exclusiveOrderIds: row.configured
+            ? new Set(allocated)
+            : pegging && article
+              ? exclusiveOrderIds(pegging, article, (d) => d.id === `so:${row.salesOrderRowId}`)
+              : new Set<string>(),
+        };
+      });
+      root = {
+        kind: "sales_order",
+        salesOrderId: id,
+        orderNumber: entry.order.orderNumber,
+        customerName: entry.order.customerName,
+        outlook: entry.outlook,
+        rows,
+      };
+      // The rows' TOs (depth 1) are the batch behind Halvfabrikat sent.
+      const first = [
+        ...new Set(entry.rows.flatMap((r) => r.allocations.flatMap((a) => (a.kind === "manufacturing_order" && a.documentId ? [a.documentId] : [])))),
+      ];
+      level = first;
+      if (loaded.allocatedWorld && first.length > 0) {
+        addLevel(first, loaded.allocatedWorld);
+        level = nextStructureLevel(first.flatMap((x) => demandsByOrder.get(x) ?? []), expanded);
+        depth = 2;
+      }
+    }
+    await descend(level, depth);
+
+    const plans = await loadOrderPlans([...expanded]);
+    for (const [id, facts] of orders) facts.plan = plans.summaries.get(id) ?? null;
+    const stamped = plans.operations.length > 0 ? await repo.stampedOperationIds() : new Set<string>();
+    const input: Omit<StructureInput, "offDays"> = {
+      today,
+      root,
+      demandsByOrder,
+      orders,
+      operations: plans.operations,
+      workCenters: plans.world?.workCenters ?? new Map<string, PlanWorkCenter>(),
+      stamped,
+    };
+    // The axis' days off: the capacity load's full-day holidays reach the
+    // plan horizon. Only a tree without any open TO, or one whose axis ends
+    // beyond the horizon, reads the holidays for its own axis.
+    const tree = buildStructureTree({ ...input, offDays: plans.world?.offDays ?? new Set<string>() });
+    if (plans.world && tree.axis.to <= plans.horizonTo) return tree;
+    return buildStructureTree({ ...input, offDays: new Set(await repo.fullDayHolidaysBetween(tree.axis.from, tree.axis.to)) });
+  }
+
+  // --- Planera om strukturen (planeringsverktyget etapp 5) ----------------
+  // What the preview and the write share, writing nothing (structure-replan.ts
+  // owns the rules, planStructure the placing — Planera's engine, one TO at
+  // a time, children before parents):
+  //   1. the tree from the top with Strukturvyn's own loader (one pegParents
+  //      per TO level), every read through `dbc`;
+  //   2. the choice (replanSelection: the default, or includeOrderIds);
+  //   3. with `lock`: the chosen TOs' operations FOR UPDATE in id order —
+  //      never the order row (the caller holds the production_plan lock);
+  //   4. the plan world and the stamps, read AFTER the locks;
+  //   5. planStructure;
+  //   6. the färdigdatum in memory: the top's new one, and with
+  //      moveComponentDueDates each chosen halvfabrikat's NEW klar-dag (the
+  //      reservation's rule: a TO it creates is due the day it is ready) —
+  //      then planStructure once more with those dates, so Sen and the
+  //      warnings are counted on them (the placing never reads a due date:
+  //      the days are the same);
+  //   7. the answer.
+  // `dbc` undefined = outside a transaction (the preview). Throws, in this
+  // order: unknown top (404), a top that is not open (409
+  // invalid-status-transition), an includeOrderIds that may not be chosen
+  // (409 replan-structure-changed with the answer for the valid part).
+  type ReplanRequest = { dueDate: string | null; moveComponentDueDates: boolean; includeOrderIds?: string[] };
+  async function prepareReplanStructure(dbc: Tx | undefined, topId: string, input: ReplanRequest, opts: { lock: boolean }) {
+    // "delas med": the other demands a halvfabrikat-TO covers, per place in
+    // the tree (parent|child) — Går till of the TO in the pegging its parent
+    // was pegged with.
+    const sharedByLink = new Map<string, string[]>();
+    const levels = structureLevels((ids, world) => {
+      for (const parentId of ids) {
+        for (const { pegging, demand } of parentDemands(world, parentId)) {
+          for (const a of demand.allocations) {
+            const supply = supplyOf(pegging, a);
+            const childId = supply.kind === "manufacturing_order" ? (supply.row?.documentId ?? null) : null;
+            if (childId === null || sharedByLink.has(`${parentId}|${childId}`)) continue;
+            const others = goesToOf(pegging, childId)
+              .goesTo.filter((g) => g.documentId !== parentId)
+              .map((g) => g.documentNumber ?? "lagret");
+            sharedByLink.set(`${parentId}|${childId}`, [...new Set(others)]);
+          }
+        }
+      }
+    });
+    const topWorld = await pegParents([topId], {}, dbc);
+    const head = topWorld.heads.find((h) => h.id === topId);
+    if (!head) throw new ManufacturingOrderNotFoundError(topId);
+    if (!OPEN_MO_STATUSES.has(head.status)) throw new InvalidStatusTransitionError(head.orderNumber, head.status);
+    levels.addLevel([topId], topWorld);
+    await levels.descend(nextStructureLevel(levels.demandsByOrder.get(topId) ?? [], levels.expanded), 1, dbc);
+
+    const tree = replanTree(topId, levels.orders, levels.demandsByOrder);
+    const selection = replanSelection(tree, input.includeOrderIds);
+    const chosenIds = tree.map((n) => n.manufacturingOrderId).filter((id) => selection.included.has(id));
+    if (opts.lock && dbc) await repo.lockOrdersOperations(dbc, [...chosenIds].sort());
+    const world = await loadPlanWorld(dbc);
+    const stamped = await repo.stampedOperationIds(dbc);
+
+    // The färdigdatum that would be written — only where it changes.
+    const dueDates = new Map<string, { before: string | null; after: string; late: boolean }>();
+    if (input.dueDate !== null && input.dueDate !== head.dueDate) {
+      dueDates.set(topId, { before: head.dueDate, after: input.dueDate, late: false });
+    }
+    const ordersWithDates = () =>
+      replanOrders(tree, selection.included, levels.demandsByOrder, (id) => {
+        const due = dueDates.get(id);
+        return due ? due.after : (levels.orders.get(id)?.dueDate ?? null);
+      });
+    let plan = planStructure(world, stamped, ordersWithDates());
+    if (input.moveComponentDueDates) {
+      for (const node of tree) {
+        const id = node.manufacturingOrderId;
+        const finish = plan.finishOf.get(id) ?? null;
+        // A TO beyond the horizon has no klar-dag: its date is left alone.
+        if (id === topId || !selection.included.has(id) || finish === null || finish === node.dueDate) continue;
+        dueDates.set(id, { before: node.dueDate, after: finish, late: false });
+      }
+      plan = planStructure(world, stamped, ordersWithDates());
+    }
+    const result = replanStructureOutcome({
+      tree,
+      included: selection.included,
+      sharedWith: new Map(
+        tree.flatMap((n) =>
+          n.parentOrderId === null ? [] : [[n.manufacturingOrderId, sharedByLink.get(`${n.parentOrderId}|${n.manufacturingOrderId}`) ?? []] as const]
+        )
+      ),
+      dueDates,
+      world,
+      capacity: world.capacity,
+      stamped,
+      plan,
+      notes: selection.capped
+        ? [`Fler än ${REPLAN_MAX_INCLUDED} halvfabrikat kan inte planeras om på en gång — resten är inte valda`]
+        : [],
+    });
+    if (!selection.valid) throw new ReplanStructureChangedError(result);
+    return { head, plan, dueDates, result };
+  }
+  // The färdigdatum changed between the read and the order rows' lock: the
+  // write is rolled back and answered with a preview read again.
+  class ReplanDueDateRace {
+    constructor(public manufacturingOrderId: string) {}
   }
 
   // --- Skapa saknade halvfabrikat (pegging #9, etapp 3) -------------------
@@ -2739,7 +3715,18 @@ export function createPlanningService(
       const workCenters = await repo.runPlanWorkCenters();
       const stations = runPlanStations(workCenters);
       if (!query.workCenterId) {
-        return { workCenter: null, today, toDate, rows: [], days: [], totalMinutes: 0, totalHours: 0, stations };
+        return {
+          workCenter: null,
+          today,
+          toDate,
+          rows: [],
+          days: [],
+          totalMinutes: 0,
+          totalHours: 0,
+          stations,
+          materialGroups: [],
+          unlinkedRowKeys: [],
+        };
       }
       const workCenter = workCenters.find((w) => w.id === query.workCenterId);
       if (!workCenter) return null;
@@ -2752,7 +3739,97 @@ export function createPlanningService(
       // same rows (quantities, time flags, planned days) the matrix reads.
       // The calendars are not read by the körplan — no holiday span needed.
       const operations = orderIds.length === 0 ? [] : (await repo.loadCapacityInput(today, today, undefined, { orderIds })).operations;
-      return buildRunPlan({ today, toDate, workCenter, stations, operations, plannedOrderOperations });
+      // The list first (pure), then the extras for exactly the listed
+      // operations — the rows are built again with them; the order, the
+      // selection and the days never read them.
+      const input = { today, toDate, workCenter, stations, operations, plannedOrderOperations };
+      const listed = extrasOperationsOf(buildRunPlan(input).rows);
+      const extras = await loadRunPlanExtras(listed.operationIds, listed.orderIdOf);
+      return buildRunPlan({ ...input, ...extras });
+    },
+
+    // Dagplan — every resource's work ONE day (day-plan.ts owns the list;
+    // the rows are the körplan's, the load Beläggning's). Derived at every
+    // read from ONE capacity load over all open orders.
+    async getDayPlan(query: DayPlanQuery): Promise<DayPlanResult> {
+      const today = todayFn();
+      const date = query.date ?? today;
+      const lastDate = addDays(today, DAY_PLAN_MAX_AHEAD_DAYS);
+      if (date < today || date > lastDate) throw new DayPlanDateOutOfRangeError(date, today);
+      // One day past the window, so Nästa dag at the edge sees its holidays.
+      const capacity = await repo.loadCapacityInput(today, addDays(lastDate, 1));
+      // Full-day holidays, as planWorldOf reads them.
+      const offDays = new Set(capacity.holidays.filter((h) => h.dayScheduleId === null).map((h) => h.date));
+      const base = {
+        today,
+        date,
+        offDays,
+        workCenters: capacity.workCenters,
+        productionGroups: capacity.productionGroups,
+        productionGroupId: query.productionGroupId ?? null,
+        operations: capacity.operations,
+        dayLoads: resourceDayLoads(capacity, today, date),
+      };
+      // The day's list first (pure), then the extras for the operations it
+      // SHOWS (carried + rows) — never for the whole floor's pending work.
+      const empty = { materials: new Map<string, RunPlanOperationMaterials>(), stamps: new Map<string, RunPlanStamp[]>() };
+      const shown = buildDayPlan({ ...base, ...empty, present: new Map() }).resources.flatMap((r) => [...r.carried, ...r.rows]);
+      const listed = extrasOperationsOf(shown);
+      const extras = await loadRunPlanExtras(listed.operationIds, listed.orderIdOf);
+      // På plats is a fact about now — only today's dagplan carries it.
+      const present = new Map<string, DayPlanPresent[]>();
+      if (date === today) {
+        for (const p of await repo.presentByWorkCenter()) {
+          const list = present.get(p.workCenterId) ?? [];
+          list.push({ employeeId: p.employeeId, name: p.name });
+          present.set(p.workCenterId, list);
+        }
+      }
+      return buildDayPlan({ ...base, ...extras, present });
+    },
+
+    // The dagplan as a PDF (A4 landscape): one group per resource with rows,
+    // Kvar från tidigare first (no number), then the day's in körordning.
+    async getDayPlanPdf(query: DayPlanQuery): Promise<{ filename: string; content: Buffer }> {
+      if (!deps.runPlanPdf) throw new Error("The körplan PDF renderer is not wired");
+      const plan = await this.getDayPlan(query);
+      const group = query.productionGroupId ? plan.productionGroups.find((g) => g.id === query.productionGroupId) : null;
+      const pdfRow = (row: RunPlanRow, nr: string) => ({
+        day: nr,
+        orderNumber: row.orderNumber,
+        article: `${row.articleNumber} ${row.articleName}`,
+        operation: row.description ? `Op ${row.sequenceNo} ${row.description}` : `Op ${row.sequenceNo}`,
+        remainingQuantity: formatRunPlanQuantity(row.remainingQuantity),
+        remainingTime: formatRunPlanHours(row.remainingHours),
+        dueDate: row.dueDate ?? "–",
+        status: `${runPlanStatusLabel(row)}${row.planLocked ? " · Låst" : ""}`,
+        locked: "",
+        material: dayPlanMaterialText(row),
+      });
+      const loadText = (load: DayPlanResult["resources"][number]["load"]) =>
+        load.availableHours == null
+          ? formatRunPlanHours(load.loadHours)
+          : load.availableHours === 0
+            ? `${formatRunPlanHours(load.loadHours)} — ingen kapacitet`
+            : `${formatRunPlanHours(load.loadHours)} av ${formatRunPlanHours(load.availableHours)}`;
+      const content = await deps.runPlanPdf.renderRunPlan({
+        title: `Dagplan — ${RUN_PLAN_WEEKDAYS[plan.weekday - 1]} ${plan.date} (vecka ${plan.isoWeek})`,
+        subtitle: `${query.productionGroupId ? (group ? `${group.code} ${group.name}` : "Okänd produktionsgrupp") : "Alla resurser"} · Utskriven ${plan.today}`,
+        emptyText: "Inga planerade operationer den dagen.",
+        firstColumnHeading: "Nr",
+        materialHeading: "Material",
+        groups: plan.resources
+          .filter((r) => r.carried.length + r.rows.length > 0)
+          .map((r) => ({
+            heading: `${r.workCenter.code} ${r.workCenter.name} — ${loadText(r.load)}`,
+            totalLabel: `Summa ${r.workCenter.code}`,
+            total: formatRunPlanHours(r.rowHours),
+            rows: [...r.carried.map((row) => pdfRow(row, "–")), ...r.rows.map((row, i) => pdfRow(row, String(i + 1)))],
+          })),
+        totalLabel: "Summa tid kvar",
+        total: formatRunPlanHours(plan.totals.hours),
+      });
+      return { filename: `dagplan-${plan.date}.pdf`, content };
     },
 
     // The körplan as a PDF (A4 landscape), the same selection as the list,
@@ -2880,61 +3957,7 @@ export function createPlanningService(
     async moveOperation(opId: string, input: MoveOperationInput, userId: string | null): Promise<MoveOperationResult> {
       const moved = await repo.transaction(async (tx) => {
         await lockProductionPlan(tx);
-        const op = await repo.planOperation(opId, tx);
-        if (!op) throw new OperationNotFoundError(opId);
-        const today = todayFn();
-        if (input.date < today) throw new PlanDateInPastError(input.date, today);
-        if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
-        if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
-        if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
-        const world = await loadPlanWorld(tx);
-        const target = world.operations.find((o) => o.moOperationId === opId);
-        if (!target) throw new OperationNotPlannableError("order_not_open");
-        // Under the book's threshold nothing would be written (roundPlanDays).
-        if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
-        const stamped = await repo.stampedOperationIds(tx);
-
-        const orderOps: PlanOperation[] = [];
-        const fixed: CapacityOperationRow[] = [];
-        for (const o of world.operations.filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)) {
-          const started = startedOf(o, stamped);
-          const replan =
-            o.moOperationId === opId ||
-            o.operationStatus === "done" ||
-            (o.sequenceNo > op.sequenceNo && input.moveFollowing && !o.planLocked);
-          if (replan) orderOps.push({ ...o, started });
-          // A lego operation always walks with the order: the engine never
-          // books it, but it takes its place in the chain (its Ledtid and
-          // its gap) exactly as in Planera — left out, the gaps after it
-          // were counted one short (another day than the next Planera gives
-          // with a Standardkötid in half days) and a move to before the lego
-          // is back gave no sequence warning.
-          else if (world.workCenters.get(o.workCenterId)?.type === "subcontract") orderOps.push({ ...o, started });
-          // Kept as it is: planned ⇒ fixed load and the sequence floor, like a
-          // lock but reported as "ligger fast" rather than "låst"; unplanned
-          // ⇒ its due-date bucket, untouched.
-          else if (hasPlan(o)) orderOps.push({ ...o, started, fixed: true });
-          else fixed.push(o);
-        }
-        const result = planProduction({
-          today: world.today,
-          offDays: world.offDays,
-          workCenters: world.workCenters,
-          schedule: world.schedule,
-          queueDays: world.queueDays,
-          orders: [{ id: op.manufacturingOrderId, orderNumber: op.orderNumber, dueDate: target.dueDate, operations: orderOps }],
-          existingOperations: [...world.operations.filter((o) => o.manufacturingOrderId !== op.manufacturingOrderId), ...fixed],
-          forceStart: { operationId: opId, date: input.date },
-          longOperationWeeks: world.longOperationWeeks,
-        });
-        // The forced day took nothing (no capacity that day: a weekend, a
-        // röd dag, a free day in the schedule) — the book went on to the
-        // first day with capacity. Tested on the plan BEFORE the write, so
-        // nothing is written.
-        const ownPlan = result.plans.find((p) => p.operationId === opId);
-        if (ownPlan && ownPlan.startDate !== input.date) {
-          throw new PlanDateNoCapacityError(input.date, op.workCenterCode);
-        }
+        const { op, result, following } = await prepareMove(tx, opId, input);
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
         // Locked only when it got a plan — beyond the horizon it is cleared
         // (the CHECK forbids a lock without days) and the warning says so.
@@ -2942,15 +3965,6 @@ export function createPlanningService(
         const row = placed
           ? (await repo.setOperationLock(tx, opId, true))!
           : { plannedStartDate: null, plannedEndDate: null, planLocked: false };
-        const seqOf = new Map(orderOps.map((o) => [o.moOperationId, o.sequenceNo]));
-        const following = [
-          ...result.plans
-            .filter((p) => p.operationId !== opId)
-            .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartDate: p.startDate, plannedEndDate: p.endDate })),
-          ...result.clear
-            .filter((id) => id !== opId && (seqOf.get(id) ?? 0) > op.sequenceNo)
-            .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartDate: null, plannedEndDate: null })),
-        ].sort((a, b) => a.sequenceNo - b.sequenceNo);
         return { op, operation: row, following, warnings: result.warnings };
       });
       await audit.log({
@@ -2971,6 +3985,101 @@ export function createPlanningService(
         userId,
       });
       return { operation: moved.operation, following: moved.following, warnings: moved.warnings };
+    },
+
+    // Flytta, the preview — what POST …/move would do with the same body,
+    // computed on the plan as it is right now: no transaction, no
+    // production_plan lock, nothing written and nothing logged. The same
+    // refusals as the move, in the same order (prepareMove).
+    async previewMoveOperation(opId: string, input: MoveOperationInput): Promise<MoveOperationPreview> {
+      const { today, world, target, result, following } = await prepareMove(undefined, opId, input);
+      // The operation's days as writeOperationPlans would mirror them
+      // (operationsWithPlan rounds with the writer's own roundPlanDays).
+      const operationsAfter = operationsWithPlan(world.operations, result);
+      const own = operationsAfter.find((o) => o.moOperationId === opId);
+      const range = own ? plannedDateRange(own) : null;
+      const loadOf = (ops: CapacityOperationRow[]) => worldDayLoad(world, today, target.workCenterId, input.date, ops);
+      return {
+        operation: { plannedStartDate: range?.start ?? null, plannedEndDate: range?.end ?? null },
+        following,
+        warnings: result.warnings,
+        dayLoad: { before: loadOf(world.operations), after: loadOf(operationsAfter) },
+      };
+    },
+
+    // Samkör, the preview — what POST /planning/co-run would do, computed
+    // on the plan as it is right now: no transaction, no production_plan
+    // lock, nothing written. null = the resource does not exist.
+    async previewCoRun(input: CoRunInput): Promise<CoRunResult | null> {
+      const prepared = await prepareCoRun(undefined, input, { lock: false });
+      if (!prepared) return null;
+      const current = await repo.runPlanDayOperations(undefined, prepared.workCenter.id, input.date, { lock: false });
+      const outcome = coRunOutcomeOf(prepared, input.date, coRunDayOperationsAfter(prepared, input.date, current));
+      return { ...outcome, materials: await coRunMaterials(prepared) };
+    },
+
+    // Samkör — the selected operations moved to ONE day with Flytta's rule
+    // (planCoRun: one at a time against one world), locked and laid next to
+    // each other after the day's already ordered ones. ONE transaction.
+    // Lock order: production_plan → the selected operations (FOR UPDATE, by
+    // id) → the day's operations (FOR UPDATE, by id) — never the order row.
+    // The places are written LAST: writeOperationPlans drops run_position
+    // for every operation whose start day changes. null = the resource does
+    // not exist.
+    async coRun(input: CoRunInput, userId: string | null): Promise<CoRunResult | null> {
+      const written = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const prepared = await prepareCoRun(tx, input, { lock: true });
+        if (!prepared) return null;
+        const { plan } = prepared;
+        await repo.writeOperationPlans(tx, { plans: plan.plans, clear: plan.clear, plannedAt: new Date() });
+        await repo.setOperationLocks(tx, plan.lockIds, true);
+        const current = await repo.runPlanDayOperations(tx, prepared.workCenter.id, input.date, { lock: true });
+        const order = coRunOrder(current, prepared.operationIds);
+        if (order.length > 0) await repo.writeRunPositions(tx, order);
+        // The answer (all but the materials) is computed BEFORE commit:
+        // nothing between the commit and the händelselogg can throw.
+        return { prepared, result: coRunOutcomeOf(prepared, input.date, current) };
+      });
+      if (!written) return null;
+      const { prepared, result } = written;
+      // The same event as Flytta for every operation a move was run on (one
+      // beyond the horizon lost its days: logged too, with no days), marked
+      // as part of a co-run; one already on the day was not moved.
+      for (const op of result.operations) {
+        if (op.outcome === "already_on_day") continue;
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: op.orderNumber,
+          action: "operation_moved",
+          detail: {
+            moOperationId: op.moOperationId,
+            sequenceNo: op.sequenceNo,
+            workCenterCode: prepared.workCenter.code,
+            fromDate: op.fromDate,
+            toDate: input.date,
+            plannedStartDate: op.plannedStartDate,
+            plannedEndDate: op.plannedEndDate,
+            moveFollowing: true,
+            warnings: result.warnings.filter((w) => w.manufacturingOrderId === op.manufacturingOrderId),
+            reason: "co_run",
+          },
+          userId,
+        });
+      }
+      await audit.log({
+        entityType: "production_plan",
+        entityId: null,
+        action: "co_run",
+        detail: {
+          workCenterCode: prepared.workCenter.code,
+          date: input.date,
+          operations: result.operations.map((op) => `${op.orderNumber} op ${op.sequenceNo}`).join(", "),
+          moved: result.operations.filter((op) => op.outcome === "moved").length,
+        },
+        userId,
+      });
+      return { ...result, materials: await coRunMaterials(prepared) };
     },
 
     // Lås upp — the allocation stays until the next Planera. Idempotent.
@@ -2994,11 +4103,183 @@ export function createPlanningService(
       return { operation: unlocked.row };
     },
 
+    // Lås upp hela ordern / Lås upp strukturen (S27): every locked pending
+    // operation of the given TOs, in ONE transaction. Lock order as every
+    // writer of the plan: production_plan (advisory) → the operations FOR
+    // UPDATE in id order — never the order row. Idempotent, so no
+    // `expected`; the days stay until the next Planera, like Lås upp. An
+    // unknown TO refuses the whole request (404, nothing written).
+    // Händelselogg after commit, one row per TO that actually had a lock.
+    async unlockOrders(
+      input: UnlockOrdersInput,
+      userId: string | null
+    ): Promise<{ unlocked: { manufacturingOrderId: string; orderNumber: string; operations: number }[] }> {
+      const ids = input.manufacturingOrderIds;
+      const result = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const loaded = await repo.lockOrdersOperations(tx, ids);
+        const numberOf = new Map(loaded.orders.map((o) => [o.manufacturingOrderId, o.orderNumber]));
+        for (const id of ids) if (!numberOf.has(id)) throw new ManufacturingOrderNotFoundError(id);
+        const locked = loaded.operations.filter(isLockedOperation);
+        await repo.setOperationLocks(tx, locked.map((op) => op.moOperationId), false);
+        // In the request's order.
+        return ids.map((id) => ({
+          manufacturingOrderId: id,
+          orderNumber: numberOf.get(id)!,
+          sequenceNos: locked.filter((op) => op.manufacturingOrderId === id).map((op) => op.sequenceNo).sort((a, b) => a - b),
+        }));
+      });
+      for (const order of result) {
+        if (order.sequenceNos.length === 0) continue;
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: order.orderNumber,
+          action: "order_plan_unlocked",
+          detail: { operations: order.sequenceNos.map((n) => `op ${n}`).join(", "), count: order.sequenceNos.length },
+          userId,
+        });
+      }
+      return { unlocked: result.map(({ sequenceNos, ...order }) => ({ ...order, operations: sequenceNos.length })) };
+    },
+
+    // Planera om strukturen, the preview: what the write would do, on the
+    // plan as it is right now — no transaction, no production_plan lock,
+    // nothing written.
+    async previewReplanStructure(topId: string, input: ReplanStructurePreviewInput): Promise<ReplanStructureResult> {
+      return (await prepareReplanStructure(undefined, topId, input, { lock: false })).result;
+    },
+
+    // Planera om strukturen — the top TO and the chosen halvfabrikat-TOs
+    // planned again (children before parents, each from the day its
+    // material is ready) and locked on their days; with the färdigdatum the
+    // dialog chose. ONE transaction.
+    // Lock order: production_plan (advisory) → the chosen TOs' operations
+    // (FOR UPDATE, by id) → their order rows (setDueDatesInTx, by id) —
+    // operation before order, as the reports (operation → order) and the
+    // operation edits (advisory → operations → order). The writers that
+    // start on the order row (Flytta halvfabrikaten, the header PATCH,
+    // Makulera/Slutför/Förbruka) never take an operation after it, so no
+    // cycle. Never a kundorder row.
+    // 409 replan-structure-changed when the tree or its dates are not the
+    // ones the preview showed (`expected`), 409
+    // replan-structure-not-plannable when a chosen TO does not fit within
+    // the horizon — nothing written. Other load is not tested: the answer
+    // shows the actual outcome. Händelselogg after commit.
+    async replanStructure(topId: string, input: ReplanStructureInput, userId: string | null): Promise<ReplanStructureResult> {
+      let written: Awaited<ReturnType<typeof prepareReplanStructure>>;
+      try {
+        written = await repo.transaction(async (tx) => {
+          await lockProductionPlan(tx);
+          const prepared = await prepareReplanStructure(tx, topId, input, { lock: true });
+          if (!sameReplanExpected(prepared.result.expected, input.expected)) throw new ReplanStructureChangedError(prepared.result);
+          if (prepared.plan.blocked.length > 0) {
+            throw new ReplanStructureNotPlannableError(prepared.plan.blocked.map((b) => b.orderNumber));
+          }
+          const moves = [...prepared.dueDates].map(([manufacturingOrderId, due]) => ({
+            manufacturingOrderId,
+            dueDate: due.after,
+            expectedDueDate: due.before,
+          }));
+          if (moves.length > 0) {
+            const outcome = await deps.manufacturing.setDueDatesInTx(tx, moves);
+            if (!outcome.ok) {
+              switch (outcome.reason) {
+                case "not_found":
+                  throw new ManufacturingOrderNotFoundError(outcome.manufacturingOrderId);
+                case "invalid_status":
+                  throw new InvalidStatusTransitionError(outcome.orderNumber, outcome.status);
+                case "due_date_changed":
+                  throw new ReplanDueDateRace(outcome.manufacturingOrderId);
+              }
+            }
+          }
+          // ONE write for the whole tree (run_position dropped where the
+          // start day changes, as always), then the locks.
+          await repo.writeOperationPlans(tx, { plans: prepared.plan.plans, clear: prepared.plan.clear, plannedAt: new Date() });
+          await repo.setOperationLocks(tx, prepared.plan.lockIds, true);
+          // The answer was computed before any write — nothing between the
+          // commit and the händelselogg can throw.
+          return prepared;
+        });
+      } catch (err) {
+        if (!(err instanceof ReplanDueDateRace)) throw err;
+        throw new ReplanStructureChangedError((await prepareReplanStructure(undefined, topId, input, { lock: false })).result);
+      }
+      // The starts move the proposals' dates.
+      cache = null;
+      const { result } = written;
+      const planned = result.orders.filter((o) => o.included);
+      for (const order of planned) {
+        const withDays = order.operations.filter((op) => op.after.start !== null);
+        const changed = order.operations.some(
+          (op) => op.before.start !== op.after.start || op.before.end !== op.after.end || (op.after.start !== null && !op.wasLocked)
+        );
+        if (changed) {
+          const warnings = result.warnings.filter((w) => w.manufacturingOrderId === order.manufacturingOrderId).map((w) => w.message);
+          await audit.log({
+            entityType: "manufacturing_order",
+            entityId: order.orderNumber,
+            action: "structure_replanned",
+            detail: {
+              forOrder: result.top.orderNumber,
+              plannedStartDate: order.planned.after.start,
+              plannedEndDate: order.planned.after.end,
+              before: { plannedStartDate: order.planned.before.start, plannedEndDate: order.planned.before.end },
+              floorDate: order.floor?.date ?? null,
+              // ONE text — Historik writes lists as raw JSON.
+              operations: withDays
+                .map((op) => `op ${op.sequenceNo} ${op.after.start}${op.after.end !== op.after.start ? `–${op.after.end}` : ""}`)
+                .join(", "),
+              unlocked: order.operations.filter((op) => op.wasLocked).length,
+              ...(warnings.length > 0 ? { warnings: warnings.join("; ") } : {}),
+            },
+            userId,
+          });
+        }
+        const due = written.dueDates.get(order.manufacturingOrderId);
+        if (due) {
+          await audit.log({
+            entityType: "manufacturing_order",
+            entityId: order.orderNumber,
+            action: "updated",
+            detail: { before: { dueDate: due.before }, after: { dueDate: due.after }, reason: "structure_replan", forOrder: result.top.orderNumber },
+            userId,
+          });
+        }
+      }
+      await audit.log({
+        entityType: "production_plan",
+        entityId: null,
+        action: "structure_replanned",
+        detail: { top: result.top.orderNumber, orders: planned.map((o) => o.orderNumber).join(", "), count: planned.length },
+        userId,
+      });
+      return result;
+    },
+
+    getStructure,
     planNewOrderInTx,
     replanOrderInTx,
     orderPlanSummaries,
     operationResourceSuggestions,
     componentLateOrders,
+    deliveryOutlooks,
+    deliveryRiskOrderIds,
+
+    // Leveransläget on the kundorder card. An order that is no demand (a
+    // quote, delivered, …) answers "none" without rows.
+    async getSalesOrderDeliveryOutlook(salesOrderId: string): Promise<SalesOrderDeliveryOutlook> {
+      const entry = (await deliveryOutlooks([salesOrderId])).get(salesOrderId);
+      if (!entry) throw new SalesOrderNotFoundError(salesOrderId);
+      return {
+        salesOrderId,
+        orderNumber: entry.order.orderNumber,
+        orderStatus: entry.order.orderStatus,
+        today: todayFn(),
+        ...entry.outlook,
+        rows: entry.rows,
+      };
+    },
 
     // Pegging (#9) — the TO card's Täcks av / Går till: what covers each of
     // the TO's material needs, and which demands its own output goes to,
@@ -3044,28 +4325,14 @@ export function createPlanningService(
       });
       materials.sort((a, b) => a.articleNumber.localeCompare(b.articleNumber, "sv", { numeric: true }) || a.rowId.localeCompare(b.rowId));
 
-      const own = world.peggings.get(parent.articleId);
-      const supply = own?.supplies.find((s) => s.id === `mo:${parent.id}`);
-      const goesTo: CoverageGoesTo[] = (supply?.allocations ?? []).map((a) => {
-        const demand = own!.demands.find((d) => d.id === a.demandId)!;
-        return {
-          kind: (demand.row?.kind as CoverageGoesTo["kind"] | undefined) ?? "stock",
-          documentId: demand.row?.documentId ?? null,
-          documentNumber: demand.row?.documentNumber ?? null,
-          partner: demand.row?.partner ?? null,
-          needDate: demand.date,
-          quantity: a.quantity,
-          late: a.late,
-          daysLate: a.daysLate,
-        };
-      });
+      const { goesTo, surplus } = goesToOf(world.peggings.get(parent.articleId), parent.id);
       return {
         manufacturingOrderId,
         orderNumber: parent.orderNumber,
         status: parent.status,
         materials,
         goesTo,
-        surplus: supply?.surplus ?? 0,
+        surplus,
         componentLate: isComponentLate(world, parent.id),
         moves: await componentMoves(world, parent),
       };

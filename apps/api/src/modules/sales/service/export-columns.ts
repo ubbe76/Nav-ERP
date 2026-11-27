@@ -5,7 +5,7 @@
 // at the end. Status enums are exported as their Swedish label, mirroring the
 // *_STATUS_PILL maps in apps/web/lib/types.ts (there is no server-side
 // equivalent, so the labels are inlined here).
-import type { CsvColumn } from "@navet/shared";
+import { salesOrderOutlookText, type CsvColumn, type SalesOrderListOutlook } from "@navet/shared";
 import type {
   customers,
   invoices,
@@ -68,14 +68,21 @@ type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & {
   customerName: string;
   nextDeliveryDate: string | null;
   lostReasonName: string | null;
+  // Leveransläget — derived by the service for the rows that are a demand.
+  deliveryOutlook: SalesOrderListOutlook | null;
 };
 
-export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
+// `withOutlook`: the column Leveransläge — only when the export was asked for
+// with withOutlook=true (the kundorder list's link), since only then is the
+// outlook computed. Never an empty column that looks like "no outlook".
+export const salesOrderCsvColumns = (withOutlook: boolean): CsvColumn<SalesOrderRow>[] => [
   { label: "Ordernummer", value: (r) => r.orderNumber },
   // Offerter (0138): the OF- number, also on an order that came from one.
   { label: "Offertnummer", value: (r) => r.quoteNumber },
   { label: "Kund", value: (r) => r.customerName },
   { label: "Status", value: (r) => SALES_ORDER_STATUS_LABELS[r.status] },
+  // Empty for a closed order (no outlook). Text, never a price.
+  ...(withOutlook ? [{ label: "Leveransläge", value: (r: SalesOrderRow) => salesOrderOutlookText(r.deliveryOutlook) }] : []),
   { label: "Leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },
   { label: "Nästa leveransdatum", value: (r) => r.nextDeliveryDate, format: "date" },
   { label: "Giltig t.o.m.", value: (r) => r.quoteValidUntil, format: "date" },

@@ -58,7 +58,10 @@ describe("händelseloggens etiketter", () => {
     // Produktionsplanering: Flytta, Lås upp, ordningen inom dagen (#18).
     ["action", "operation_moved"],
     ["action", "operation_unlocked"],
+    ["action", "order_plan_unlocked"],
     ["action", "run_order_changed"],
+    ["action", "co_run"],
+    ["action", "structure_replanned"],
     // Inköpsorder stängd automatiskt vid sista inleveransen (2026-11-21).
     ["action", "closed_automatically"],
     // Stämplingar: a work stamp corrected, registered afterwards or removed (2026-11-22).

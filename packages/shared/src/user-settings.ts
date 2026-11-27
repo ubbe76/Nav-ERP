@@ -65,6 +65,7 @@ export const OVERVIEW_CARDS = [
   "payables",
   "quotes",
   "deviations",
+  "deliveryRisk",
 ] as const;
 export type OverviewCard = (typeof OVERVIEW_CARDS)[number];
 // The standard (overviewCards null): the four cards Översikten has always

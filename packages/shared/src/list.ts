@@ -56,28 +56,38 @@ export function statusListParam<T extends readonly [string, ...string[]]>(values
 // The order lists' (kund-, inköps- and tillverkningsorder) status filter also
 // takes "late" — Sen, derived when the list is read by the same rule as
 // Aviseringarna, never a stored status. The TO list also takes
-// "component_late" — Halvfabrikat sent (pegging #9), derived the same way.
-// splitLateFilter separates the pseudo statuses from the real ones; given
-// together, all apply.
+// "component_late" — Halvfabrikat sent (pegging #9) — and the kundorder list
+// "delivery_risk" — Leverans i fara (leveransläget), both derived the same
+// way. splitLateFilter separates the pseudo statuses from the real ones;
+// given together, all apply. A list that does not take a pseudo status never
+// sees it (its schema refuses the value) and ignores the flag.
 export const LATE_FILTER = "late";
 export const COMPONENT_LATE_FILTER = "component_late";
-const PSEUDO_STATUSES: ReadonlySet<string> = new Set([LATE_FILTER, COMPONENT_LATE_FILTER]);
+export const DELIVERY_RISK_FILTER = "delivery_risk";
+type PseudoStatus = typeof LATE_FILTER | typeof COMPONENT_LATE_FILTER | typeof DELIVERY_RISK_FILTER;
+const PSEUDO_STATUSES: ReadonlySet<string> = new Set([LATE_FILTER, COMPONENT_LATE_FILTER, DELIVERY_RISK_FILTER]);
 export function orderStatusListParam<T extends readonly [string, ...string[]]>(values: T) {
   return statusListParam([...values, LATE_FILTER] as unknown as readonly [T[number] | typeof LATE_FILTER, ...(T[number] | typeof LATE_FILTER)[]]);
 }
-// The TO list: the real statuses plus both pseudo statuses.
+// The TO list: the real statuses plus Sen and Halvfabrikat sent.
 export function manufacturingOrderStatusListParam<T extends readonly [string, ...string[]]>(values: T) {
   type Value = T[number] | typeof LATE_FILTER | typeof COMPONENT_LATE_FILTER;
   return statusListParam([...values, LATE_FILTER, COMPONENT_LATE_FILTER] as unknown as readonly [Value, ...Value[]]);
 }
+// The kundorder list: the real statuses plus Sen and Leverans i fara.
+export function salesOrderStatusListParam<T extends readonly [string, ...string[]]>(values: T) {
+  type Value = T[number] | typeof LATE_FILTER | typeof DELIVERY_RISK_FILTER;
+  return statusListParam([...values, LATE_FILTER, DELIVERY_RISK_FILTER] as unknown as readonly [Value, ...Value[]]);
+}
 export function splitLateFilter<S extends string>(
-  status: readonly (S | typeof LATE_FILTER | typeof COMPONENT_LATE_FILTER)[] | undefined
-): { statuses: S[] | undefined; late: boolean; componentLate: boolean } {
-  if (!status) return { statuses: undefined, late: false, componentLate: false };
+  status: readonly (S | PseudoStatus)[] | undefined
+): { statuses: S[] | undefined; late: boolean; componentLate: boolean; deliveryRisk: boolean } {
+  if (!status) return { statuses: undefined, late: false, componentLate: false, deliveryRisk: false };
   const statuses = status.filter((s): s is S => !PSEUDO_STATUSES.has(s));
   return {
     statuses: statuses.length > 0 ? statuses : undefined,
     late: status.includes(LATE_FILTER),
     componentLate: status.includes(COMPONENT_LATE_FILTER),
+    deliveryRisk: status.includes(DELIVERY_RISK_FILTER),
   };
 }

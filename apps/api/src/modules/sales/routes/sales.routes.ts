@@ -122,7 +122,7 @@ import { contentDisposition } from "../../system/service/content-disposition.js"
 import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { SeriesExhaustedError } from "../../system/service/number-series.js";
-import { CUSTOMER_CSV_COLUMNS, PRICE_LIST_CSV_COLUMNS, SALES_ORDER_CSV_COLUMNS } from "../service/export-columns.js";
+import { CUSTOMER_CSV_COLUMNS, PRICE_LIST_CSV_COLUMNS, salesOrderCsvColumns } from "../service/export-columns.js";
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
@@ -450,7 +450,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     path: "/sales-orders/csv",
     querySchema: listSalesOrdersQuerySchema,
     filenameBase: (q) => (q.kind === "quote" ? "offerter" : "kundordrar"),
-    columns: SALES_ORDER_CSV_COLUMNS,
+    columns: (_req, q) => salesOrderCsvColumns(q.withOutlook === true),
     fetch: (q) => service.listSalesOrders(q),
   });
 

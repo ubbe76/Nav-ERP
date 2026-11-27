@@ -19,6 +19,7 @@ export const OVERVIEW_CARDS = [
   "payables",
   "quotes",
   "deviations",
+  "deliveryRisk",
 ] as const;
 export type OverviewCard = (typeof OVERVIEW_CARDS)[number];
 // The standard (overviewCards null): the four cards Översikten has always
@@ -38,6 +39,7 @@ export const OVERVIEW_CARD_LABELS: Record<OverviewCard, string> = {
   payables: "Leverantörsfakturor att betala",
   quotes: "Offerter att följa upp",
   deviations: "Öppna avvikelser",
+  deliveryRisk: "Leverans i fara",
 };
 
 // Flow and stock run the full width; the rest are half cards that pair up
@@ -55,6 +57,7 @@ export const OVERVIEW_CARD_HALF: Record<OverviewCard, boolean> = {
   payables: true,
   quotes: true,
   deviations: true,
+  deliveryRisk: true,
 };
 
 // The page a newer card's Se alla opens — and its gate: the card is offered
@@ -70,6 +73,7 @@ export const OVERVIEW_CARD_HREF: Partial<Record<OverviewCard, string>> = {
   payables: "/inkop/reskontra",
   quotes: "/forsaljning/offerter",
   deviations: "/kvalitet/avvikelser",
+  deliveryRisk: "/forsaljning/ordrar",
 };
 
 type CardUser = { role: "admin" | "supervisor" | "user"; permissions?: readonly Permission[] };
@@ -84,6 +88,7 @@ export const OVERVIEW_CARD_ALERT_KIND = {
   receivables: "customer_invoice_overdue",
   payables: "supplier_invoice_due",
   quotes: "quote_followup",
+  deliveryRisk: "sales_order_delivery_risk",
 } as const satisfies Partial<Record<OverviewCard, string>>;
 
 // Unknown keys are dropped and repeats kept once, like the API's read does;

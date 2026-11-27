@@ -10,6 +10,7 @@ import {
   plannedDateRange,
   remainingByPlannedDays,
   remainingOperationMinutes,
+  resourceDayLoads,
   resourceDayMinutes,
   setupDoneOnCurrentResource,
   resolveResourceWeekHours,
@@ -670,6 +671,7 @@ describe("computeCapacity — planned operations", () => {
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-u", orderNumber: "PO-U" }],
       resourceSuggestions: [],
+      lockedOperations: 1,
     });
   });
 
@@ -772,6 +774,7 @@ describe("computeCapacity — planned operations", () => {
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-1", orderNumber: "PO-1" }],
       resourceSuggestions: [],
+      lockedOperations: 0,
     });
   });
 });
@@ -1094,5 +1097,88 @@ describe("computeCapacity — day view and overloadedDays", () => {
     expect(resourceRow(result, "wc-1").days[1]!.overloaded).toBe(true);
     expect(result.groups[0]!.dayTotals[1]).toMatchObject({ loadHours: 10, availableHours: 24, overloaded: false, overloadedDays: 0 });
     expect(result.summary.overloadedDays).toBe(1);
+  });
+});
+
+describe("resourceDayLoads — equals the matrix's dayLoads", () => {
+  // TODAY is Wednesday 2026-08-19. Friday the 21st is a röd dag, Monday the
+  // 24th a kortdag (4 h).
+  const fixture = calcInput({
+    workCenters: [
+      wc({ workCenterId: "wc-1", code: "100", weekScheduleId: "ws-40" }),
+      wc({ workCenterId: "wc-2", code: "200", hoursPerDay: 6, capacityFactor: 0.5 }),
+      wc({ workCenterId: "wc-3", code: "300" }), // no capacity calendar
+      wc({ workCenterId: "wc-lego", code: "900", type: "subcontract" }),
+    ],
+    weekScheduleDays: STD_WEEK.weekScheduleDays,
+    daySchedules: [...STD_WEEK.daySchedules, { id: "ds-240", netMinutes: 240 }],
+    holidays: [
+      { date: "2026-08-21", dayScheduleId: null },
+      { date: "2026-08-24", dayScheduleId: "ds-240" },
+    ],
+    operations: [
+      // Planned over three days, the middle one a röd dag: 900 min.
+      op({
+        moOperationId: "op-a",
+        runTimePerUnit: 90,
+        plannedDays: [
+          { date: "2026-08-20", minutes: 300 },
+          { date: "2026-08-21", minutes: 200 },
+          { date: "2026-08-24", minutes: 400 },
+        ],
+      }),
+      // A passed plan: clamped to today.
+      op({
+        moOperationId: "op-b",
+        manufacturingOrderId: "mo-2",
+        runTimePerUnit: 33.33,
+        plannedDays: [
+          { date: "2026-08-17", minutes: 200 },
+          { date: "2026-08-19", minutes: 133.3 },
+        ],
+      }),
+      // Unplanned: on the due date; a passed due date on today; undated nowhere.
+      op({ moOperationId: "op-c", manufacturingOrderId: "mo-3", dueDate: "2026-08-25", runTimePerUnit: 7 }),
+      op({ moOperationId: "op-d", manufacturingOrderId: "mo-4", dueDate: "2026-08-10", runTimePerUnit: 11 }),
+      op({ moOperationId: "op-e", manufacturingOrderId: "mo-5", dueDate: null }),
+      op({ moOperationId: "op-f", manufacturingOrderId: "mo-6", dueDate: "2026-08-19", operationStatus: "done" }),
+      // Hours per day × the factor: 3 h a day, overloaded by 4 h on Thursday.
+      op({ moOperationId: "op-g", manufacturingOrderId: "mo-7", workCenterId: "wc-2", dueDate: "2026-08-20", runTimePerUnit: 24 }),
+      op({ moOperationId: "op-h", manufacturingOrderId: "mo-8", workCenterId: "wc-2", dueDate: "2026-08-22", runTimePerUnit: 1 }),
+      // No calendar: load without capacity, never overloaded.
+      op({ moOperationId: "op-i", manufacturingOrderId: "mo-9", workCenterId: "wc-3", dueDate: "2026-08-19", runTimePerUnit: 100 }),
+      // Lego: never load.
+      op({ moOperationId: "op-j", manufacturingOrderId: "mo-9", workCenterId: "wc-lego", dueDate: "2026-08-19", sequenceNo: 20 }),
+    ],
+  });
+  const DAYS = 14;
+  const matrix = computeCapacity(fixture, { today: TODAY, weeks: 8, granularity: "day", days: DAYS });
+
+  it("gives the same loadHours, availableHours and overloaded for every resource and day", () => {
+    for (const { date } of matrix.days) {
+      const loads = resourceDayLoads(fixture, TODAY, date);
+      expect([...loads.keys()].sort()).toEqual(["wc-1", "wc-2", "wc-3"]);
+      for (const workCenterId of ["wc-1", "wc-2", "wc-3"]) {
+        const expected = resourceRow(matrix, workCenterId).dayLoads.find((d) => d.date === date)!;
+        expect(loads.get(workCenterId), `${workCenterId} ${date}`).toEqual(expected);
+      }
+    }
+    expect(matrix.days).toHaveLength(DAYS);
+  });
+
+  it("is not vacuous: the fixture's röd dag, kortdag, clamped plan and resource without calendar", () => {
+    const on = (date: string, id: string) => resourceDayLoads(fixture, TODAY, date).get(id)!;
+    // Today: the passed plan (333.3 min) + the passed due date (110 min).
+    expect(on("2026-08-19", "wc-1")).toEqual({ date: "2026-08-19", loadHours: 7.39, availableHours: 8, overloaded: false });
+    // Röd dag with planned load: 0 h available ⇒ overloaded.
+    expect(on("2026-08-21", "wc-1")).toEqual({ date: "2026-08-21", loadHours: 3.33, availableHours: 0, overloaded: true });
+    // Kortdag: 400 min of 4 h.
+    expect(on("2026-08-24", "wc-1")).toEqual({ date: "2026-08-24", loadHours: 6.67, availableHours: 4, overloaded: true });
+    expect(on("2026-08-20", "wc-2")).toEqual({ date: "2026-08-20", loadHours: 4, availableHours: 3, overloaded: true });
+    // Saturday without capacity but with load.
+    expect(on("2026-08-22", "wc-2")).toEqual({ date: "2026-08-22", loadHours: 0.17, availableHours: 0, overloaded: true });
+    expect(on("2026-08-19", "wc-3")).toEqual({ date: "2026-08-19", loadHours: 16.67, availableHours: null, overloaded: false });
+    // A resource without load is still there.
+    expect(on("2026-08-26", "wc-3")).toEqual({ date: "2026-08-26", loadHours: 0, availableHours: null, overloaded: false });
   });
 });

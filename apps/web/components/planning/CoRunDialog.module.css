@@ -1,0 +1,127 @@
+/* Samkör. The modal body is narrow (about 496px, the whole screen on a
+   phone): every list is a wrapping flex line — what to the left, the outcome
+   to the right, under each other when they do not fit. No pixel grids. */
+.resource {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.pending {
+  margin-top: var(--space-3);
+}
+
+.done {
+  margin-top: var(--space-4);
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.section {
+  min-width: 0;
+}
+
+.heading {
+  margin: 0 0 4px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+.outcome {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.outcome[data-tone="muted"] {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.outcome[data-tone="alert"],
+.load[data-tone="alert"] {
+  color: var(--status-stopped-text);
+}
+
+.load {
+  margin: 0;
+  font-weight: 600;
+}
+
+.warnings {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.runOrder {
+  margin: 0;
+  padding-left: 1.9em;
+}
+
+.runOrder > li {
+  padding: 2px 0;
+  color: var(--color-text-secondary);
+}
+
+.runOrder > li > span:first-child {
+  margin-right: 8px;
+}
+
+.runOrder > li[data-selected="true"] {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.selectedTag {
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.help {
+  margin-top: var(--space-4);
+}

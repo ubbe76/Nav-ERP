@@ -97,7 +97,7 @@ async function bookOnBank(date: string, bankAmount: number, counter = "6570") {
 const alertsAt = (today: string) =>
   createAlertsService({
     repo: createAlertsRepository(db),
-    planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
+    planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map(), deliveryRiskOrders: async () => [] },
     settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
     today: () => today,
   });

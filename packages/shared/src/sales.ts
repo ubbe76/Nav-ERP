@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { dimensionFields } from "./dimensions.js";
 import { vatRateSchema } from "./vat.js";
-import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
+import { listQuerySchema, salesOrderStatusListParam, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
 import { blankSafe, numericMax, numericStep } from "./coerce.js";
@@ -78,8 +78,9 @@ export function salesDocumentKind(order: {
 }
 
 export const listSalesOrdersQuerySchema = listQuerySchema.extend({
-  // Also "late" (Sen) — see orderStatusListParam in list.ts.
-  status: orderStatusListParam(salesOrderStatusSchema.options),
+  // Also "late" (Sen) and "delivery_risk" (Leverans i fara) — see
+  // salesOrderStatusListParam in list.ts.
+  status: salesOrderStatusListParam(salesOrderStatusSchema.options),
   // Offerter vs Kundorder — filters on the derived document kind; the
   // status filter still applies on top.
   kind: salesDocumentKindSchema.optional(),
@@ -97,8 +98,47 @@ export const listSalesOrdersQuerySchema = listQuerySchema.extend({
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .optional(),
+  // Leveransläget on the rows (deliveryOutlook) — opt-in like the article
+  // register's withAbc: the outlook pegs the page's open orders at every
+  // read, and this list is also every order picker's `?limit=1000` fetch.
+  // Only the kundorder list (page, split list and its export) asks for it;
+  // without it deliveryOutlook is null and nothing is computed. The filter
+  // status=delivery_risk works either way (it needs the ids, not the mark).
+  withOutlook: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
 });
 export type ListSalesOrdersQuery = z.infer<typeof listSalesOrdersQuerySchema>;
+
+// Leveransläget on a kundorder list row (GET /sales-orders, derived at the
+// read like the card's): the order's worst row and whether the order is
+// Leverans i fara (Sen, Saknar täckning or Halvfabrikat sent). null on the
+// row = no outlook (a quote, a delivered order, an order without rows that
+// are a demand) — or a list read without withOutlook=true. No prices.
+export const SALES_ORDER_OUTLOOK_STATUSES = ["on_time", "late", "undated", "uncovered"] as const;
+export type SalesOrderOutlookStatus = (typeof SALES_ORDER_OUTLOOK_STATUSES)[number];
+export interface SalesOrderListOutlook {
+  status: SalesOrderOutlookStatus;
+  daysLate: number; // working days, the largest among the rows; 0 unless late
+  atRisk: boolean;
+}
+
+// The mark as text — the list's CSV column Leveransläge. The web's pill uses
+// the same words (apps/web/lib/deliveryRisk.ts, web-delivery-risk.test.ts).
+export function salesOrderOutlookText(outlook: SalesOrderListOutlook | null): string {
+  if (!outlook) return "";
+  switch (outlook.status) {
+    case "uncovered":
+      return "Saknar täckning";
+    case "late":
+      return outlook.daysLate > 0 ? `Sen ${outlook.daysLate} ${outlook.daysLate === 1 ? "dag" : "dagar"}` : "Sen";
+    default:
+      // Halvfabrikat sent is the one way an order that is not late itself is
+      // at risk.
+      return outlook.atRisk ? "Halvfabrikat sent" : outlook.status === "undated" ? "Tillgång utan datum" : "I tid";
+  }
+}
 
 // Manual status override — any status, any direction, no transition guard.
 // Bypasses the state machine on purpose (Monitor-style); never books stock

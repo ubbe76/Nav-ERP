@@ -33,7 +33,7 @@ describe("Översiktens kort", () => {
     const admin = { role: "admin" as const, permissions: [] };
     const offered = (user: typeof sales | typeof purchasing | typeof admin) =>
       OVERVIEW_CARDS.filter((card) => web.overviewCardAvailable(user, card));
-    expect(offered(sales)).toEqual(["flow", "attention", "orders", "stock", "favorites", "deliveries", "receivables", "quotes"]);
+    expect(offered(sales)).toEqual(["flow", "attention", "orders", "stock", "favorites", "deliveries", "receivables", "quotes", "deliveryRisk"]);
     expect(offered(purchasing)).toEqual(["flow", "attention", "orders", "stock", "favorites", "arrivals", "payables"]);
     expect(offered(admin)).toEqual([...OVERVIEW_CARDS]);
   });

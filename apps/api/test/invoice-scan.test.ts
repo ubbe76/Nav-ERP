@@ -462,7 +462,7 @@ describe("the alert invoice_scans_pending", () => {
   it("lists the scans still to review (new + interpreted), oldest first", async () => {
     const alerts = createAlertsService({
       repo: createAlertsRepository(db),
-      planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map() },
+      planning: { requirementProposals: async () => [], orderPlanSummaries: async () => new Map(), deliveryRiskOrders: async () => [] },
       settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7, batchExpiryDays: async () => 30 },
       today: () => TODAY,
     });

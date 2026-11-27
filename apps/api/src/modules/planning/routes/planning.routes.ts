@@ -1,26 +1,35 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   applyDeliveryTimeSchema,
   articleForecastUpdateSchema,
   articleOverviewQuerySchema,
   capacityQuerySchema,
   componentMovesSchema,
+  coRunSchema,
   createPlanningOrdersSchema,
+  dayPlanQuerySchema,
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
   listAbcQuerySchema,
   listRequirementsQuerySchema,
   missingComponentsSchema,
   moveOperationSchema,
+  replanStructurePreviewSchema,
+  replanStructureSchema,
   runPlanPdfQuerySchema,
   runPlanOrderSchema,
   runPlanQuerySchema,
+  structureQuerySchema,
+  unlockOrdersSchema,
+  type CoRunInput,
+  type MoveOperationInput,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { abcExportColumns, requirementsExportColumns } from "../service/export-columns.js";
 import {
   ArticleNotFoundError,
   ComponentMoveChangedError,
+  CoRunChangedError,
   ForecastMonthOutsideHorizonError,
   InvalidStatusTransitionError,
   ManufacturingOrderNotFoundError,
@@ -29,12 +38,16 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerNotFoundError,
+  DayPlanDateOutOfRangeError,
   DeliveryTimeChangedError,
   NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
+  OperationPlanChangedError,
   PlanDateInPastError,
   PlanDateNoCapacityError,
+  ReplanStructureChangedError,
+  ReplanStructureNotPlannableError,
   RunPlanOrderChangedError,
   RunPlanSubcontractResourceError,
   SalesOrderNotFoundError,
@@ -283,6 +296,20 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     }
   });
 
+  // Leveransläge: will the order's rows leave on the day they were
+  // promised (derived from the pegging at every read, nothing stored).
+  // DELIVERY_CHECK like the Leveranstidskontroll — the seller and the
+  // planner ask the same question; a GET, so a read-only account may ask
+  // too. No prices in the answer.
+  app.get<{ Params: { id: string } }>("/sales-orders/:id/delivery-outlook", { config: { access: DELIVERY_CHECK } }, async (req, reply) => {
+    try {
+      return await service.getSalesOrderDeliveryOutlook(req.params.id);
+    } catch (err) {
+      if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
   // Reservationen — Skapa tillverkningsordrar för det som saknas: the check
   // run again under the production_plan lock, one TO per shortage batch
   // planned in the days it booked, and the KO's Förväntat leveransdatum.
@@ -374,6 +401,33 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     }
   });
 
+  // Dagplan — every resource's work one day, derived at read time. Read
+  // like the körplan (MO_READ); no price data. 400
+  // day-plan-date-out-of-range outside today … today + 41.
+  app.get("/planning/day-plan", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = dayPlanQuerySchema.parse(req.query);
+    try {
+      return await service.getDayPlan(query);
+    } catch (err) {
+      if (err instanceof DayPlanDateOutOfRangeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // The same day as a PDF (A4 landscape) — Skriv ut.
+  app.get("/planning/day-plan/pdf", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = dayPlanQuerySchema.parse(req.query);
+    try {
+      const pdf = await service.getDayPlanPdf(query);
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", contentDisposition(pdf.filename, "inline"));
+      return reply.send(pdf.content);
+    } catch (err) {
+      if (err instanceof DayPlanDateOutOfRangeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
   // Ordningen inom dagen (#18): the whole day's list on the resource in the
   // wanted order. Module default write = tillverkning (arbetsledaren — the
   // workshop profile reads the körplan but does not order it). No dates are
@@ -398,19 +452,60 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
   app.post("/planning/plan", async (req) => service.planProductionRun(req.user!.id));
 
   // Flytta: start the operation on a chosen day (locked); the TO's later
-  // unlocked operations follow when moveFollowing is set.
-  app.post<{ Params: { opId: string } }>("/planning/operations/:opId/move", async (req, reply) => {
-    const input = moveOperationSchema.parse(req.body);
-    try {
-      return await service.moveOperation(req.params.opId, input, req.user!.id);
-    } catch (err) {
-      if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
-      if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
-      if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
-      throw err;
-    }
-  });
+  // unlocked operations follow when moveFollowing is set. The preview
+  // answers what the same body would do and writes nothing — like Samkör's
+  // it still needs the write rule and is NOT readOnlySafe (a read-only
+  // account cannot move anyway). Both refuse alike; 409
+  // operation-plan-changed when expectedStartDate is sent and the stored
+  // start day is another one: nothing written, the web reads again.
+  const moveRoute = <T>(run: (opId: string, input: MoveOperationInput, userId: string) => Promise<T>) =>
+    async (req: FastifyRequest<{ Params: { opId: string } }>, reply: FastifyReply) => {
+      const input = moveOperationSchema.parse(req.body);
+      try {
+        return await run(req.params.opId, input, req.user!.id);
+      } catch (err) {
+        if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
+        if (err instanceof OperationPlanChangedError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
+        if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    };
+  app.post<{ Params: { opId: string } }>(
+    "/planning/operations/:opId/move",
+    moveRoute((opId, input, userId) => service.moveOperation(opId, input, userId))
+  );
+  app.post<{ Params: { opId: string } }>(
+    "/planning/operations/:opId/move/preview",
+    moveRoute((opId, input) => service.previewMoveOperation(opId, input))
+  );
+
+  // Samkör: the chosen operations of one resource moved to one day with
+  // Flytta's rule, laid next to each other and locked. The preview computes
+  // the same answer and writes nothing — it still needs the write rule and
+  // is NOT readOnlySafe (a read-only account cannot co-run anyway). 409
+  // co-run-changed when a selected operation is not where the list showed
+  // it: nothing written, the web reads the list again.
+  const coRunRoute = (run: (input: CoRunInput, userId: string) => ReturnType<PlanningService["coRun"]>) =>
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const input = coRunSchema.parse(req.body);
+      try {
+        const result = await run(input, req.user!.id);
+        if (!result) return reply.code(404).send(errorBody(new WorkCenterNotFoundError(input.workCenterId)));
+        return result;
+      } catch (err) {
+        if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof RunPlanSubcontractResourceError) return reply.code(400).send(errorBody(err));
+        if (err instanceof PlanDateInPastError) return reply.code(400).send(errorBody(err));
+        if (err instanceof CoRunChangedError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PlanDateNoCapacityError) return reply.code(409).send(errorBody(err));
+        if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    };
+  app.post("/planning/co-run/preview", coRunRoute((input) => service.previewCoRun(input)));
+  app.post("/planning/co-run", coRunRoute((input, userId) => service.coRun(input, userId)));
 
   // Lås upp: the days stay until the next Planera. Idempotent.
   app.post<{ Params: { opId: string } }>("/planning/operations/:opId/unlock", async (req, reply) => {
@@ -419,6 +514,69 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     } catch (err) {
       if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
+    }
+  });
+
+  // Strukturvyn (etapp 4): one order's whole tree with the planned days,
+  // opened on a TO or a kundorder (exactly one of the two, else 400). Read
+  // like a TO (MO_READ — the TO card already shows the kundorder number and
+  // the customer to the same profiles); a GET, so a read-only account may
+  // read it. No prices in the answer.
+  app.get("/planning/structure", { config: { access: MO_READ } }, async (req, reply) => {
+    const query = structureQuerySchema.parse(req.query);
+    try {
+      return await service.getStructure(query);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError || err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Lås upp hela ordern / Lås upp strukturen (S27): the locks of the given
+  // TOs' operations removed; the days stay until the next Planera.
+  // Idempotent. Module default write = tillverkning; 404 for a TO that does
+  // not exist (nothing written).
+  app.post("/planning/unlock-orders", async (req, reply) => {
+    const input = unlockOrdersSchema.parse(req.body);
+    try {
+      return await service.unlockOrders(input, req.user!.id);
+    } catch (err) {
+      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Planera om strukturen (etapp 5): the TO and the chosen halvfabrikat-TOs
+  // under it planned again, children before parents, and locked. The preview
+  // computes the same answer and writes nothing — it still needs the write
+  // rule and is NOT readOnlySafe (as Samkör's and Flytta's). Module default
+  // write = tillverkning. 409 replan-structure-changed carries the fresh
+  // preview in `result` (the tree or its dates are not the ones confirmed,
+  // or a chosen TO may not be chosen); 409 replan-structure-not-plannable
+  // when a chosen TO does not fit within the horizon; 409
+  // invalid-status-transition for a TO that is no longer open; 404 for a TO
+  // that does not exist. Nothing is written in any of them.
+  const replanErrors = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof ReplanStructureChangedError) return reply.code(409).send({ ...errorBody(err), result: err.result });
+    if (err instanceof ReplanStructureNotPlannableError) return reply.code(409).send({ ...errorBody(err), orderNumbers: err.orderNumbers });
+    if (err instanceof InvalidStatusTransitionError) return reply.code(409).send({ ...errorBody(err), orderNumber: err.orderNumber });
+    throw err;
+  };
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/replan-structure/preview", async (req, reply) => {
+    const input = replanStructurePreviewSchema.parse(req.body);
+    try {
+      return await service.previewReplanStructure(req.params.id, input);
+    } catch (err) {
+      return replanErrors(err, reply);
+    }
+  });
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/replan-structure", async (req, reply) => {
+    const input = replanStructureSchema.parse(req.body);
+    try {
+      return await service.replanStructure(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return replanErrors(err, reply);
     }
   });
 

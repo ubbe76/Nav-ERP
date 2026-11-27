@@ -343,6 +343,11 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
         description: "Last per resurs och vecka mot schemalagd kapacitet.",
       },
       {
+        href: "/tillverkning/dagplan",
+        title: "Dagplan",
+        description: "Dagens arbeten per resurs i körordning — för avstämning med verkstaden.",
+      },
+      {
         href: "/tillverkning/korplan",
         title: "Körplan",
         description: "Kommande arbeten på en resurs, dag för dag — utskrivbar.",
