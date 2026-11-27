@@ -499,7 +499,7 @@ Ordern har ett revisionsnummer (**Rev** i orderkortets huvud) som börjar på 1.
 
 ### Skicka offert och orderbekräftelse via e-post
 
-Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är konfigurerat under [System → Inställningar](/hjalp/system)):
+E-post och PDF:er finns på fliken **Dokument** på offert- och orderkortet (utskicket kräver att SMTP är konfigurerat under [System → Inställningar](/hjalp/system)):
 
 - **Skicka offert** (endast i status Offert) mejlar offerten (med offertnumret) som PDF-bilaga utan att ändra status.
 - **Skicka orderbekräftelse** (bara på orderkortet) mejlar orderbekräftelsen som PDF-bilaga utan att ändra status. En offert har ingen orderbekräftelse — skapa först en kundorder med **Skapa kundorder**. Avbrutna ordrar kan inte mejlas.
