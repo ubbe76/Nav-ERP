@@ -262,11 +262,16 @@ describe("the Material view and Samkör in the pages", () => {
     expect(lib).not.toMatch(/apiFetch|from "react"|"use client"/);
   });
 
-  it("shows no Material view in Mötesläget", () => {
-    expect(dayPlan).toMatch(/const view: RunPlanView = meeting \? "order" : runPlanView\(searchParams\.get\("visa"\)\);/);
-    // The switch sits in the page's toolbar, which Mötesläget replaces.
+  // Mötesläget has Grupp and Visa too (the user's wish 2026-11-27), but its
+  // Material view stays read-only: canSelect is canWrite, which is never true
+  // in a meeting, and the rows carry no links.
+  it("shows Material in Mötesläget without checkboxes or links", () => {
+    expect(dayPlan).toMatch(/const view: RunPlanView = runPlanView\(searchParams\.get\("visa"\)\);/);
+    // One switch, rendered in both the page's toolbar and Mötesläget's bar.
     expect(dayPlan.match(/<SegmentedToggle/g) ?? []).toHaveLength(1);
-    expect(dayPlan.indexOf("<SegmentedToggle")).toBeGreaterThan(dayPlan.indexOf("className={styles.toolbar}"));
+    expect(dayPlan.match(/\{viewField\}/g) ?? []).toHaveLength(2);
+    expect(dayPlan).toMatch(/<MaterialGroups[^>]*canSelect=\{canWrite\}\s+links=\{!meeting\}/s);
+    expect(dayPlan).toMatch(/const canWrite = !meeting && can\(\["tillverkning"\]\);/);
   });
 
   it("offers the checkboxes and the dialog only with Tillverkning", () => {
