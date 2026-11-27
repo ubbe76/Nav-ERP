@@ -49,7 +49,7 @@ import styles from "./DayPlanPageClient.module.css";
 // existing planning routes. Visa: Material (?visa=material) groups each
 // resource's rows by ingoing material, with Samkör valda… for the chosen
 // ones. `meeting` is Mötesläget: bigger, read-only, reloaded every minute —
-// and always in körordning.
+// with the same Grupp and Visa as the page, but no checkboxes and no links.
 
 const PAGE = "/tillverkning/dagplan";
 const MEETING_PAGE = "/tillverkning/dagplan/mote";
@@ -73,8 +73,8 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   const searchParams = useSearchParams();
   const dag = searchParams.get("dag") ?? "";
   const grupp = searchParams.get("grupp") ?? "";
-  // Mötesläget is the run order on the wall: no Material view there.
-  const view: RunPlanView = meeting ? "order" : runPlanView(searchParams.get("visa"));
+  const view: RunPlanView = runPlanView(searchParams.get("visa"));
+  const visa = view === "material" ? "material" : null;
 
   // Mötesläget never writes: no ordering, no drag, no row menu, no dialog.
   const can = useCan();
@@ -114,7 +114,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   shownDate.current = data?.date ?? null;
   const showToday = useRef(() => {});
   showToday.current = () =>
-    router.replace(dayPlanHref(pathname, { dag: null, grupp, visa: view === "material" ? "material" : null }), { scroll: false });
+    router.replace(dayPlanHref(pathname, { dag: null, grupp, visa }), { scroll: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -325,6 +325,36 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     </div>
   );
 
+  // Grupp and Visa: in the page's toolbar and in Mötesläget's bar alike.
+  const groupField = (
+    <label className={styles.field}>
+      <span className={styles.label}>Grupp</span>
+      <Select size={meeting ? undefined : "sm"} value={grupp} onChange={(e) => show({ grupp: e.target.value || null })} aria-label="Grupp">
+        <option value="">Alla resurser</option>
+        {(data?.productionGroups ?? []).map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.code} · {g.name}
+          </option>
+        ))}
+      </Select>
+    </label>
+  );
+
+  const viewField = (
+    <div className={styles.field}>
+      <span className={styles.label}>Visa</span>
+      <SegmentedToggle
+        ariaLabel="Visa"
+        value={view}
+        options={[
+          { value: "order", label: "Körordning" },
+          { value: "material", label: "Material" },
+        ]}
+        onChange={(next) => show({ visa: next })}
+      />
+    </div>
+  );
+
   const summary = data && (
     <p className={styles.summary}>
       <span>
@@ -351,6 +381,8 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         <header className={styles.meetingBar}>
           <div className={styles.meetingTitle}>Dagplan</div>
           {dayNav}
+          {groupField}
+          {viewField}
           <div className={styles.meetingActions}>
             {reloadFailed && (
               <span className={styles.reloadFailed} role="status">
@@ -367,7 +399,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
                 {fullscreen ? "Lämna helskärm" : "Helskärm"}
               </Button>
             )}
-            <Link href={dayPlanHref(PAGE, { dag, grupp })} className={`${buttonStyles.button} ${buttonStyles.secondary}`}>
+            <Link href={dayPlanHref(PAGE, { dag, grupp, visa })} className={`${buttonStyles.button} ${buttonStyles.secondary}`}>
               <X size={18} aria-hidden="true" />
               Stäng
             </Link>
@@ -376,31 +408,10 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
       ) : (
         <div className={styles.toolbar}>
           {dayNav}
-          <label className={styles.field}>
-            <span className={styles.label}>Grupp</span>
-            <Select size="sm" value={grupp} onChange={(e) => show({ grupp: e.target.value || null })} aria-label="Grupp">
-              <option value="">Alla resurser</option>
-              {(data?.productionGroups ?? []).map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.code} · {g.name}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <div className={styles.field}>
-            <span className={styles.label}>Visa</span>
-            <SegmentedToggle
-              ariaLabel="Visa"
-              value={view}
-              options={[
-                { value: "order", label: "Körordning" },
-                { value: "material", label: "Material" },
-              ]}
-              onChange={(next) => show({ visa: next })}
-            />
-          </div>
+          {groupField}
+          {viewField}
           <div className={styles.toolbarActions}>
-            <Link href={dayPlanHref(MEETING_PAGE, { dag, grupp })} className={`${buttonStyles.button} ${buttonStyles.secondary} ${buttonStyles.small}`}>
+            <Link href={dayPlanHref(MEETING_PAGE, { dag, grupp, visa })} className={`${buttonStyles.button} ${buttonStyles.secondary} ${buttonStyles.small}`}>
               <Presentation size={16} aria-hidden="true" />
               Mötesläge
             </Link>
@@ -732,6 +743,7 @@ function ResourceSection({
           unlinkedRowKeys={resource.unlinkedRowKeys}
           version={data}
           canSelect={canWrite}
+          links={!meeting}
           busy={busy}
           onCoRun={onCoRun}
         />
