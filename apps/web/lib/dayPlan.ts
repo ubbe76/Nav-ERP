@@ -217,11 +217,6 @@ export function arrivalConfirmationText(confirmed: boolean): string {
   return SUPPLIER_CONFIRMATION_TEXT[confirmed ? "confirmed" : "none"];
 }
 
-// A legorad: the TO operation the goods come back from.
-export function legoText(lego: { orderNumber: string; sequenceNo: number }): string {
-  return `Lego · ${lego.orderNumber} op ${lego.sequenceNo}`;
-}
-
 // The list's two parts: Försenade (the day has passed — only today) first,
 // then the day's own rows, each in the API's order.
 export function splitOverdue<T extends { overdue: boolean }>(rows: readonly T[]): { overdue: T[]; day: T[] } {

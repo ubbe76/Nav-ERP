@@ -861,9 +861,11 @@ För båda listorna gäller:
 
 **Mötesläge** öppnar dagplanen för skärmen på väggen: större text, ingen meny och resurserna bredvid varandra (under varandra på en smal skärm). Läget visar samma dag, grupp och visning som sidan, läser om sig självt varje minut medan fliken syns och har inga knappar som ändrar något.
 
+Länkarna fungerar som på sidan: ett ordernummer, en inköpsorder eller tillverkningsorder under materialet och *N ej planerade* öppnar kortet eller körplanen i samma flik. Webbläsarens bakåtknapp går tillbaka till mötesläget på samma dag och visning.
+
 - Pilarna och **I dag** byter dag.
 - **Grupp** visar en produktionsgrupps resurser, eller **Alla resurser**.
-- **Visa** växlar mellan **Körordning**, **Material**, **Utleveranser** och **Inleveranser**. I Material-läget går det inte att välja operationer eller samköra, och listorna har inga länkar.
+- **Visa** växlar mellan **Körordning**, **Material**, **Utleveranser** och **Inleveranser**. I Material-läget går det inte att välja operationer eller samköra.
 - **Helskärm** fyller hela skärmen (knappen finns där webbläsaren stöder det; **Lämna helskärm** eller Esc går tillbaka).
 - **Stäng** går tillbaka till dagplanen.
 

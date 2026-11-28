@@ -35,7 +35,6 @@ export function MaterialGroups({
   unlinkedRowKeys,
   version,
   canSelect,
-  links = true,
   busy = false,
   onCoRun,
 }: {
@@ -47,7 +46,6 @@ export function MaterialGroups({
   version: unknown;
   // Checkboxes and Samkör valda… — users with Tillverkning.
   canSelect: boolean;
-  links?: boolean;
   busy?: boolean;
   // The chosen rows, in the order of the list.
   onCoRun?: (rows: RunPlanRow[]) => void;
@@ -90,13 +88,9 @@ export function MaterialGroups({
           {row.date ? weekdayShortDate(row.date) : "Ej planerad"}
         </span>
         <span className={styles.order}>
-          {links ? (
-            <GatedLink href={`/tillverkning/ordrar/${row.manufacturingOrderId}`} className={styles.orderLink}>
-              {row.orderNumber}
-            </GatedLink>
-          ) : (
-            <span className={styles.orderLink}>{row.orderNumber}</span>
-          )}
+          <GatedLink href={`/tillverkning/ordrar/${row.manufacturingOrderId}`} className={styles.orderLink}>
+            {row.orderNumber}
+          </GatedLink>
         </span>
         <span className={styles.operation}>
           <span className={styles.operationText}>
@@ -132,13 +126,9 @@ export function MaterialGroups({
                 {state.document && (
                   <>
                     {" · "}
-                    {links ? (
-                      <GatedLink href={materialDocumentHref(state.document)} className={styles.document}>
-                        {state.document.number}
-                      </GatedLink>
-                    ) : (
-                      state.document.number
-                    )}
+                    <GatedLink href={materialDocumentHref(state.document)} className={styles.document}>
+                      {state.document.number}
+                    </GatedLink>
                     {state.document.draft ? " (utkast)" : ""}
                   </>
                 )}
