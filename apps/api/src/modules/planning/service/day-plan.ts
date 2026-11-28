@@ -56,7 +56,9 @@ export interface DayPlanResource {
   unlinkedRowKeys: string[];
 }
 
-export interface DayPlanResult {
+// The shown day and its neighbours — the same for the operations and for
+// the order rows (day-plan-orders.ts).
+export interface DayPlanDays {
   today: string;
   date: string;
   weekday: number; // ISO 1 = Monday … 7 = Sunday
@@ -64,12 +66,31 @@ export interface DayPlanResult {
   // The previous / next working day; null outside [today, today + 41].
   previousDate: string | null;
   nextDate: string | null;
+}
+
+export interface DayPlanResult extends DayPlanDays {
   productionGroups: { id: string; code: string; name: string }[];
   resources: DayPlanResource[]; // compareStationCodes order
   totals: { rows: number; hours: number; unlinkedOperations: number; shortMaterials: number };
 }
 
 const isoWeekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() || 7;
+
+// Föregående / Nästa arbetsdag: the company's working days (full-day
+// holidays off), never outside the window.
+export function dayPlanDays(today: string, date: string, offDays: ReadonlySet<string>): DayPlanDays {
+  const lastDate = addDays(today, DAY_PLAN_MAX_AHEAD_DAYS);
+  const previous = previousWorkingDay(date, offDays);
+  const next = addWorkingDays(date, 1, offDays);
+  return {
+    today,
+    date,
+    weekday: isoWeekdayOf(date),
+    isoWeek: isoWeekOf(date).isoWeek,
+    previousDate: previous >= today && previous < date ? previous : null,
+    nextDate: next <= lastDate && next > date ? next : null,
+  };
+}
 
 const minutesOf = (rows: RunPlanRow[]) => rows.reduce((sum, row) => sum + row.remainingMinutes, 0);
 
@@ -90,7 +111,6 @@ export function buildDayPlan(input: {
   present: ReadonlyMap<string, DayPlanPresent[]>;
 }): DayPlanResult {
   const { today, date } = input;
-  const lastDate = addDays(today, DAY_PLAN_MAX_AHEAD_DAYS);
 
   const workCenterOf = new Map(input.workCenters.map((w) => [w.workCenterId, w]));
   const stations = runPlanStations(
@@ -149,15 +169,8 @@ export function buildDayPlan(input: {
   });
 
   const shown = resources.flatMap((r) => [...r.carried, ...r.rows]);
-  const previous = previousWorkingDay(date, input.offDays);
-  const next = addWorkingDays(date, 1, input.offDays);
   return {
-    today,
-    date,
-    weekday: isoWeekdayOf(date),
-    isoWeek: isoWeekOf(date).isoWeek,
-    previousDate: previous >= today && previous < date ? previous : null,
-    nextDate: next <= lastDate && next > date ? next : null,
+    ...dayPlanDays(today, date, input.offDays),
     productionGroups: [...input.productionGroups]
       .sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))
       .map((g) => ({ id: g.productionGroupId, code: g.code, name: g.name })),

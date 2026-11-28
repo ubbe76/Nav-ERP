@@ -75,6 +75,7 @@ import { loadDeliveryContext } from "../../system/repository/delivery-context.js
 import { loadLeadTimeDefaults, loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.js";
 import { onHandByArticle } from "../../stock/repository/on-hand.js";
+import type { DayPlanArrivalLoad } from "../service/day-plan-orders.js";
 
 // Reported time per operation of the orders `orderFilter` selects, split by
 // resource (#15, time_reports.work_center_id; a report without one counts on
@@ -1963,6 +1964,81 @@ export function createPlanningRepository(db: Db) {
                 configured: r.configured,
               },
       }));
+    },
+
+    // Dagplanens Inleveranser (day-plan-orders.ts): the rows of the open
+    // inköpsorder (Utkast too — the list says so — as the artikelöversikt's
+    // supply) with rest left, dated no later than `through`, never a tjänst
+    // (nothing arrives in stock), ONE query. The date is the effective
+    // arrival date; a legorad brings its TO operation along. In the order
+    // card's row order; no price columns.
+    async dayPlanArrivalRows(through: string): Promise<DayPlanArrivalLoad[]> {
+      const rows = await db
+        .select({
+          purchaseOrderId: purchaseOrders.id,
+          orderNumber: purchaseOrders.orderNumber,
+          orderStatus: purchaseOrders.status,
+          supplierName: suppliers.name,
+          purchaseOrderRowId: purchaseOrderRows.id,
+          articleId: articles.id,
+          articleNumber: articles.articleNumber,
+          articleName: articles.name,
+          unit: units.code,
+          quantityOrdered: purchaseOrderRows.quantityOrdered,
+          quantityReceived: purchaseOrderRows.quantityReceived,
+          arrivalDate: purchaseRowArrivalDate,
+          confirmed: sql<boolean>`coalesce(${purchaseOrderRows.confirmedDeliveryDate}, ${purchaseOrders.confirmedDeliveryDate}) is not null`,
+          legoOrderId: manufacturingOrders.id,
+          legoOrderNumber: manufacturingOrders.orderNumber,
+          legoSequenceNo: moOperations.sequenceNo,
+        })
+        .from(purchaseOrderRows)
+        .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderRows.purchaseOrderId))
+        .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+        .innerJoin(articles, eq(articles.id, purchaseOrderRows.articleId))
+        .leftJoin(units, eq(units.id, articles.unitId))
+        .leftJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
+        .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .where(
+          and(
+            inArray(purchaseOrders.status, OPEN_PO),
+            sql`${purchaseOrderRows.quantityReceived} < ${purchaseOrderRows.quantityOrdered}`,
+            ne(articles.type, "service"),
+            sql`${purchaseRowArrivalDate} <= ${through}::date`
+          )
+        )
+        .orderBy(purchaseOrders.orderNumber, purchaseOrders.id, sql`${purchaseOrderRows.createdAt}`, sql`${purchaseOrderRows.id}`);
+      return rows.map((r) => ({
+        purchaseOrderId: r.purchaseOrderId,
+        orderNumber: r.orderNumber,
+        orderStatus: r.orderStatus,
+        supplierName: r.supplierName,
+        purchaseOrderRowId: r.purchaseOrderRowId,
+        articleId: r.articleId,
+        articleNumber: r.articleNumber,
+        articleName: r.articleName,
+        unit: r.unit,
+        quantityOrdered: Number(r.quantityOrdered),
+        quantityReceived: Number(r.quantityReceived),
+        // Not null: the where clause compared it with `through`.
+        arrivalDate: r.arrivalDate!,
+        confirmed: r.confirmed,
+        lego:
+          r.legoOrderId && r.legoOrderNumber && r.legoSequenceNo !== null
+            ? { manufacturingOrderId: r.legoOrderId, orderNumber: r.legoOrderNumber, sequenceNo: r.legoSequenceNo }
+            : null,
+      }));
+    },
+
+    // The base unit's code per article (Utleveransernas antal), ONE query.
+    async articleUnitCodes(articleIds: string[]): Promise<Map<string, string | null>> {
+      if (articleIds.length === 0) return new Map();
+      const rows = await db
+        .select({ articleId: articles.id, unit: units.code })
+        .from(articles)
+        .leftJoin(units, eq(units.id, articles.unitId))
+        .where(inArray(articles.id, articleIds));
+      return new Map(rows.map((r) => [r.articleId, r.unit]));
     },
 
     // The order a check is run for: its customer and open rows (restantal

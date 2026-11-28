@@ -6,11 +6,14 @@ import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, GripVertical, Maximize, 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ApiError, apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
-import { runPlanView, type RunPlanView } from "../../lib/coRun";
+import type { RunPlanView } from "../../lib/coRun";
 import {
   RUN_PLAN_STATUS_PILL,
   dayPlanHref,
+  dayPlanView,
+  dayPlanVisa,
   dropIndex,
+  isOrdersView,
   loadPercent,
   loadText,
   moveTargetOf,
@@ -19,12 +22,13 @@ import {
   runPlanStatusText,
   splitResources,
   stampText,
+  type DayPlanView,
 } from "../../lib/dayPlan";
 import { formatStockholmDate } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatQuantity } from "../../lib/format";
 import { plannedDateLabel, weekdayShortDate } from "../../lib/planning";
-import type { DayPlanResource, DayPlanResult, RunPlanRow } from "../../lib/types";
+import type { DayPlanDays, DayPlanOrdersResult, DayPlanResource, DayPlanResult, RunPlanRow } from "../../lib/types";
 import { PrintButton } from "../documents/PrintButton";
 import { useCan } from "../PermissionsProvider";
 import { Button } from "../ui/Button";
@@ -36,6 +40,7 @@ import { RowMenu } from "../ui/RowMenu";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
 import { StatusPill } from "../ui/StatusPill";
 import { CoRunDialog, type CoRunTarget } from "./CoRunDialog";
+import { DayPlanOrders } from "./DayPlanOrders";
 import { MaterialGroups } from "./MaterialGroups";
 import { MoveOperationDialog, type MoveTarget } from "./MoveOperationDialog";
 import { RunPlanMaterials } from "./RunPlanMaterials";
@@ -48,8 +53,12 @@ import styles from "./DayPlanPageClient.module.css";
 // users with Tillverkning orders the day and moves operations with the
 // existing planning routes. Visa: Material (?visa=material) groups each
 // resource's rows by ingoing material, with Samkör valda… for the chosen
-// ones. `meeting` is Mötesläget: bigger, read-only, reloaded every minute —
-// with the same Grupp and Visa as the page, but no checkboxes and no links.
+// ones. Visa: Utleveranser / Inleveranser (?visa=utleveranser|inleveranser,
+// only with a menu — customers and suppliers are office data) list the
+// day's kundorder and inköpsorder rows instead (GET /planning/day-plan/orders,
+// DayPlanOrders); Grupp does not apply to them. `meeting` is Mötesläget:
+// bigger, read-only, reloaded every minute — with the same Grupp and Visa as
+// the page, but no checkboxes and no links.
 
 const PAGE = "/tillverkning/dagplan";
 const MEETING_PAGE = "/tillverkning/dagplan/mote";
@@ -73,14 +82,23 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   const searchParams = useSearchParams();
   const dag = searchParams.get("dag") ?? "";
   const grupp = searchParams.get("grupp") ?? "";
-  const view: RunPlanView = runPlanView(searchParams.get("visa"));
-  const visa = view === "material" ? "material" : null;
 
   // Mötesläget never writes: no ordering, no drag, no row menu, no dialog.
   const can = useCan();
   const canWrite = !meeting && can(["tillverkning"]);
 
+  // Utleveranser and Inleveranser: customers and suppliers are office data.
+  const canSeeOrders = can(["office"]);
+  const view: DayPlanView = dayPlanView(searchParams.get("visa"), canSeeOrders);
+  const visa = dayPlanVisa(view);
+  const ordersView = isOrdersView(view);
+  // The resource sections' own switch (Körordning | Material).
+  const planView: RunPlanView = view === "material" ? "material" : "order";
+  // Grupp only selects resources: the order lists are read without it.
+  const planGroup = ordersView ? "" : grupp;
+
   const [data, setData] = useState<DayPlanResult | null>(null);
+  const [orders, setOrders] = useState<DayPlanOrdersResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Mötesläget: the last background reload failed — the picture is kept.
@@ -101,7 +119,9 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   // user caused shows the error.
   const silent = useRef(false);
   const hasData = useRef(false);
-  hasData.current = data !== null;
+  // The answer the shown view reads its days from.
+  const days: DayPlanDays | null = ordersView ? orders : data;
+  hasData.current = days !== null;
 
   const reload = useCallback(() => setReloadTick((n) => n + 1), []);
 
@@ -111,7 +131,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   // "Kunde inte läsa om" for ever. Only for a day that WAS shown: a typed
   // address outside the window still gets its error.
   const shownDate = useRef<string | null>(null);
-  shownDate.current = data?.date ?? null;
+  shownDate.current = days?.date ?? null;
   const showToday = useRef(() => {});
   showToday.current = () =>
     router.replace(dayPlanHref(pathname, { dag: null, grupp, visa }), { scroll: false });
@@ -126,12 +146,19 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     }
     const qs = new URLSearchParams();
     if (dag) qs.set("date", dag);
-    if (grupp) qs.set("productionGroupId", grupp);
-    const query = qs.toString();
-    apiFetch<DayPlanResult>(`/api/v1/planning/day-plan${query ? `?${query}` : ""}`)
-      .then((res) => {
+    if (planGroup) qs.set("productionGroupId", planGroup);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
+    // The order lists or the resources — one GET either way.
+    const request: Promise<unknown> = ordersView
+      ? apiFetch<DayPlanOrdersResult>(`/api/v1/planning/day-plan/orders${query}`).then((res) => {
+          if (!cancelled) setOrders(res);
+        })
+      : apiFetch<DayPlanResult>(`/api/v1/planning/day-plan${query}`).then((res) => {
+          if (!cancelled) setData(res);
+        });
+    request
+      .then(() => {
         if (cancelled) return;
-        setData(res);
         setReloadFailed(false);
       })
       .catch((err: unknown) => {
@@ -142,7 +169,8 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         }
         if (background) setReloadFailed(true);
         else {
-          setData(null);
+          if (ordersView) setOrders(null);
+          else setData(null);
           setError(apiErrorMessage(err, "Kunde inte hämta dagplanen"));
         }
       })
@@ -152,7 +180,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [dag, grupp, reloadTick]);
+  }, [dag, planGroup, ordersView, reloadTick]);
 
   // Mötesläget reads again every minute, only while the tab is visible, and
   // when it becomes visible again.
@@ -205,12 +233,12 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   }
 
   // URL-driven: ?dag=&grupp=&visa=. No dag = the server's today.
-  function show(next: { dag?: string | null; grupp?: string | null; visa?: RunPlanView }) {
+  function show(next: { dag?: string | null; grupp?: string | null; visa?: DayPlanView }) {
     setNotice(null);
     const href = dayPlanHref(pathname, {
       dag: next.dag === undefined ? dag : next.dag,
       grupp: next.grupp === undefined ? grupp : next.grupp,
-      visa: (next.visa ?? view) === "material" ? "material" : null,
+      visa: dayPlanVisa(next.visa ?? view),
     });
     router.replace(href, { scroll: false });
   }
@@ -285,13 +313,15 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   }
 
   const today = data?.today ?? null;
-  const isToday = data !== null && data.date === data.today;
+  const isToday = days !== null && days.date === days.today;
   const { busy: sections, idle } = splitResources(data?.resources ?? []);
-  const pdfHref = data
-    ? `/api/v1/planning/day-plan/pdf?${new URLSearchParams({ date: data.date, ...(grupp ? { productionGroupId: grupp } : {}) }).toString()}`
-    : null;
+  // Skriv ut prints the resources' körordning — not offered with the order lists.
+  const pdfHref =
+    data && !ordersView
+      ? `/api/v1/planning/day-plan/pdf?${new URLSearchParams({ date: data.date, ...(grupp ? { productionGroupId: grupp } : {}) }).toString()}`
+      : null;
 
-  const dayTitle = data ? `${weekdayShortDate(data.date)} · v.${data.isoWeek}` : dag ? weekdayShortDate(dag) : "";
+  const dayTitle = days ? `${weekdayShortDate(days.date)} · v.${days.isoWeek}` : dag ? weekdayShortDate(dag) : "";
 
   const dayNav = (
     <div className={styles.dayNav}>
@@ -300,8 +330,8 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         className={styles.dayButton}
         aria-label="Föregående arbetsdag"
         title="Föregående arbetsdag"
-        disabled={!data?.previousDate}
-        onClick={() => show({ dag: data?.previousDate ?? null })}
+        disabled={!days?.previousDate}
+        onClick={() => show({ dag: days?.previousDate ?? null })}
       >
         <ChevronLeft size={meeting ? 26 : 18} aria-hidden="true" />
       </button>
@@ -314,8 +344,8 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         className={styles.dayButton}
         aria-label="Nästa arbetsdag"
         title="Nästa arbetsdag"
-        disabled={!data?.nextDate}
-        onClick={() => show({ dag: data?.nextDate ?? null })}
+        disabled={!days?.nextDate}
+        onClick={() => show({ dag: days?.nextDate ?? null })}
       >
         <ChevronRight size={meeting ? 26 : 18} aria-hidden="true" />
       </button>
@@ -349,6 +379,12 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         options={[
           { value: "order", label: "Körordning" },
           { value: "material", label: "Material" },
+          ...(canSeeOrders
+            ? [
+                { value: "shipments" as const, label: "Utleveranser" },
+                { value: "arrivals" as const, label: "Inleveranser" },
+              ]
+            : []),
         ]}
         onChange={(next) => show({ visa: next })}
       />
@@ -376,12 +412,12 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
   );
 
   return (
-    <div className={styles.page} data-meeting={meeting ? "true" : undefined} data-loading={loading && data ? "true" : undefined}>
+    <div className={styles.page} data-meeting={meeting ? "true" : undefined} data-loading={loading && days ? "true" : undefined}>
       {meeting ? (
         <header className={styles.meetingBar}>
           <div className={styles.meetingTitle}>Dagplan</div>
           {dayNav}
-          {groupField}
+          {!ordersView && groupField}
           {viewField}
           <div className={styles.meetingActions}>
             {reloadFailed && (
@@ -408,7 +444,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
       ) : (
         <div className={styles.toolbar}>
           {dayNav}
-          {groupField}
+          {!ordersView && groupField}
           {viewField}
           <div className={styles.toolbarActions}>
             <Link href={dayPlanHref(MEETING_PAGE, { dag, grupp, visa })} className={`${buttonStyles.button} ${buttonStyles.secondary} ${buttonStyles.small}`}>
@@ -437,9 +473,15 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
         </FormNotice>
       )}
 
-      {!data && loading && <FormHint>Hämtar dagplanen…</FormHint>}
+      {!days && loading && <FormHint>Hämtar dagplanen…</FormHint>}
 
-      {data && (
+      {ordersView && orders && (
+        <div className={styles.orders}>
+          <DayPlanOrders view={view} result={orders} meeting={meeting} />
+        </div>
+      )}
+
+      {!ordersView && data && (
         <>
           {summary}
 
@@ -452,7 +494,7 @@ export function DayPlanPageClient({ meeting = false }: { meeting?: boolean }) {
                 resource={resource}
                 data={data}
                 meeting={meeting}
-                view={view}
+                view={planView}
                 canWrite={canWrite}
                 canDrag={canWrite && finePointer && !busy && !loading}
                 busy={busy || loading}

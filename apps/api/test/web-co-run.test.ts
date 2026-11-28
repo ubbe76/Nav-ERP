@@ -266,7 +266,11 @@ describe("the Material view and Samkör in the pages", () => {
   // Material view stays read-only: canSelect is canWrite, which is never true
   // in a meeting, and the rows carry no links.
   it("shows Material in Mötesläget without checkboxes or links", () => {
-    expect(dayPlan).toMatch(/const view: RunPlanView = runPlanView\(searchParams\.get\("visa"\)\);/);
+    // Material is the resource sections' own view (planView), beside the
+    // order lists (web-day-plan.test.ts).
+    expect(dayPlan).toMatch(/const view: DayPlanView = dayPlanView\(searchParams\.get\("visa"\), canSeeOrders\);/);
+    expect(dayPlan).toMatch(/const planView: RunPlanView = view === "material" \? "material" : "order";/);
+    expect(dayPlan).toMatch(/<ResourceSection[^>]*view=\{planView\}/s);
     // One switch, rendered in both the page's toolbar and Mötesläget's bar.
     expect(dayPlan.match(/<SegmentedToggle/g) ?? []).toHaveLength(1);
     expect(dayPlan.match(/\{viewField\}/g) ?? []).toHaveLength(2);

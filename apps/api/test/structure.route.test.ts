@@ -294,9 +294,13 @@ describe("GET /planning/structure with a tillverkningsorder at the top", () => {
       expect(op.days).toEqual(daysOf.get(op.moOperationId));
       expect([op.plannedStartDate, op.plannedEndDate]).toEqual([op.days[0]!.date, op.days[op.days.length - 1]!.date]);
     }
-    // The axis holds every planned day and starts today.
-    expect(tree.axis.from).toBe(today);
-    expect(tree.axis.days[0]).toMatchObject({ date: today });
+    // The axis holds every planned day and starts on the first of them —
+    // today on a working day, the next working day on a weekend (Planera
+    // never plans a day off), never before today.
+    const firstPlanned = operations.map((op) => op.days[0]!.date).reduce((a, b) => (a < b ? a : b));
+    expect(tree.axis.from).toBe(firstPlanned < today ? today : firstPlanned);
+    expect(tree.axis.from >= today).toBe(true);
+    expect(tree.axis.days[0]).toMatchObject({ date: tree.axis.from });
     expect(tree.axis.days.length).toBeGreaterThanOrEqual(14);
   });
 

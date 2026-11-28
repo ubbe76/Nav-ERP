@@ -182,6 +182,15 @@ export const dayPlanQuerySchema = z.object({
 });
 export type DayPlanQuery = z.infer<typeof dayPlanQuerySchema>;
 
+// GET /planning/day-plan/orders — Dagplanens Utleveranser och Inleveranser:
+// the kundorder rows to ship and the inköpsorder rows to arrive ONE day.
+// The same window and error as the dagplan; no production group (an order
+// row is no resource's).
+export const dayPlanOrdersQuerySchema = z.object({
+  date: businessDateSchema.optional(),
+});
+export type DayPlanOrdersQuery = z.infer<typeof dayPlanOrdersQuerySchema>;
+
 // PUT /planning/run-plan/order — the order within ONE day on a resource
 // (#18): the WHOLE day's list of operations in the wanted order. The order
 // only steers the körplan and the terminal's list, never a date.

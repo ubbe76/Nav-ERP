@@ -1,0 +1,291 @@
+/* Dagplanens Utleveranser och Inleveranser. The sizes are the page's
+   (--dp-font, --dp-small, --dp-title, --dp-row-pad on DayPlanPageClient's
+   .page), so Mötesläget raises them here too. A table when the box is at
+   least 900px wide, cards below that. */
+.box {
+  container-type: inline-size;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  font-family: var(--font-body);
+  color: var(--color-text-primary);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--dp-title);
+  font-weight: 600;
+  color: var(--color-heading-accent);
+}
+
+.count {
+  font-size: var(--dp-font);
+  font-weight: 600;
+}
+
+.overdueCount {
+  padding: 1px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+  font-size: var(--dp-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.span {
+  margin-left: auto;
+  font-size: var(--dp-small);
+  color: var(--color-text-secondary);
+}
+
+.empty {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: var(--dp-font);
+  color: var(--color-text-muted);
+}
+
+/* --- Rows: the table ---------------------------------------------------- */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.headRow,
+.row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) minmax(0, 1.4fr) 88px 110px 150px minmax(0, 1.3fr);
+  grid-template-areas: "order party article quantity day status detail";
+  column-gap: 12px;
+  padding: 0 16px;
+}
+
+.headRow {
+  padding-top: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.headRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.right {
+  text-align: right;
+}
+
+.band {
+  padding: 6px 16px;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--dp-small);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.row {
+  align-items: start;
+  padding-top: var(--dp-row-pad);
+  padding-bottom: var(--dp-row-pad);
+  border-bottom: 1px solid var(--color-divider);
+  font-size: var(--dp-font);
+  line-height: 1.45;
+}
+
+.rows:last-child > .row:last-child {
+  border-bottom: none;
+  border-radius: 0 0 var(--radius-kpi-card) var(--radius-kpi-card);
+}
+
+.row > * {
+  min-width: 0;
+}
+
+.order {
+  grid-area: order;
+}
+
+.orderLink {
+  color: var(--accent-fg);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.party {
+  grid-area: party;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article {
+  grid-area: article;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.articleName {
+  color: var(--color-text-secondary);
+}
+
+/* Antal kvar and the day are two cells in the table and one line in a card. */
+.facts {
+  display: contents;
+}
+
+.facts > span {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.quantity {
+  grid-area: quantity;
+  text-align: right;
+}
+
+.day {
+  grid-area: day;
+  display: flex;
+  flex-direction: column;
+}
+
+.row[data-overdue="true"] .day {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.dayNote {
+  font-size: var(--dp-small);
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+
+.status {
+  grid-area: status;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.detail {
+  grid-area: detail;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--dp-small);
+  color: var(--color-text-secondary);
+}
+
+.documentLink {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.late {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.unconfirmed {
+  color: var(--status-delayed-text);
+  font-weight: 600;
+}
+
+/* Mötesläget: bigger text (the page's variables), wider fixed columns —
+   the table only; the cards keep their own grid. */
+@container (min-width: 900px) {
+  .box[data-meeting="true"] .headRow,
+  .box[data-meeting="true"] .row {
+    grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1.4fr) 110px 150px 200px minmax(0, 1.3fr);
+  }
+
+  .box[data-meeting="true"] .headRow {
+    font-size: 13px;
+  }
+}
+
+@media (hover: hover) {
+  .row:hover {
+    background: var(--color-bg);
+  }
+}
+
+/* --- Rows: cards (a narrow box, a phone, Mötesläget's narrow screen) ---- */
+
+@container (max-width: 899px) {
+  .headRow {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "order party"
+      "article article"
+      "facts facts"
+      "status status"
+      "detail detail";
+    row-gap: 4px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .facts {
+    grid-area: facts;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+  }
+
+  .quantity {
+    text-align: left;
+  }
+
+  .day {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0 8px;
+  }
+
+  .facts > span::before,
+  .detail::before {
+    content: attr(data-label) " ";
+    font-size: var(--dp-small);
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+
+  .detail::before {
+    display: block;
+  }
+
+  .detail:empty {
+    display: none;
+  }
+}
