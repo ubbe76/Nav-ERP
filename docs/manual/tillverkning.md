@@ -771,7 +771,7 @@ Halvfabrikat och material som inte är kopplat till en operation visas inte här
 
 ### Planera efter material
 
-Med **Visa** överst väljer du mellan **Körordning** och **Material**. I läget **Material** grupperas varje resurs operationer efter **ingående material**, så att du lätt ser vilka jobb som tar samma plåt eller profil och kan köra dem ihop.
+Med **Visa** överst väljer du **Körordning**, **Material**, **Utleveranser** eller **Inleveranser** (de två sista beskrivs i [Utleveranser och Inleveranser](#utleveranser-och-inleveranser)). I läget **Material** grupperas varje resurs operationer efter **ingående material**, så att du lätt ser vilka jobb som tar samma plåt eller profil och kan köra dem ihop.
 
 Som material räknas samma sak som i kolumnen [Material](#material): **köpt** material som är **kopplat till operationen i beredningen** och som det finns något kvar att ta ut av.
 
@@ -830,13 +830,40 @@ Menyn **⋯** längst till höger på raden (med rättigheten Tillverkning) har:
 
 En flyttad operation blir **Låst** och får ta dagens hela kapacitet, så dagen kan bli överbelagd. Varningar från flytten — till exempel att ordern blir sen — visas överst på sidan.
 
+### Utleveranser och Inleveranser
+
+Med **Visa** → **Utleveranser** eller **Inleveranser** visar dagplanen dagens kundorder- och inköpsorderrader i stället för resurserna: det som ska skickas och det som ska komma. Valen finns för den som har någon meny (kunder och leverantörer är kontorsuppgifter), inte för ett verkstadskonto som bara läser tillverkningsordrar. **Grupp** och **Skriv ut** finns inte i de två lägena.
+
+**Utleveranser** listar raderna med något kvar att leverera på bekräftade kundordrar och ordrar under tillverkning.
+
+- Raden står på sin **avsändningsdag**. Det är leveransdatumet bakåt med kundens transportdagar och anpassat till kundens fasta leveransdagar, samma dag som [Leveransläge](/hjalp/forsaljning#leveranslage) räknar med. När avsändningen är en annan dag än leveransdatumet står leveransdatumet under, till exempel *lev. 10 dec*.
+- Varje rad visar **Kundorder** (en länk till ordern), **Kund**, **Artikel**, **Antal kvar** (i artikelns enhet), **Avsändning**, **Leveransläge** och **Täcks av**.
+- **Leveransläge** och **Täcks av** är desamma som på kundorderkortet. Läget är *I tid*, *Sen 2 dagar*, *Saknar täckning* eller *Tillgång utan datum*, och **Täcks av** visar det som täcker raden, till exempel *Lager 4 st*, *IO-1015 · 6 st · 2 dec* och *Saknas 5 st*.
+- Tjänster, fraktrader och ställkostnadsrader listas inte.
+
+**Inleveranser** listar raderna med något kvar att ta emot på öppna inköpsordrar, även utkast.
+
+- Raden står på sitt **ankomstdatum**: bekräftat leveransdatum före önskat, och radens eget datum före orderns.
+- Varje rad visar **Inköpsorder** (en länk till ordern), **Leverantör**, **Artikel**, **Antal kvar**, **Ankomst**, **Status** och **Bekräftelse**.
+- **Status** är orderns: *Utkast*, *Skickad*, *Bekräftad* eller *Delvis mottagen*.
+- **Bekräftelse** säger *Leverantören har bekräftat* när raden eller ordern har ett bekräftat leveransdatum, annars *Leverantören har inte bekräftat*.
+- En legorad visar vilken operation godset kommer tillbaka till, till exempel *Lego · TO-1050 op 20*.
+- Tjänster listas inte.
+
+För båda listorna gäller:
+
+- **I dag** visar också det som borde ha skickats eller kommit en tidigare dag, under **Försenade** och med datumet i rött. En senare dag visar bara den dagens rader.
+- Inför en helg eller röd dag tar listan med raderna fram till nästa arbetsdag. En fredag visar alltså även lördagens och söndagens rader, och rubriken säger då till exempel *fre 4 dec–sön 6 dec*.
+- Raderna står i datumordning och sedan efter ordernummer.
+- Rubriken räknar raderna och ordrarna, till exempel *4 rader på 3 ordrar*, och hur många som är försenade.
+
 ### Mötesläge
 
 **Mötesläge** öppnar dagplanen för skärmen på väggen: större text, ingen meny och resurserna bredvid varandra (under varandra på en smal skärm). Läget visar samma dag, grupp och visning som sidan, läser om sig självt varje minut medan fliken syns och har inga knappar som ändrar något.
 
 - Pilarna och **I dag** byter dag.
 - **Grupp** visar en produktionsgrupps resurser, eller **Alla resurser**.
-- **Visa** växlar mellan **Körordning** och **Material**. I Material-läget går det inte att välja operationer eller samköra.
+- **Visa** växlar mellan **Körordning**, **Material**, **Utleveranser** och **Inleveranser**. I Material-läget går det inte att välja operationer eller samköra, och listorna har inga länkar.
 - **Helskärm** fyller hela skärmen (knappen finns där webbläsaren stöder det; **Lämna helskärm** eller Esc går tillbaka).
 - **Stäng** går tillbaka till dagplanen.
 
@@ -846,7 +873,7 @@ Står läget öppet över midnatt på en vald dag går det över till **i dag** 
 
 ### Skriv ut dagplanen
 
-**Skriv ut** öppnar utskriftsdialogen för dagen och gruppen som visas: en grupp per resurs med last och kapacitet i rubriken, först raderna kvar från tidigare och sedan dagens operationer numrerade i körordning, med materialet som text (*finns*, *saknas 4 st*, *kommer 2026-12-02 IO-88*, *kommer 2026-12-02 IO-88, saknas 8 st*, *försenad 2026-11-25 IO-88*).
+**Skriv ut** (i lägena **Körordning** och **Material**) öppnar utskriftsdialogen för dagen och gruppen som visas: en grupp per resurs med last och kapacitet i rubriken, först raderna kvar från tidigare och sedan dagens operationer numrerade i körordning, med materialet som text (*finns*, *saknas 4 st*, *kommer 2026-12-02 IO-88*, *kommer 2026-12-02 IO-88, saknas 8 st*, *försenad 2026-11-25 IO-88*).
 
 ## Körplan
 

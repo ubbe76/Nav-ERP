@@ -7,6 +7,7 @@ import {
   componentMovesSchema,
   coRunSchema,
   createPlanningOrdersSchema,
+  dayPlanOrdersQuerySchema,
   dayPlanQuerySchema,
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
@@ -408,6 +409,20 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     const query = dayPlanQuerySchema.parse(req.query);
     try {
       return await service.getDayPlan(query);
+    } catch (err) {
+      if (err instanceof DayPlanDateOutOfRangeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Dagplanens Utleveranser och Inleveranser: the kundorder rows to ship
+  // and the inköpsorder rows to arrive the day (today with the passed ones).
+  // Customers and suppliers are office data — the module's read rule, no
+  // workshop exception; no prices. Same window and 400 as the dagplan.
+  app.get("/planning/day-plan/orders", async (req, reply) => {
+    const query = dayPlanOrdersQuerySchema.parse(req.query);
+    try {
+      return await service.getDayPlanOrders(query);
     } catch (err) {
       if (err instanceof DayPlanDateOutOfRangeError) return reply.code(400).send(errorBody(err));
       throw err;

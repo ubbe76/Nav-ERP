@@ -12,7 +12,8 @@
   min-width: 0;
 }
 
-.page[data-loading="true"] .resources {
+.page[data-loading="true"] .resources,
+.page[data-loading="true"] .orders {
   opacity: 0.6;
   transition: opacity 150ms ease 200ms;
 }
@@ -162,6 +163,12 @@
   margin: 4px 0 0;
   font-size: 13px;
   color: var(--color-text-muted);
+}
+
+/* Utleveranser / Inleveranser: one box over the whole width, also in
+   Mötesläget (DayPlanOrders.module.css). */
+.orders {
+  min-width: 0;
 }
 
 /* --- A resource -------------------------------------------------------- */

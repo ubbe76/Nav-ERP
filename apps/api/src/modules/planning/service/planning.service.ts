@@ -7,6 +7,7 @@ import type {
   MissingComponentsInput as MissingComponentsRequest,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
+  DayPlanOrdersQuery,
   DayPlanQuery,
   DeliveryTimeCheckRequest,
   ListAbcQuery,
@@ -139,7 +140,8 @@ import {
   type RunPlanStamp,
 } from "./run-plan.js";
 import { coRunOrder, coRunRunOrder, groupRunPlanByMaterial, planCoRun, type CoRunPlan, type CoRunResult } from "./co-run.js";
-import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
+import { buildDayPlan, DAY_PLAN_MAX_AHEAD_DAYS, dayPlanDays, type DayPlanPresent, type DayPlanResult } from "./day-plan.js";
+import { dayPlanArrivals, dayPlanOrderSpan, dayPlanShipments, onOrderSpan, type DayPlanOrdersResult } from "./day-plan-orders.js";
 import {
   buildStructureTree,
   exclusiveOrderIds,
@@ -3830,6 +3832,47 @@ export function createPlanningService(
         total: formatRunPlanHours(plan.totals.hours),
       });
       return { filename: `dagplan-${plan.date}.pdf`, content };
+    },
+
+    // Dagplanens Utleveranser och Inleveranser (day-plan-orders.ts owns the
+    // lists): the kundorder rows to ship and the inköpsorder rows to arrive
+    // on the day, today with what has passed. Same window and error as the
+    // dagplan. The Leveransläge is computed only for the orders with a row
+    // on the day: a light read of every open row's ship date first (the
+    // pegging's own date, shiftToShipDates), then deliveryOutlooks for those
+    // orders — whose rows decide (a row that moved in between drops out).
+    async getDayPlanOrders(query: DayPlanOrdersQuery): Promise<DayPlanOrdersResult> {
+      const today = todayFn();
+      const date = query.date ?? today;
+      const lastDate = addDays(today, DAY_PLAN_MAX_AHEAD_DAYS);
+      if (date < today || date > lastDate) throw new DayPlanDateOutOfRangeError(date, today);
+      // The holidays for Föregående/Nästa and the span's end, which can lie
+      // a few days past the window's last day.
+      const { offDays } = await repo.deliveryContext({ from: today, to: addDays(lastDate, 14) });
+      const span = dayPlanOrderSpan(today, date, offDays);
+
+      const open = await repo.outlookRows("open");
+      const dated = open.flatMap((l) =>
+        l.row?.promisedDate
+          ? [{ salesOrderId: l.order.salesOrderId, expectedDeliveryDate: l.row.promisedDate, customerDelivery: l.order.customerDelivery }]
+          : []
+      );
+      const shipDays = await toShipDates(dated);
+      const orderIds = [...new Set(shipDays.filter((r) => onOrderSpan(r.expectedDeliveryDate, span)).map((r) => r.salesOrderId))];
+      const [outlooks, arrivalRows] = await Promise.all([
+        orderIds.length > 0 ? deliveryOutlooks(orderIds) : Promise.resolve(new Map<string, DeliveryOutlookEntry>()),
+        repo.dayPlanArrivalRows(span.through),
+      ]);
+      const shownArticles = [...outlooks.values()].flatMap((e) =>
+        e.rows.filter((row) => onOrderSpan(row.promisedShipDate, span)).map((row) => row.articleId)
+      );
+      const units = await repo.articleUnitCodes([...new Set(shownArticles)]);
+      return {
+        ...dayPlanDays(today, date, offDays),
+        through: span.through,
+        shipments: dayPlanShipments(outlooks.values(), span, units),
+        arrivals: dayPlanArrivals(arrivalRows, span),
+      };
     },
 
     // The körplan as a PDF (A4 landscape), the same selection as the list,

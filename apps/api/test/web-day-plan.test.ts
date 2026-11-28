@@ -2,8 +2,16 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  arrivalConfirmationText,
   dayPlanHref,
+  dayPlanView,
+  dayPlanVisa,
   dropIndex,
+  isOrdersView,
+  legoText,
+  orderRowQuantity,
+  orderRowsSummary,
+  splitOverdue,
   loadPercent,
   loadText,
   materialDocumentHref,
@@ -257,9 +265,12 @@ describe("Mötesläget never writes", () => {
   const WRITES = ["saveDayOrder", "moveOperationTo", "unlockOperation"];
 
   it("keeps every write call out of the page component", () => {
-    // No apiFetch with a method here — only the plain GET of the day plan.
+    // No apiFetch with a method here — only the plain GETs of the day plan
+    // and of its order lists.
     expect(client).not.toMatch(/method:\s*["'`]/);
-    expect(client.match(/apiFetch</g) ?? []).toHaveLength(1);
+    expect(client.match(/apiFetch</g) ?? []).toHaveLength(2);
+    expect(client).toContain("apiFetch<DayPlanResult>(`/api/v1/planning/day-plan${query}`)");
+    expect(client).toContain("apiFetch<DayPlanOrdersResult>(`/api/v1/planning/day-plan/orders${query}`)");
     const writes = web("components/planning/dayPlanWrites.ts");
     for (const name of WRITES) expect(writes).toContain(`export function ${name}(`);
   });
@@ -325,5 +336,57 @@ describe("Mötesläget never writes", () => {
     expect(page).not.toMatch(/import .*ConfirmDialogHost/);
     expect(page).not.toContain("AppShell }");
     expect(page).toContain('canOpen(user, "/tillverkning/dagplan")');
+  });
+});
+
+// Utleveranser och Inleveranser (the user's wish 2026-11-28): two more
+// choices under Visa that list the day's kundorder and inköpsorder rows.
+describe("the order lists", () => {
+  const web = (path: string) => readFileSync(fileURLToPath(new URL(`../../web/${path}`, import.meta.url)), "utf8");
+  const client = web("components/planning/DayPlanPageClient.tsx");
+  const lists = web("components/planning/DayPlanOrders.tsx");
+
+  it("reads ?visa= — the order lists only with a menu, and back to the address", () => {
+    expect(dayPlanView("utleveranser", true)).toBe("shipments");
+    expect(dayPlanView("inleveranser", true)).toBe("arrivals");
+    expect(dayPlanView("material", false)).toBe("material");
+    expect(dayPlanView("utleveranser", false)).toBe("order");
+    expect(dayPlanView(null, true)).toBe("order");
+    expect(dayPlanView("korordning", true)).toBe("order");
+    expect(["order", "material", "shipments", "arrivals"].map((v) => dayPlanVisa(v as never))).toEqual([null, "material", "utleveranser", "inleveranser"]);
+    expect(isOrdersView("shipments") && isOrdersView("arrivals") && !isOrdersView("material") && !isOrdersView("order")).toBe(true);
+  });
+
+  it("words the rows", () => {
+    expect(orderRowQuantity(2.5, "st")).toBe("2,5 st");
+    expect(orderRowQuantity(3, null)).toBe("3");
+    expect(arrivalConfirmationText(true)).toBe("Leverantören har bekräftat");
+    expect(arrivalConfirmationText(false)).toBe("Leverantören har inte bekräftat");
+    expect(legoText({ orderNumber: "TO-12", sequenceNo: 20 })).toBe("Lego · TO-12 op 20");
+    expect(orderRowsSummary([{ orderNumber: "KO-1" }])).toBe("1 rad på 1 order");
+    expect(orderRowsSummary([{ orderNumber: "KO-1" }, { orderNumber: "KO-1" }, { orderNumber: "KO-2" }])).toBe("3 rader på 2 ordrar");
+    const rows = [{ overdue: false, id: 1 }, { overdue: true, id: 2 }, { overdue: false, id: 3 }];
+    expect(splitOverdue(rows)).toEqual({ overdue: [rows[1]], day: [rows[0], rows[2]] });
+  });
+
+  it("offers them only with a menu, without Grupp and without Skriv ut", () => {
+    expect(client).toContain('const canSeeOrders = can(["office"]);');
+    expect(client).toMatch(/\.\.\.\(canSeeOrders\s+\?\s+\[\s+\{ value: "shipments" as const, label: "Utleveranser" \},\s+\{ value: "arrivals" as const, label: "Inleveranser" \},/);
+    // Grupp in neither bar, and no production group in the request.
+    expect(client.match(/\{!ordersView && groupField\}/g) ?? []).toHaveLength(2);
+    expect(client).not.toMatch(/\{groupField\}/);
+    expect(client).toContain('const planGroup = ordersView ? "" : grupp;');
+    // Skriv ut prints the körordning only.
+    expect(client).toMatch(/const pdfHref =\s+data && !ordersView/);
+    expect(client).toContain("<DayPlanOrders view={view} result={orders} meeting={meeting} />");
+  });
+
+  it("keeps the lists read-only, and without links in Mötesläget", () => {
+    expect(lists).not.toMatch(/apiFetch|method:|onClick/);
+    // Every link goes through the one helper that drops it in a meeting —
+    // apart from the legorad's TO, behind its own meeting check.
+    expect(lists).toMatch(/const link = \(href: string, text: string, kind: "order" \| "document"\) =>\s+meeting \? \(\s+<span className=\{kind === "order" \? styles\.orderLink : undefined\}>\{text\}<\/span>/);
+    expect(lists.match(/<GatedLink/g) ?? []).toHaveLength(2);
+    expect(lists).toMatch(/\{meeting \? \(\s+legoText\(a\.lego\)\s+\) : \(/);
   });
 });

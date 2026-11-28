@@ -3,6 +3,7 @@
 // them into the page's texts and into the id list the order PUT wants.
 import type { MoveTarget } from "../components/planning/MoveOperationDialog";
 import { formatQuantity } from "./format";
+import { SUPPLIER_CONFIRMATION_TEXT } from "./overviewCardRows";
 import { shortDate } from "./planning";
 import type { CapacityDayLoad, DayPlanResource, RunPlanMaterial, RunPlanRow } from "./types";
 
@@ -168,4 +169,67 @@ export function dayPlanHref(base: string, params: { dag?: string | null; grupp?:
   if (params.visa) qs.set("visa", params.visa);
   const query = qs.toString();
   return query ? `${base}?${query}` : base;
+}
+
+// --- Visa: the view and its address --------------------------------------
+
+// Körordning and Material are the körplan's two (lib/coRun.ts); Utleveranser
+// and Inleveranser list the day's kundorder and inköpsorder rows
+// (GET /planning/day-plan/orders) and are offered only with a menu — the
+// API's read rule (customers and suppliers are office data).
+export type DayPlanView = "order" | "material" | "shipments" | "arrivals";
+export type DayPlanOrdersView = "shipments" | "arrivals";
+
+const VISA_PARAMS: Record<DayPlanView, string | null> = {
+  order: null,
+  material: "material",
+  shipments: "utleveranser",
+  arrivals: "inleveranser",
+};
+
+// ?visa= → the view; an order list without the right is Körordning.
+export function dayPlanView(param: string | null | undefined, canSeeOrders: boolean): DayPlanView {
+  if (param === "material") return "material";
+  if (canSeeOrders && param === "utleveranser") return "shipments";
+  if (canSeeOrders && param === "inleveranser") return "arrivals";
+  return "order";
+}
+
+// The view → ?visa= (null = Körordning, no parameter).
+export function dayPlanVisa(view: DayPlanView): string | null {
+  return VISA_PARAMS[view];
+}
+
+export function isOrdersView(view: DayPlanView): view is DayPlanOrdersView {
+  return view === "shipments" || view === "arrivals";
+}
+
+// --- Utleveranser och Inleveranser -----------------------------------------
+
+// "5 st" — the base unit after the quantity, when the article has one.
+export function orderRowQuantity(quantity: number, unit: string | null): string {
+  return unit ? `${formatQuantity(quantity)} ${unit}` : formatQuantity(quantity);
+}
+
+// Whether the supplier has given a date — the Översikten card's words
+// (worded apart from the status Bekräftad, which only says it is sent).
+export function arrivalConfirmationText(confirmed: boolean): string {
+  return SUPPLIER_CONFIRMATION_TEXT[confirmed ? "confirmed" : "none"];
+}
+
+// A legorad: the TO operation the goods come back from.
+export function legoText(lego: { orderNumber: string; sequenceNo: number }): string {
+  return `Lego · ${lego.orderNumber} op ${lego.sequenceNo}`;
+}
+
+// The list's two parts: Försenade (the day has passed — only today) first,
+// then the day's own rows, each in the API's order.
+export function splitOverdue<T extends { overdue: boolean }>(rows: readonly T[]): { overdue: T[]; day: T[] } {
+  return { overdue: rows.filter((r) => r.overdue), day: rows.filter((r) => !r.overdue) };
+}
+
+// The summary line: "4 rader på 3 ordrar".
+export function orderRowsSummary(rows: readonly { orderNumber: string }[]): string {
+  const orders = new Set(rows.map((r) => r.orderNumber)).size;
+  return `${rows.length} ${rows.length === 1 ? "rad" : "rader"} på ${orders} ${orders === 1 ? "order" : "ordrar"}`;
 }

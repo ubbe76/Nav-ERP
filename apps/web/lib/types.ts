@@ -7789,7 +7789,8 @@ export interface DayPlanResource {
   unlinkedRowKeys: string[];
 }
 
-export interface DayPlanResult {
+// The shown day and its neighbours — the same in both answers.
+export interface DayPlanDays {
   today: string;
   date: string;
   weekday: number; // ISO 1 = Monday … 7 = Sunday
@@ -7797,9 +7798,62 @@ export interface DayPlanResult {
   // The previous / next working day; null outside today … today + 41.
   previousDate: string | null;
   nextDate: string | null;
+}
+
+export interface DayPlanResult extends DayPlanDays {
   productionGroups: { id: string; code: string; name: string }[];
   resources: DayPlanResource[];
   totals: { rows: number; hours: number; unlinkedOperations: number; shortMaterials: number };
+}
+
+// Dagplanens Utleveranser och Inleveranser: GET /planning/day-plan/orders.
+// Quantities are in the article's BASE unit. No prices. `overdue` = the
+// row's day has passed (only on today's list — Försenade).
+export interface DayPlanShipment {
+  key: string;
+  salesOrderId: string;
+  orderNumber: string;
+  customerName: string;
+  salesOrderRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  restQuantity: number;
+  configured: boolean;
+  promisedDate: string | null; // Leveransdatum — the customer's day
+  shipDate: string; // Avsändning — the day on the list
+  overdue: boolean;
+  // The Leveransläge (the KO card's): will the rest be there by the ship date.
+  status: OutlookStatus;
+  daysLate: number;
+  componentLate: boolean;
+  atRisk: boolean;
+  readyDate: string | null;
+  uncovered: number;
+  allocations: OutlookAllocation[];
+}
+export interface DayPlanArrival {
+  key: string;
+  purchaseOrderId: string;
+  orderNumber: string;
+  orderStatus: PurchaseOrderStatus;
+  supplierName: string;
+  purchaseOrderRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  unit: string | null;
+  restQuantity: number;
+  arrivalDate: string; // Bekräftat before Önskat, the row's before the order's
+  overdue: boolean;
+  confirmed: boolean; // a Bekräftat leveransdatum on the row or the order
+  lego: { manufacturingOrderId: string; orderNumber: string; sequenceNo: number } | null;
+}
+export interface DayPlanOrdersResult extends DayPlanDays {
+  through: string; // the span's last day — a Friday also lists the weekend
+  shipments: DayPlanShipment[];
+  arrivals: DayPlanArrival[];
 }
 
 // Samkör (POST /planning/co-run and /planning/co-run/preview): the request…
