@@ -58,7 +58,8 @@ import styles from "./DayPlanPageClient.module.css";
 // day's kundorder and inköpsorder rows instead (GET /planning/day-plan/orders,
 // DayPlanOrders); Grupp does not apply to them. `meeting` is Mötesläget:
 // bigger, read-only, reloaded every minute — with the same Grupp and Visa as
-// the page, but no checkboxes and no links.
+// the page, but no checkboxes. The links work in both (the user's wish
+// 2026-11-28): an order number opens its card in the same tab.
 
 const PAGE = "/tillverkning/dagplan";
 const MEETING_PAGE = "/tillverkning/dagplan/mote";
@@ -636,13 +637,9 @@ function ResourceSection({
       >
         <span className={`${styles.nr} num`}>{nr ?? "–"}</span>
         <span className={styles.order}>
-          {meeting ? (
-            <span className={styles.orderLink}>{row.orderNumber}</span>
-          ) : (
-            <GatedLink href={`/tillverkning/ordrar/${row.manufacturingOrderId}`} className={styles.orderLink}>
-              {row.orderNumber}
-            </GatedLink>
-          )}
+          <GatedLink href={`/tillverkning/ordrar/${row.manufacturingOrderId}`} className={styles.orderLink}>
+            {row.orderNumber}
+          </GatedLink>
         </span>
         <span className={styles.article} title={`${row.articleNumber} ${row.articleName}`}>
           <span className="num">{row.articleNumber}</span> <span className={styles.articleName}>{row.articleName}</span>
@@ -671,7 +668,7 @@ function ResourceSection({
           {row.planLocked && <span className={styles.lockBadge}>Låst</span>}
         </span>
         <span className={styles.material} data-label="Material">
-          <RunPlanMaterials row={row} links={!meeting} />
+          <RunPlanMaterials row={row} />
         </span>
         <span className={styles.stamps} data-label="Pågår" data-empty={row.activeStamps.length === 0 ? "true" : undefined}>
           {row.activeStamps.map((s) => (
@@ -768,14 +765,11 @@ function ResourceSection({
             <span className={styles.presentLabel}>På plats:</span> {resource.present.map((p) => p.name).join(", ")}
           </div>
         )}
-        {resource.unplannedRows > 0 &&
-          (meeting ? (
-            <span className={styles.unplanned}>{resource.unplannedRows} ej planerade</span>
-          ) : (
-            <GatedLink href={`/tillverkning/korplan?resurs=${workCenter.id}`} className={styles.unplanned}>
-              {resource.unplannedRows} ej planerade
-            </GatedLink>
-          ))}
+        {resource.unplannedRows > 0 && (
+          <GatedLink href={`/tillverkning/korplan?resurs=${workCenter.id}`} className={styles.unplanned}>
+            {resource.unplannedRows} ej planerade
+          </GatedLink>
+        )}
       </header>
 
       {resource.carried.length + resource.rows.length > 0 && view === "material" ? (
@@ -785,7 +779,6 @@ function ResourceSection({
           unlinkedRowKeys={resource.unlinkedRowKeys}
           version={data}
           canSelect={canWrite}
-          links={!meeting}
           busy={busy}
           onCoRun={onCoRun}
         />

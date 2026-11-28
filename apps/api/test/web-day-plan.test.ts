@@ -8,7 +8,6 @@ import {
   dayPlanVisa,
   dropIndex,
   isOrdersView,
-  legoText,
   orderRowQuantity,
   orderRowsSummary,
   splitOverdue,
@@ -362,7 +361,6 @@ describe("the order lists", () => {
     expect(orderRowQuantity(3, null)).toBe("3");
     expect(arrivalConfirmationText(true)).toBe("Leverantören har bekräftat");
     expect(arrivalConfirmationText(false)).toBe("Leverantören har inte bekräftat");
-    expect(legoText({ orderNumber: "TO-12", sequenceNo: 20 })).toBe("Lego · TO-12 op 20");
     expect(orderRowsSummary([{ orderNumber: "KO-1" }])).toBe("1 rad på 1 order");
     expect(orderRowsSummary([{ orderNumber: "KO-1" }, { orderNumber: "KO-1" }, { orderNumber: "KO-2" }])).toBe("3 rader på 2 ordrar");
     const rows = [{ overdue: false, id: 1 }, { overdue: true, id: 2 }, { overdue: false, id: 3 }];
@@ -381,12 +379,11 @@ describe("the order lists", () => {
     expect(client).toContain("<DayPlanOrders view={view} result={orders} meeting={meeting} />");
   });
 
-  it("keeps the lists read-only, and without links in Mötesläget", () => {
+  // The links work in Mötesläget too (the user's wish 2026-11-28): the
+  // kundorder, the inköpsorder, what covers a row and the legorad's TO.
+  it("keeps the lists read-only, with their links in Mötesläget too", () => {
     expect(lists).not.toMatch(/apiFetch|method:|onClick/);
-    // Every link goes through the one helper that drops it in a meeting —
-    // apart from the legorad's TO, behind its own meeting check.
-    expect(lists).toMatch(/const link = \(href: string, text: string, kind: "order" \| "document"\) =>\s+meeting \? \(\s+<span className=\{kind === "order" \? styles\.orderLink : undefined\}>\{text\}<\/span>/);
-    expect(lists.match(/<GatedLink/g) ?? []).toHaveLength(2);
-    expect(lists).toMatch(/\{meeting \? \(\s+legoText\(a\.lego\)\s+\) : \(/);
+    expect(lists.match(/<GatedLink/g) ?? []).toHaveLength(4);
+    expect(lists).not.toMatch(/meeting \?\s*\(?\s*<span|meeting \?\s*\(?\s*legoText/);
   });
 });

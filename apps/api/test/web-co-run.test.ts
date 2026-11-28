@@ -264,8 +264,8 @@ describe("the Material view and Samkör in the pages", () => {
 
   // Mötesläget has Grupp and Visa too (the user's wish 2026-11-27), but its
   // Material view stays read-only: canSelect is canWrite, which is never true
-  // in a meeting, and the rows carry no links.
-  it("shows Material in Mötesläget without checkboxes or links", () => {
+  // in a meeting. The links work there too (the user's wish 2026-11-28).
+  it("shows Material in Mötesläget without checkboxes, with the links", () => {
     // Material is the resource sections' own view (planView), beside the
     // order lists (web-day-plan.test.ts).
     expect(dayPlan).toMatch(/const view: DayPlanView = dayPlanView\(searchParams\.get\("visa"\), canSeeOrders\);/);
@@ -274,7 +274,12 @@ describe("the Material view and Samkör in the pages", () => {
     // One switch, rendered in both the page's toolbar and Mötesläget's bar.
     expect(dayPlan.match(/<SegmentedToggle/g) ?? []).toHaveLength(1);
     expect(dayPlan.match(/\{viewField\}/g) ?? []).toHaveLength(2);
-    expect(dayPlan).toMatch(/<MaterialGroups[^>]*canSelect=\{canWrite\}\s+links=\{!meeting\}/s);
+    expect(dayPlan).toMatch(/<MaterialGroups[^>]*canSelect=\{canWrite\}/s);
+    expect(dayPlan).not.toMatch(/links=/);
+    expect(web("components/planning/MaterialGroups.tsx")).not.toMatch(/links\??:|<span className=\{styles\.orderLink\}>/);
+    expect(web("components/planning/RunPlanMaterials.tsx")).not.toMatch(/links/);
+    // Körordning's rows too: the TO and "N ej planerade" are links in a meeting.
+    expect(dayPlan).not.toMatch(/meeting \?\s*\(?\s*<span className=\{styles\.(orderLink|unplanned)\}/);
     expect(dayPlan).toMatch(/const canWrite = !meeting && can\(\["tillverkning"\]\);/);
   });
 

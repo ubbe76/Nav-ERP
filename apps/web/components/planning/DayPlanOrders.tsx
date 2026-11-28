@@ -1,7 +1,7 @@
 "use client";
 
 import { allocationHref, allocationText, COMPONENT_LATE_LABEL, outlookDate, outlookLabel, outlookTone, uncoveredText } from "../../lib/deliveryOutlook";
-import { arrivalConfirmationText, legoText, orderRowQuantity, orderRowsSummary, splitOverdue, type DayPlanOrdersView } from "../../lib/dayPlan";
+import { arrivalConfirmationText, orderRowQuantity, orderRowsSummary, splitOverdue, type DayPlanOrdersView } from "../../lib/dayPlan";
 import { weekdayShortDate } from "../../lib/planning";
 import { PURCHASE_ORDER_STATUS_PILL, type DayPlanArrival, type DayPlanOrdersResult, type DayPlanShipment } from "../../lib/types";
 import { GatedLink } from "../ui/GatedLink";
@@ -12,7 +12,8 @@ import styles from "./DayPlanOrders.module.css";
 // inköpsorder rows to arrive on the shown day (GET /planning/day-plan/orders;
 // the API decides the day, the order and the readiness — nothing here).
 // Today first lists what has passed (Försenade). Read-only; `meeting` =
-// Mötesläget, without links. Two row layouts share the markup: a table when
+// Mötesläget (larger pills, wider columns — the links work there too, the
+// user's wish 2026-11-28). Two row layouts share the markup: a table when
 // the box is at least 900px wide, cards below that.
 
 const TEXTS: Record<DayPlanOrdersView, { title: string; empty: string; dayLabel: string }> = {
@@ -28,22 +29,15 @@ export function DayPlanOrders({ view, result, meeting }: { view: DayPlanOrdersVi
   // A Friday also lists the weekend: say which days the list covers.
   const span = result.through !== result.date ? `${weekdayShortDate(result.date)}–${weekdayShortDate(result.through)}` : null;
 
-  // Mötesläget has no links: the order number keeps its look, a covering
-  // document is plain text.
-  const link = (href: string, text: string, kind: "order" | "document") =>
-    meeting ? (
-      <span className={kind === "order" ? styles.orderLink : undefined}>{text}</span>
-    ) : (
-      <GatedLink href={href} className={kind === "order" ? styles.orderLink : styles.documentLink}>
-        {text}
-      </GatedLink>
-    );
-
   function renderShipment(s: DayPlanShipment) {
     const quantity = (q: number) => orderRowQuantity(q, s.unit);
     return (
       <li key={s.key} className={styles.row} data-overdue={s.overdue ? "true" : undefined}>
-        <span className={styles.order}>{link(`/forsaljning/ordrar/${s.salesOrderId}`, s.orderNumber, "order")}</span>
+        <span className={styles.order}>
+          <GatedLink href={`/forsaljning/ordrar/${s.salesOrderId}`} className={styles.orderLink}>
+            {s.orderNumber}
+          </GatedLink>
+        </span>
         <span className={styles.party} title={s.customerName}>
           {s.customerName}
         </span>
@@ -71,7 +65,13 @@ export function DayPlanOrders({ view, result, meeting }: { view: DayPlanOrdersVi
             const href = allocationHref(a);
             return (
               <li key={i}>
-                {href ? link(href, text.label, "document") : text.label} {a.kind === "stock" ? "" : "· "}
+                {href ? (
+                  <GatedLink href={href} className={styles.documentLink}>
+                    {text.label}
+                  </GatedLink>
+                ) : (
+                  text.label
+                )} {a.kind === "stock" ? "" : "· "}
                 {text.detail}
                 {text.late && <span className={styles.late}> · {text.late}</span>}
               </li>
@@ -87,7 +87,11 @@ export function DayPlanOrders({ view, result, meeting }: { view: DayPlanOrdersVi
     const pill = PURCHASE_ORDER_STATUS_PILL[a.orderStatus];
     return (
       <li key={a.key} className={styles.row} data-overdue={a.overdue ? "true" : undefined}>
-        <span className={styles.order}>{link(`/inkop/ordrar/${a.purchaseOrderId}`, a.orderNumber, "order")}</span>
+        <span className={styles.order}>
+          <GatedLink href={`/inkop/ordrar/${a.purchaseOrderId}`} className={styles.orderLink}>
+            {a.orderNumber}
+          </GatedLink>
+        </span>
         <span className={styles.party} title={a.supplierName}>
           {a.supplierName}
         </span>
@@ -109,17 +113,11 @@ export function DayPlanOrders({ view, result, meeting }: { view: DayPlanOrdersVi
           <li className={a.confirmed ? undefined : styles.unconfirmed}>{arrivalConfirmationText(a.confirmed)}</li>
           {a.lego && (
             <li>
-              {meeting ? (
-                legoText(a.lego)
-              ) : (
-                <>
-                  Lego ·{" "}
-                  <GatedLink href={`/tillverkning/ordrar/${a.lego.manufacturingOrderId}`} className={styles.documentLink}>
-                    {a.lego.orderNumber}
-                  </GatedLink>{" "}
-                  op {a.lego.sequenceNo}
-                </>
-              )}
+              Lego ·{" "}
+              <GatedLink href={`/tillverkning/ordrar/${a.lego.manufacturingOrderId}`} className={styles.documentLink}>
+                {a.lego.orderNumber}
+              </GatedLink>{" "}
+              op {a.lego.sequenceNo}
             </li>
           )}
         </ul>
